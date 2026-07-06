@@ -1,0 +1,29 @@
+{
+  "name": "@aicliui/daemon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "predev": "npm --workspace @aicliui/shared run build",
+    "dev": "tsx src/index.ts",
+    "prebuild": "npm --workspace @aicliui/shared run build",
+    "build": "tsc -p tsconfig.json",
+    "pretest": "npm --workspace @aicliui/shared run build",
+    "test": "vitest run",
+    "prets:check": "npm --workspace @aicliui/shared run build",
+    "ts:check": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aicliui/shared": "0.1.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.1",
+    "typescript": "~5.9.2",
+    "vitest": "^4.0.18"
+  }
+}

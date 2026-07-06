@@ -1,0 +1,24 @@
+{
+  "name": "aicliui-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Android local CLI agent workbench based on AionUi mobile patterns.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "mobile:start": "npm --workspace @aicliui/mobile run start",
+    "mobile:android": "npm --workspace @aicliui/mobile run android",
+    "mobile:test": "npm --workspace @aicliui/mobile run test",
+    "mobile:ts": "npm --workspace @aicliui/mobile run ts:check",
+    "daemon:dev": "npm --workspace @aicliui/daemon run dev",
+    "daemon:test": "npm --workspace @aicliui/daemon run test",
+    "daemon:ts": "npm --workspace @aicliui/daemon run ts:check",
+    "test": "npm --workspaces --if-present run test",
+    "ts:check": "npm --workspaces --if-present run ts:check"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
