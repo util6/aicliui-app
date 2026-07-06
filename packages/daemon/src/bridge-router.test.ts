@@ -45,4 +45,33 @@ describe('BridgeRouter', () => {
     const router = new BridgeRouter();
     await expect(router.handleIncoming({ name: 'pong', data: { timestamp: 1 } })).resolves.toEqual([]);
   });
+
+  it('allows handlers to emit server-push events alongside the callback', async () => {
+    const router = new BridgeRouter();
+    router.register('chat.send.message', async (_data, context) => {
+      context.emit('chat.response.stream', { type: 'start', conversation_id: 'conv-1' });
+      context.emit('chat.response.stream', { type: 'finish', conversation_id: 'conv-1' });
+      return { success: true };
+    });
+
+    const messages = await router.handleIncoming({
+      name: 'subscribe-chat.send.message',
+      data: { id: 'm_3', data: { conversation_id: 'conv-1', input: 'hello' } },
+    });
+
+    expect(messages).toEqual([
+      {
+        name: 'subscribe.callback-chat.send.messagem_3',
+        data: { success: true },
+      },
+      {
+        name: 'chat.response.stream',
+        data: { type: 'start', conversation_id: 'conv-1' },
+      },
+      {
+        name: 'chat.response.stream',
+        data: { type: 'finish', conversation_id: 'conv-1' },
+      },
+    ]);
+  });
 });

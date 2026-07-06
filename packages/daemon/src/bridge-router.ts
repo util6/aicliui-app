@@ -8,6 +8,7 @@ import {
 export type BridgeRouteContext = {
   key: string;
   id: string;
+  emit: (name: string, data?: unknown) => void;
 };
 
 export type BridgeRouteHandler = (data: unknown, context: BridgeRouteContext) => Promise<unknown> | unknown;
@@ -36,9 +37,18 @@ export class BridgeRouter {
       ];
     }
 
+    const pushedMessages: BridgeMessage[] = [];
+    const context: BridgeRouteContext = {
+      key: request.key,
+      id: request.id,
+      emit(name, data) {
+        pushedMessages.push({ name, data });
+      },
+    };
+
     try {
-      const data = await handler(request.data, { key: request.key, id: request.id });
-      return [createBridgeCallbackMessage(request.key, request.id, data)];
+      const data = await handler(request.data, context);
+      return [createBridgeCallbackMessage(request.key, request.id, data), ...pushedMessages];
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Bridge route failed';
       return [
