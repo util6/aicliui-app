@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -9,6 +9,12 @@ import { useConnection } from '../src/context/ConnectionContext';
 import { useThemeColor } from '../src/hooks/useThemeColor';
 import { wsService } from '../src/services/websocket';
 import { getOrCreateLocalDaemonConfig, LOCAL_DAEMON_PORT } from '../src/services/localRuntime';
+import {
+  openTermuxIfAvailable,
+  probeTermuxRuntime,
+  type ProbeState,
+  type TermuxRuntimeProbe,
+} from '../src/services/termuxRuntime';
 
 type RuntimeRowProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -27,6 +33,21 @@ export default function ConnectScreen() {
   const border = useThemeColor({}, 'border');
   const textSecondary = useThemeColor({}, 'textSecondary');
   const [isConnecting, setIsConnecting] = useState(false);
+  const [runtimeProbe, setRuntimeProbe] = useState<TermuxRuntimeProbe>({
+    nativeModule: 'unavailable',
+    termuxInstalled: 'unknown',
+    runCommandPermission: 'unknown',
+  });
+
+  useEffect(() => {
+    let active = true;
+    probeTermuxRuntime().then((probe) => {
+      if (active) setRuntimeProbe(probe);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleConnectLocal = async () => {
     setIsConnecting(true);
@@ -42,7 +63,26 @@ export default function ConnectScreen() {
     }
   };
 
-  const handleInstallRuntime = () => {
+  const handleInstallRuntime = async () => {
+    const probe = await probeTermuxRuntime();
+    setRuntimeProbe(probe);
+
+    if (probe.nativeModule === 'unavailable') {
+      Alert.alert(t('connect.installRuntime'), t('connect.nativeModuleUnavailable'));
+      return;
+    }
+
+    if (probe.termuxInstalled === 'no') {
+      Alert.alert(t('connect.termux'), t('connect.termuxMissing'));
+      await openTermuxIfAvailable();
+      return;
+    }
+
+    if (probe.runCommandPermission === 'no') {
+      Alert.alert(t('connect.termux'), t('connect.runCommandPermissionMissing'));
+      return;
+    }
+
     Alert.alert(t('connect.installRuntime'), t('connect.installComingSoon'));
   };
 
@@ -64,8 +104,8 @@ export default function ConnectScreen() {
         <RuntimeRow
           icon='phone-portrait-outline'
           label={t('connect.termux')}
-          value={t('connect.statusUnknown')}
-          tone='pending'
+          value={probeLabel(runtimeProbe.termuxInstalled, t)}
+          tone={probeTone(runtimeProbe.termuxInstalled)}
         />
         <RuntimeRow
           icon='server-outline'
@@ -75,9 +115,9 @@ export default function ConnectScreen() {
         />
         <RuntimeRow
           icon='hardware-chip-outline'
-          label={t('connect.agents')}
-          value='OpenCode, Gemini'
-          tone='missing'
+          label={t('connect.runCommandPermission')}
+          value={probeLabel(runtimeProbe.runCommandPermission, t)}
+          tone={probeTone(runtimeProbe.runCommandPermission)}
         />
       </View>
 
@@ -111,6 +151,18 @@ export default function ConnectScreen() {
       </View>
     </SafeAreaView>
   );
+}
+
+function probeLabel(state: ProbeState, t: (key: string) => string): string {
+  if (state === 'yes') return t('connect.statusReady');
+  if (state === 'no') return t('connect.statusMissing');
+  return t('connect.statusUnknown');
+}
+
+function probeTone(state: ProbeState): RuntimeRowProps['tone'] {
+  if (state === 'yes') return 'ready';
+  if (state === 'no') return 'missing';
+  return 'pending';
 }
 
 function RuntimeRow({ icon, label, value, tone }: RuntimeRowProps) {

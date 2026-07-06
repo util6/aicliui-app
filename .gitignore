@@ -4,8 +4,10 @@ build/
 coverage/
 .expo/
 .expo-shared/
-android/
-ios/
+/android/
+/ios/
+apps/mobile/android/
+apps/mobile/ios/
 *.apk
 *.aab
 *.ipa
