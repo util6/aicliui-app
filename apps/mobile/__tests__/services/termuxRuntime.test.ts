@@ -5,6 +5,7 @@ import {
   runCommandAsync,
 } from '@aicliui/termux';
 import { spawnSync } from 'node:child_process';
+import { TERMUX_DAEMON_SOURCE } from '@/src/services/termuxDaemonSource';
 import * as localRuntime from '@/src/services/localRuntime';
 import {
   buildTermuxBootstrapScript,
@@ -100,6 +101,7 @@ describe('termuxRuntime', () => {
     });
     const match = script.match(/AICLIUI_DAEMON_SOURCE'\n([\s\S]*?)\nAICLIUI_DAEMON_SOURCE/);
     expect(match).not.toBeNull();
+    expect(match?.[1]).toBe(TERMUX_DAEMON_SOURCE);
 
     const result = spawnSync(process.execPath, ['--input-type=module', '--check', '-'], {
       input: match?.[1] ?? '',
