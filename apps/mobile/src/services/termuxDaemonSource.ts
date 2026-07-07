@@ -106,6 +106,7 @@ async function route(key, data, emit) {
   if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: await getModelInfo(params.backend) } };
   if (key === 'database.get-user-conversations') return listConversations(params.page, params.pageSize);
   if (key === 'database.get-conversation-messages') return messages.get(requiredString(params.conversation_id)) || [];
+  if (key === 'conversation.get-slash-commands') return await getSlashCommands(params);
   if (key === 'create-conversation') return await createConversation(params);
   if (key === 'remove-conversation') return await removeConversation(requiredString(params.id));
   if (key === 'update-conversation') return await updateConversation(requiredString(params.id), isRecord(params.updates) ? params.updates : {});
@@ -417,6 +418,61 @@ async function getOpenCodeModelInfo() {
     console.warn('OpenCode model probe failed:', error instanceof Error ? error.message : error);
     return null;
   }
+}
+
+async function getSlashCommands(params) {
+  const conversation = conversations.get(requiredString(params.conversation_id));
+  if (!conversation || !isRecord(conversation.extra)) return [];
+  const backend = typeof conversation.extra.backend === 'string' ? conversation.extra.backend : 'opencode';
+  if (backend !== 'opencode') return [];
+
+  try {
+    const baseUrl = await ensureOpenCodeServer();
+    const workspace = typeof conversation.extra.workspace === 'string' ? conversation.extra.workspace : undefined;
+    const response = await requestOpenCodeJson(baseUrl, openCodeCommandListPath(workspace), { method: 'GET' });
+    return extractOpenCodeCommands(response);
+  } catch {
+    try {
+      const baseUrl = await ensureOpenCodeServer();
+      const workspace = typeof conversation.extra.workspace === 'string' ? conversation.extra.workspace : undefined;
+      const response = await requestOpenCodeJson(baseUrl, legacyOpenCodeCommandListPath(workspace), { method: 'GET' });
+      return extractOpenCodeCommands(response);
+    } catch (fallbackError) {
+      console.warn(
+        'OpenCode command probe failed:',
+        fallbackError instanceof Error ? fallbackError.message : fallbackError,
+      );
+      return [];
+    }
+  }
+}
+
+function openCodeCommandListPath(workspace) {
+  if (!workspace) return '/api/command';
+  return '/api/command?location=' + encodeURIComponent(JSON.stringify({ directory: workspace }));
+}
+
+function legacyOpenCodeCommandListPath(workspace) {
+  if (!workspace) return '/command';
+  return '/command?directory=' + encodeURIComponent(workspace);
+}
+
+function extractOpenCodeCommands(value) {
+  const rawCommands = Array.isArray(value) ? value : isRecord(value) && Array.isArray(value.data) ? value.data : [];
+  return rawCommands
+    .filter(isRecord)
+    .map((command) => {
+      const name = stringValue(command.name) || stringValue(command.command);
+      const template = stringValue(command.template);
+      const description = stringValue(command.description) || template;
+      if (!name || !description) return null;
+      return {
+        command: name,
+        description,
+        ...(template ? { hint: template } : {}),
+      };
+    })
+    .filter(Boolean);
 }
 
 function normalizeOpenCodeModels(models) {

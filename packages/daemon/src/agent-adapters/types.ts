@@ -20,6 +20,17 @@ export type SendMessageInput = {
   sessionMode?: string;
 };
 
+export type SlashCommandInfo = {
+  command: string;
+  description: string;
+  hint?: string;
+};
+
+export type GetSlashCommandsInput = {
+  conversationId: string;
+  workspace?: string;
+};
+
 export type CommandSpec = {
   command: string;
   args: string[];
@@ -36,4 +47,5 @@ export type CliAgentAdapter = {
   label?: string;
   probe(): Promise<AgentHealth>;
   sendMessage(input: SendMessageInput): AsyncIterable<CliAgentEvent>;
+  getSlashCommands?(input: GetSlashCommandsInput): Promise<SlashCommandInfo[]>;
 };

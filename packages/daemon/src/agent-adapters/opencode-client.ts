@@ -9,6 +9,11 @@ export type OpenCodePromptInput = {
   directory?: string;
 };
 
+export type OpenCodeCommandListInput = {
+  directory?: string;
+  workspace?: string;
+};
+
 export type OpenCodePromptResult = {
   sessionId: string;
   text: string;
@@ -16,6 +21,7 @@ export type OpenCodePromptResult = {
 
 export type OpenCodeSessionClient = {
   sendPrompt(input: OpenCodePromptInput): Promise<OpenCodePromptResult>;
+  listCommands(input?: OpenCodeCommandListInput): Promise<Array<{ command: string; description: string; hint?: string }>>;
 };
 
 export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSessionClient {
@@ -80,7 +86,34 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
         text: extractOpenCodeAssistantText(context.data ?? []),
       };
     },
+    async listCommands(input = {}) {
+      const v2Path = commandListV2Path(input);
+      try {
+        const response = await requestJson<unknown>(v2Path, { method: 'GET' });
+        return extractOpenCodeCommands(response);
+      } catch {
+        const legacyPath = commandListLegacyPath(input);
+        const response = await requestJson<unknown>(legacyPath, { method: 'GET' });
+        return extractOpenCodeCommands(response);
+      }
+    },
   };
+}
+
+function commandListV2Path(input: OpenCodeCommandListInput): string {
+  const location: Record<string, string> = {};
+  if (input.directory) location.directory = input.directory;
+  if (input.workspace) location.workspace = input.workspace;
+  if (Object.keys(location).length === 0) return '/api/command';
+  return `/api/command?location=${encodeURIComponent(JSON.stringify(location))}`;
+}
+
+function commandListLegacyPath(input: OpenCodeCommandListInput): string {
+  const params = new URLSearchParams();
+  if (input.directory) params.set('directory', input.directory);
+  if (input.workspace) params.set('workspace', input.workspace);
+  const query = params.toString();
+  return query ? `/command?${query}` : '/command';
 }
 
 export function extractOpenCodeAssistantText(messages: unknown[]): string {
@@ -90,6 +123,26 @@ export function extractOpenCodeAssistantText(messages: unknown[]): string {
     if (text) return text;
   }
   return '';
+}
+
+export function extractOpenCodeCommands(value: unknown): Array<{ command: string; description: string; hint?: string }> {
+  const rawCommands = Array.isArray(value) ? value : isRecord(value) && Array.isArray(value.data) ? value.data : [];
+
+  return rawCommands
+    .filter(isRecord)
+    .map((command) => {
+      const name = stringValue(command.name) ?? stringValue(command.command);
+      const template = stringValue(command.template);
+      const description = stringValue(command.description) ?? template;
+      if (!name || !description) return null;
+
+      return {
+        command: name,
+        description,
+        ...(template ? { hint: template } : {}),
+      };
+    })
+    .filter((command): command is { command: string; description: string; hint?: string } => command !== null);
 }
 
 function isAssistantMessage(value: unknown): value is Record<string, unknown> {
@@ -111,4 +164,8 @@ function extractTextParts(value: Record<string, unknown>): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }

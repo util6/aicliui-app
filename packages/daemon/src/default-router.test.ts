@@ -170,4 +170,63 @@ describe('default bridge routes', () => {
       { position: 'left', content: { content: 'adapter response' } },
     ]);
   });
+
+  it('returns slash commands from the active conversation backend adapter', async () => {
+    let nextId = 0;
+    const store = new InMemoryConversationStore({
+      now: () => 4000 + nextId,
+      id: () => `slash-id-${++nextId}`,
+    });
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'opencode',
+          name: 'opencode',
+          label: 'OpenCode',
+          probe: async () => ({ backend: 'opencode', state: 'ready' }),
+          sendMessage: async function* () {
+            yield { type: 'content', content: 'unused' };
+          },
+          getSlashCommands: async ({ conversationId, workspace }) => {
+            expect(conversationId).toBe('slash-id-1');
+            expect(workspace).toBe('/tmp/project');
+            return [
+              {
+                command: 'review',
+                description: 'Review current changes',
+                hint: 'focus on regressions',
+              },
+            ];
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_slash',
+        data: {
+          type: 'acp',
+          name: 'hello',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'opencode', workspace: '/tmp/project' },
+        },
+      },
+    });
+
+    const [commands] = await router.handleIncoming({
+      name: 'subscribe-conversation.get-slash-commands',
+      data: { id: 'm_slash', data: { conversation_id: 'slash-id-1' } },
+    });
+
+    expect(commands.data).toEqual([
+      {
+        command: 'review',
+        description: 'Review current changes',
+        hint: 'focus on regressions',
+      },
+    ]);
+  });
 });

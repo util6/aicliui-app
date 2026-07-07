@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createOpenCodeClient, extractOpenCodeAssistantText } from './opencode-client.js';
+import { createOpenCodeClient, extractOpenCodeAssistantText, extractOpenCodeCommands } from './opencode-client.js';
 
 describe('OpenCode local API client', () => {
   it('creates a session, prompts it, waits, and returns assistant text from context', async () => {
@@ -68,6 +68,63 @@ describe('OpenCode local API client', () => {
         { type: 'assistant', content: [{ type: 'text', text: 'from content' }] },
       ]),
     ).toBe('from content');
+  });
+
+  it('lists commands from the OpenCode v2 command endpoint', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return jsonResponse({
+          data: [
+            {
+              name: 'review',
+              description: 'Review current changes',
+              template: 'Review the diff',
+            },
+          ],
+        });
+      },
+    });
+
+    await expect(client.listCommands({ directory: '/tmp/project' })).resolves.toEqual([
+      {
+        command: 'review',
+        description: 'Review current changes',
+        hint: 'Review the diff',
+      },
+    ]);
+
+    expect(calls.map((call) => call.url)).toEqual([
+      'http://127.0.0.1:4096/api/command?location=%7B%22directory%22%3A%22%2Ftmp%2Fproject%22%7D',
+    ]);
+  });
+
+  it('extracts commands from legacy and v2 OpenCode response shapes', () => {
+    expect(
+      extractOpenCodeCommands([
+        { name: 'init', description: 'Create project instructions', template: 'Initialize this repo' },
+      ]),
+    ).toEqual([
+      {
+        command: 'init',
+        description: 'Create project instructions',
+        hint: 'Initialize this repo',
+      },
+    ]);
+
+    expect(
+      extractOpenCodeCommands({
+        data: [{ name: 'plan', template: 'Make a plan' }],
+      }),
+    ).toEqual([
+      {
+        command: 'plan',
+        description: 'Make a plan',
+        hint: 'Make a plan',
+      },
+    ]);
   });
 });
 

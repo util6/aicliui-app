@@ -65,5 +65,10 @@ export function createOpenCodeAdapter(
         content: 'OpenCode server adapter is prepared; session HTTP/SSE wiring is the next runtime slice.',
       };
     },
+    async getSlashCommands(input) {
+      const activeClient = client ?? (serverManager ? await serverManager.ensureClient() : null);
+      if (!activeClient) return [];
+      return activeClient.listCommands({ directory: input.workspace });
+    },
   };
 }

@@ -45,6 +45,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [slashCommands, setSlashCommands] = useState<SlashCommandItem[]>([]);
   const [thought, setThought] = useState<ThoughtData>(null);
   const messagesRef = useRef<TMessage[]>([]);
+  const loadRequestRef = useRef(0);
   const { connectionState } = useConnection();
   const prevConnectionStateRef = useRef(connectionState);
 
@@ -55,6 +56,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   // Load message history
   const loadConversation = useCallback(async (id: string) => {
+    const requestId = ++loadRequestRef.current;
     setConversationId(id);
     setMessages([]);
     setIsStreaming(false);
@@ -68,10 +70,21 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         conversation_id: id,
       });
       if (Array.isArray(data)) {
+        if (requestId !== loadRequestRef.current) return;
         setMessages(data);
       }
     } catch (e) {
       console.warn('[Chat] Failed to load messages:', e);
+    }
+
+    try {
+      const data = await bridge.request('conversation.get-slash-commands', {
+        conversation_id: id,
+      });
+      if (requestId !== loadRequestRef.current) return;
+      setSlashCommands(mapAvailableCommandsToSlashCommands(data));
+    } catch (e) {
+      console.warn('[Chat] Failed to load slash commands:', e);
     }
   }, []);
 

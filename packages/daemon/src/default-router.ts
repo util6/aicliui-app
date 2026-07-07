@@ -33,6 +33,21 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     const params = asRecord(data);
     return store.getMessages(stringParam(params.conversation_id));
   });
+  router.register('conversation.get-slash-commands', async (data) => {
+    const params = asRecord(data);
+    const conversationId = stringParam(params.conversation_id);
+    const conversation = store.getConversation(conversationId);
+    if (!conversation) return [];
+
+    const backend = conversation.extra.backend || 'opencode';
+    const adapter = adapters.get(backend);
+    if (!adapter?.getSlashCommands) return [];
+
+    return adapter.getSlashCommands({
+      conversationId,
+      workspace: conversation.extra.workspace,
+    });
+  });
   router.register('create-conversation', (data) => {
     const params = asRecord(data);
     return store.createConversation({
