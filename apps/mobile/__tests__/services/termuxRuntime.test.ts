@@ -83,6 +83,11 @@ describe('termuxRuntime', () => {
     expect(script).toContain('npm install -g @google/gemini-cli@latest');
     expect(script).toContain("import { WebSocketServer } from 'ws';");
     expect(script).toContain("import { spawn } from 'node:child_process';");
+    expect(script).toContain("import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';");
+    expect(script).toContain("const storePath = process.env.AICLIUI_STORE_PATH || dataRoot + '/daemon/store.json';");
+    expect(script).toContain('const storeReady = loadStore();');
+    expect(script).toContain('await storeReady;');
+    expect(script).toContain('await rename(tmpPath, storePath);');
     expect(script).toContain("opencode', ['serve', '--hostname', '127.0.0.1', '--port'");
     expect(script).toContain("buildGeminiArgs({ input, model, approvalMode }).slice(1)");
     expect(script).toContain("'--output-format'");

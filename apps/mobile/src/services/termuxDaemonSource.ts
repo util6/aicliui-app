@@ -1,13 +1,19 @@
-export const TERMUX_DAEMON_SOURCE = String.raw`import { spawn } from 'node:child_process';
+export const TERMUX_DAEMON_SOURCE = String.raw`import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 
 const port = Number.parseInt(process.env.AICLIUI_DAEMON_PORT || '43117', 10);
 const openCodePort = Number.parseInt(process.env.AICLIUI_OPENCODE_PORT || '4096', 10);
+const dataRoot = process.env.AICLIUI_HOME || (process.env.HOME ? process.env.HOME + '/.aicliui' : '.aicliui');
+const storePath = process.env.AICLIUI_STORE_PATH || dataRoot + '/daemon/store.json';
 const token = process.env.AICLIUI_DAEMON_TOKEN || '';
 const startedAt = Date.now();
 const conversations = new Map();
 const messages = new Map();
 let openCodeServerPromise = null;
+let saveQueue = Promise.resolve();
+const storeReady = loadStore();
 
 const agents = [
   { backend: 'opencode', name: 'opencode', label: 'OpenCode' },
@@ -62,15 +68,16 @@ server.on('connection', (socket, request) => {
 });
 
 async function route(key, data, emit) {
+  await storeReady;
   const params = isRecord(data) ? data : {};
   if (key === 'runtime.get-status') return getRuntimeStatus();
   if (key === 'acp.get-available-agents') return { success: true, data: agents };
   if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: null } };
   if (key === 'database.get-user-conversations') return listConversations(params.page, params.pageSize);
   if (key === 'database.get-conversation-messages') return messages.get(requiredString(params.conversation_id)) || [];
-  if (key === 'create-conversation') return createConversation(params);
-  if (key === 'remove-conversation') return removeConversation(requiredString(params.id));
-  if (key === 'update-conversation') return updateConversation(requiredString(params.id), isRecord(params.updates) ? params.updates : {});
+  if (key === 'create-conversation') return await createConversation(params);
+  if (key === 'remove-conversation') return await removeConversation(requiredString(params.id));
+  if (key === 'update-conversation') return await updateConversation(requiredString(params.id), isRecord(params.updates) ? params.updates : {});
   if (key === 'chat.send.message') return await sendMessage(params, emit);
   if (key === 'chat.stop.stream') return { success: true };
   if (key === 'confirmation.list') return [];
@@ -93,7 +100,64 @@ async function probeAgent(backend) {
   return { backend, state: 'ready', version: await readVersion(backend, ['--version']) };
 }
 
-function createConversation(params) {
+async function loadStore() {
+  try {
+    const raw = await readFile(storePath, 'utf8');
+    const store = JSON.parse(raw);
+    if (!isRecord(store)) return;
+    conversations.clear();
+    messages.clear();
+
+    if (Array.isArray(store.conversations)) {
+      for (const conversation of store.conversations) {
+        if (isRecord(conversation) && typeof conversation.id === 'string') {
+          conversations.set(conversation.id, conversation);
+        }
+      }
+    }
+
+    if (isRecord(store.messages)) {
+      for (const [conversationId, conversationMessages] of Object.entries(store.messages)) {
+        messages.set(conversationId, Array.isArray(conversationMessages) ? conversationMessages : []);
+      }
+    }
+
+    for (const id of conversations.keys()) {
+      if (!messages.has(id)) messages.set(id, []);
+    }
+  } catch (error) {
+    if (!isNodeErrorCode(error, 'ENOENT')) {
+      console.warn('Failed to load AICLIUI daemon store:', error instanceof Error ? error.message : error);
+    }
+  }
+}
+
+function saveStore() {
+  saveQueue = saveQueue.then(writeStore, writeStore);
+  return saveQueue;
+}
+
+async function writeStore() {
+  await mkdir(dirname(storePath), { recursive: true });
+  const tmpPath = storePath + '.tmp';
+  const payload = JSON.stringify(
+    {
+      version: 1,
+      conversations: Array.from(conversations.values()),
+      messages: Object.fromEntries(messages.entries()),
+    },
+    null,
+    2,
+  );
+  await writeFile(tmpPath, payload, 'utf8');
+  await rename(tmpPath, storePath);
+}
+
+function isNodeErrorCode(error, code) {
+  return isRecord(error) && error.code === code;
+}
+
+async function createConversation(params) {
   const now = Date.now();
   const id = randomId();
   const conversation = {
@@ -108,6 +172,7 @@ function createConversation(params) {
   };
   conversations.set(id, conversation);
   messages.set(id, []);
+  await saveStore();
   return conversation;
 }
 
@@ -133,7 +198,7 @@ async function sendMessage(params, emit) {
   const approvalMode = typeof conversation.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined;
   let assistantContent = '';
 
-  addTextMessage(conversationId, userMsgId, 'right', input);
+  await addTextMessage(conversationId, userMsgId, 'right', input);
   emit('chat.response.stream', { type: 'start', msg_id: assistantMsgId, conversation_id: conversationId, data: null });
 
   try {
@@ -177,7 +242,7 @@ async function sendMessage(params, emit) {
       (error instanceof Error ? error.message : 'Unknown runtime error');
   }
 
-  addTextMessage(conversationId, assistantMsgId, 'left', assistantContent);
+  await addTextMessage(conversationId, assistantMsgId, 'left', assistantContent);
   emit('chat.response.stream', {
     type: 'content',
     msg_id: assistantMsgId,
@@ -441,7 +506,7 @@ function readVersion(command, args) {
   });
 }
 
-function addTextMessage(conversationId, msgId, position, content) {
+async function addTextMessage(conversationId, msgId, position, content) {
   const now = Date.now();
   const message = {
     id: randomId(),
@@ -454,15 +519,17 @@ function addTextMessage(conversationId, msgId, position, content) {
   };
   messages.get(conversationId).push(message);
   conversations.get(conversationId).modifyTime = now;
+  await saveStore();
 }
 
-function removeConversation(id) {
+async function removeConversation(id) {
   const existed = conversations.delete(id);
   messages.delete(id);
+  if (existed) await saveStore();
   return existed;
 }
 
-function updateConversation(id, updates) {
+async function updateConversation(id, updates) {
   const conversation = conversations.get(id);
   if (!conversation) return false;
   conversations.set(id, {
@@ -471,6 +538,7 @@ function updateConversation(id, updates) {
     extra: isRecord(updates.extra) ? { ...conversation.extra, ...updates.extra } : conversation.extra,
     modifyTime: Date.now(),
   });
+  await saveStore();
   return true;
 }
 
