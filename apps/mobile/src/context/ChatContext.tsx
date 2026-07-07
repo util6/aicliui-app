@@ -25,10 +25,18 @@ type RuntimeSummary = {
   turn_id: string | null;
 };
 
+export type QueuedCommand = {
+  id: string;
+  input: string;
+  files: string[];
+  createdAt: number;
+};
+
 type ChatContextType = {
   messages: TMessage[];
   isStreaming: boolean;
   canSendMessage: boolean;
+  queuedCommands: QueuedCommand[];
   conversationId: string | null;
   confirmations: any[];
   contextUsage: { used: number; size: number } | null;
@@ -44,6 +52,7 @@ const ChatContext = createContext<ChatContextType>({
   messages: [],
   isStreaming: false,
   canSendMessage: true,
+  queuedCommands: [],
   conversationId: null,
   confirmations: [],
   contextUsage: null,
@@ -59,6 +68,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [messages, setMessages] = useState<TMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [canSendMessage, setCanSendMessageState] = useState(true);
+  const [queuedCommands, setQueuedCommandsState] = useState<QueuedCommand[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [confirmations, setConfirmations] = useState<any[]>([]);
   const [contextUsage, setContextUsage] = useState<{ used: number; size: number } | null>(null);
@@ -68,6 +78,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const loadRequestRef = useRef(0);
   const isStreamingRef = useRef(false);
   const canSendMessageRef = useRef(true);
+  const queuedCommandsRef = useRef<QueuedCommand[]>([]);
+  const suppressNextQueueDrainRef = useRef(false);
   const turnFinishedRef = useRef(false);
   const activeThinkingRef = useRef<{ msgId: string; startedAt: number } | null>(null);
   const { connectionState } = useConnection();
@@ -82,6 +94,74 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     canSendMessageRef.current = value;
     setCanSendMessageState(value);
   }, []);
+
+  const setQueuedCommands = useCallback((next: QueuedCommand[] | ((prev: QueuedCommand[]) => QueuedCommand[])) => {
+    const resolved = typeof next === 'function' ? next(queuedCommandsRef.current) : next;
+    queuedCommandsRef.current = resolved;
+    setQueuedCommandsState(resolved);
+  }, []);
+
+  const executeSend = useCallback(
+    (text: string, files?: string[]) => {
+      const trimmed = text.trim();
+      if (!conversationId || !trimmed) return false;
+
+      const msgId = uuid();
+      const userMsg: TMessage = {
+        id: uuid(),
+        msg_id: msgId,
+        conversation_id: conversationId,
+        type: 'text',
+        position: 'right',
+        content: { content: trimmed },
+        createdAt: Date.now(),
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      turnFinishedRef.current = false;
+      setStreamingState(true);
+      setCanSendMessage(false);
+
+      bridge
+        .request('chat.send.message', {
+          input: trimmed,
+          msg_id: msgId,
+          conversation_id: conversationId,
+          ...(files?.length ? { files } : {}),
+        })
+        .catch((e) => {
+          setStreamingState(false);
+          setCanSendMessage(true);
+          console.warn('[Chat] send failed:', e);
+        });
+      return true;
+    },
+    [conversationId, setCanSendMessage, setStreamingState],
+  );
+
+  const enqueueMessage = useCallback(
+    (text: string, files?: string[]) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      setQueuedCommands((prev) => [
+        ...prev,
+        {
+          id: uuid(),
+          input: trimmed,
+          files: uniqueFiles(files),
+          createdAt: Date.now(),
+        },
+      ]);
+    },
+    [setQueuedCommands],
+  );
+
+  const drainNextQueuedCommand = useCallback(() => {
+    if (!conversationId || !canSendMessageRef.current || isStreamingRef.current) return false;
+    const [next, ...rest] = queuedCommandsRef.current;
+    if (!next) return false;
+    setQueuedCommands(rest);
+    return executeSend(next.input, next.files);
+  }, [conversationId, executeSend, setQueuedCommands]);
 
   const completeActiveThinking = useCallback(
     (boundary: Pick<IResponseMessage, 'conversation_id' | 'createdAt' | 'created_at'>, duration?: number) => {
@@ -152,6 +232,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const requestId = ++loadRequestRef.current;
     setConversationId(id);
     setMessages([]);
+    setQueuedCommands([]);
+    suppressNextQueueDrainRef.current = false;
     turnFinishedRef.current = false;
     activeThinkingRef.current = null;
     setStreamingState(false);
@@ -224,6 +306,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         setStreamingState(false);
         setCanSendMessage(true);
         setThought(null);
+        if (suppressNextQueueDrainRef.current) {
+          suppressNextQueueDrainRef.current = false;
+        } else {
+          drainNextQueuedCommand();
+        }
         return;
       }
 
@@ -334,7 +421,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       unsubConfirmUpdate();
       unsubConfirmRemove();
     };
-  }, [completeActiveThinking, conversationId, refreshSlashCommands, setCanSendMessage, setStreamingState]);
+  }, [
+    completeActiveThinking,
+    conversationId,
+    drainNextQueuedCommand,
+    refreshSlashCommands,
+    setCanSendMessage,
+    setStreamingState,
+  ]);
 
   // Restore pending confirmations on reconnect (Issue 2)
   useEffect(() => {
@@ -352,74 +446,24 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const pending = consumePendingInitialMessage(conversationId);
     if (!pending) return;
 
-    const msgId = uuid();
-    const userMsg: TMessage = {
-      id: uuid(),
-      msg_id: msgId,
-      conversation_id: conversationId,
-      type: 'text',
-      position: 'right',
-      content: { content: pending },
-      createdAt: Date.now(),
-    };
-    setMessages((prev) => [...prev, userMsg]);
-    turnFinishedRef.current = false;
-    setStreamingState(true);
-    setCanSendMessage(false);
-
-    bridge
-      .request('chat.send.message', {
-        input: pending,
-        msg_id: msgId,
-        conversation_id: conversationId,
-      })
-      .catch((e) => {
-        setStreamingState(false);
-        setCanSendMessage(true);
-        console.warn('[Chat] initial send failed:', e);
-      });
-  }, [conversationId, setCanSendMessage, setStreamingState]);
+    executeSend(pending);
+  }, [conversationId, executeSend]);
 
   const sendMessage = useCallback(
     (text: string, files?: string[]) => {
-      if (!conversationId || !text.trim() || !canSendMessageRef.current) return;
-
-      const msgId = uuid();
-
-      // Optimistic insert for user message
-      const userMsg: TMessage = {
-        id: uuid(),
-        msg_id: msgId,
-        conversation_id: conversationId,
-        type: 'text',
-        position: 'right',
-        content: { content: text },
-        createdAt: Date.now(),
-      };
-      setMessages((prev) => [...prev, userMsg]);
-      turnFinishedRef.current = false;
-      setStreamingState(true);
-      setCanSendMessage(false);
-
-      // Send via bridge
-      bridge
-        .request('chat.send.message', {
-          input: text,
-          msg_id: msgId,
-          conversation_id: conversationId,
-          ...(files?.length ? { files } : {}),
-        })
-        .catch((e) => {
-          setStreamingState(false);
-          setCanSendMessage(true);
-          console.warn('[Chat] send failed:', e);
-        });
+      if (!conversationId || !text.trim()) return;
+      if (!canSendMessageRef.current || isStreamingRef.current || queuedCommandsRef.current.length > 0) {
+        enqueueMessage(text, files);
+        return;
+      }
+      executeSend(text, files);
     },
-    [conversationId, setCanSendMessage, setStreamingState],
+    [conversationId, enqueueMessage, executeSend],
   );
 
   const stopGeneration = useCallback(() => {
     if (!conversationId) return;
+    suppressNextQueueDrainRef.current = true;
     turnFinishedRef.current = true;
     activeThinkingRef.current = null;
     setStreamingState(false);
@@ -462,6 +506,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         messages,
         isStreaming,
         canSendMessage,
+        queuedCommands,
         conversationId,
         confirmations,
         contextUsage,
@@ -576,6 +621,10 @@ function isConfirmationMessage(message: TMessage): boolean {
 
 function isProcessingConversationStatus(status: unknown): boolean {
   return status === 'running' || status === 'waiting_confirmation';
+}
+
+function uniqueFiles(files: string[] | undefined): string[] {
+  return Array.from(new Set((files ?? []).filter((file) => typeof file === 'string' && file.length > 0)));
 }
 
 function normalizeRuntimeSummary(value: unknown): RuntimeSummary | null {

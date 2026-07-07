@@ -24,7 +24,17 @@ function Probe() {
 }
 
 function RuntimeProbe() {
-  const { loadConversation, isStreaming, canSendMessage, thought, messages, contextUsage, confirmations, sendMessage } = useChat();
+  const {
+    loadConversation,
+    isStreaming,
+    canSendMessage,
+    queuedCommands,
+    thought,
+    messages,
+    contextUsage,
+    confirmations,
+    sendMessage,
+  } = useChat();
 
   useEffect(() => {
     loadConversation('conv-1');
@@ -34,6 +44,7 @@ function RuntimeProbe() {
     <>
       <Text testID='streaming'>{isStreaming ? 'streaming' : 'idle'}</Text>
       <Text testID='can-send'>{canSendMessage ? 'can-send' : 'blocked'}</Text>
+      <Text testID='queued-count'>{queuedCommands.length}</Text>
       <Text testID='thought'>{thought?.subject ?? ''}</Text>
       <Text testID='messages'>{messages.map((message) => message.content?.content ?? '').join('|')}</Text>
       <Text testID='message-types'>{messages.map((message) => message.type).join('|')}</Text>
@@ -58,6 +69,9 @@ function RuntimeProbe() {
       </Text>
       <Text testID='send' onPress={() => sendMessage('hello')}>
         send
+      </Text>
+      <Text testID='send-second' onPress={() => sendMessage('second')}>
+        send-second
       </Text>
     </>
   );
@@ -290,7 +304,7 @@ describe('ChatContext runtime state', () => {
     expect(screen.getByTestId('thought').props.children).toBe('planning');
   });
 
-  it('blocks duplicate local sends until the active turn finishes', async () => {
+  it('queues local sends while the active turn is busy and drains them after finish', async () => {
     const screen = render(
       <ChatProvider>
         <RuntimeProbe />
@@ -301,11 +315,12 @@ describe('ChatContext runtime state', () => {
 
     await act(async () => {
       fireEvent.press(screen.getByTestId('send'));
-      fireEvent.press(screen.getByTestId('send'));
+      fireEvent.press(screen.getByTestId('send-second'));
     });
 
     expect(screen.getByTestId('streaming').props.children).toBe('streaming');
     expect(screen.getByTestId('can-send').props.children).toBe('blocked');
+    expect(screen.getByTestId('queued-count').props.children).toBe(1);
     expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(1);
 
     await act(async () => {
@@ -317,13 +332,17 @@ describe('ChatContext runtime state', () => {
       });
     });
 
-    expect(screen.getByTestId('can-send').props.children).toBe('can-send');
-
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('send'));
-    });
-
+    expect(screen.getByTestId('queued-count').props.children).toBe(0);
+    expect(screen.getByTestId('streaming').props.children).toBe('streaming');
+    expect(screen.getByTestId('can-send').props.children).toBe('blocked');
     expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(2);
+    expect(mockRequest).toHaveBeenLastCalledWith(
+      'chat.send.message',
+      expect.objectContaining({
+        input: 'second',
+        conversation_id: 'conv-1',
+      }),
+    );
   });
 
   it('restores runtime summary gate when a conversation is opened', async () => {

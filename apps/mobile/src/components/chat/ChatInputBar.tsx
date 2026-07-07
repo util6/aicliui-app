@@ -11,11 +11,20 @@ type ChatInputBarProps = {
   onStop?: () => void;
   isStreaming?: boolean;
   canSend?: boolean;
+  queuedCount?: number;
   disabled?: boolean;
   slashCommands?: SlashCommandItem[];
 };
 
-export function ChatInputBar({ onSend, onStop, isStreaming, canSend = true, disabled, slashCommands = [] }: ChatInputBarProps) {
+export function ChatInputBar({
+  onSend,
+  onStop,
+  isStreaming,
+  canSend = true,
+  queuedCount = 0,
+  disabled,
+  slashCommands = [],
+}: ChatInputBarProps) {
   const { t } = useTranslation();
   const tint = useThemeColor({}, 'tint');
   const background = useThemeColor({}, 'background');
@@ -26,11 +35,12 @@ export function ChatInputBar({ onSend, onStop, isStreaming, canSend = true, disa
   const textSecondary = useThemeColor({}, 'textSecondary');
   const [text, setText] = useState('');
   const isDisabled = disabled === true;
-  const sendBlocked = isDisabled || !canSend;
+  const canQueue = !isDisabled && !canSend && isStreaming === true;
+  const sendBlocked = isDisabled || (!canSend && !canQueue);
   const slashQuery = matchSlashQuery(text);
   const matchingSlashCommands =
     slashQuery === null ? [] : filterSlashCommands(slashCommands, slashQuery).slice(0, 6);
-  const showSlashCommands = !sendBlocked && matchingSlashCommands.length > 0;
+  const showSlashCommands = canSend && !sendBlocked && matchingSlashCommands.length > 0;
 
   const handleSend = () => {
     if (sendBlocked) return;
@@ -50,11 +60,20 @@ export function ChatInputBar({ onSend, onStop, isStreaming, canSend = true, disa
     setText(`/${command.name} `);
   };
 
-  const showSend = !sendBlocked && text.trim().length > 0;
+  const showQueue = canQueue && text.trim().length > 0;
+  const showSend = canSend && !sendBlocked && text.trim().length > 0;
   const showStop = !isDisabled && isStreaming;
 
   return (
     <View style={[styles.container, { borderTopColor: border, backgroundColor: background }]}>
+      {queuedCount > 0 && (
+        <View style={styles.queueStatus}>
+          <Ionicons name='list-outline' size={13} color={textSecondary} />
+          <ThemedText style={[styles.queueStatusText, { color: textSecondary }]}>
+            {t('chat.queuedCommands', { count: queuedCount, defaultValue: `${queuedCount} queued` })}
+          </ThemedText>
+        </View>
+      )}
       {showSlashCommands && (
         <View style={[styles.slashMenu, { backgroundColor: surface, borderColor: border }]}>
           <View style={styles.slashHeader}>
@@ -96,6 +115,11 @@ export function ChatInputBar({ onSend, onStop, isStreaming, canSend = true, disa
           onSubmitEditing={handleSend}
           blurOnSubmit={false}
         />
+        {showQueue && (
+          <TouchableOpacity style={styles.sendButton} onPress={handleSend} activeOpacity={0.7}>
+            <Ionicons name='add-circle-outline' size={30} color={tint} />
+          </TouchableOpacity>
+        )}
         {showStop ? (
           <TouchableOpacity style={styles.stopButton} onPress={onStop} activeOpacity={0.7}>
             <Ionicons name='stop-circle' size={28} color={error} />
@@ -149,6 +173,17 @@ const styles = StyleSheet.create({
   },
   slashHint: {
     fontSize: 11,
+  },
+  queueStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 4,
+    paddingBottom: 6,
+  },
+  queueStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   inputRow: {
     flexDirection: 'row',

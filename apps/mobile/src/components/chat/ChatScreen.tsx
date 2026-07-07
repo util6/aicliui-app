@@ -22,6 +22,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     messages,
     isStreaming,
     canSendMessage,
+    queuedCommands,
     thought,
     contextUsage,
     slashCommands,
@@ -97,6 +98,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         onStop={stopGeneration}
         isStreaming={isStreaming}
         canSend={canSendMessage}
+        queuedCount={queuedCommands.length}
         slashCommands={slashCommands}
       />
     </KeyboardAvoidingView>
