@@ -118,4 +118,14 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("subject: 'OpenCode reasoning'");
     expect(TERMUX_DAEMON_SOURCE).toContain("status: 'done'");
   });
+
+  it('routes OpenCode v2 tool lifecycle events through the local tool stream', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain('createOpenCodeToolUpdateExtractor');
+    expect(TERMUX_DAEMON_SOURCE).toContain('function extractOpenCodeNextToolUpdate(event, sessionId, toolByCallId)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.tool.called'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.tool.progress'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.tool.success'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.tool.failed'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeNextToolDisplay(data)');
+  });
 });

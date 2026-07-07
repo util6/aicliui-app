@@ -325,6 +325,147 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode v2 tool lifecycle events while prompting', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_tool_v2' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.tool.called',
+              data: {
+                sessionID: 'ses_tool_v2',
+                callID: 'tool_v2',
+                tool: 'bash',
+                input: { command: 'echo hi' },
+              },
+            },
+            {
+              type: 'session.next.tool.progress',
+              data: {
+                sessionID: 'ses_tool_v2',
+                callID: 'tool_v2',
+                structured: {},
+                content: [{ type: 'text', text: 'running' }],
+              },
+            },
+            {
+              type: 'session.next.tool.success',
+              data: {
+                sessionID: 'ses_tool_v2',
+                callID: 'tool_v2',
+                structured: {},
+                content: [{ type: 'text', text: 'done' }],
+              },
+            },
+            {
+              type: 'session.next.tool.called',
+              data: {
+                sessionID: 'ses_tool_v2',
+                callID: 'tool_fail',
+                tool: 'grep',
+                input: { pattern: 'needle' },
+              },
+            },
+            {
+              type: 'session.next.tool.failed',
+              data: {
+                sessionID: 'ses_tool_v2',
+                callID: 'tool_fail',
+                error: { message: 'boom' },
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_tool_v2/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_tool_v2/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_tool_v2/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'tools done' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_tool_v2' },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'tool_v2',
+          call_id: 'tool_v2',
+          name: 'bash',
+          description: 'echo hi',
+          status: 'Executing',
+          resultDisplay: '',
+          result_display: '',
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'tool_v2',
+          call_id: 'tool_v2',
+          name: 'bash',
+          description: 'echo hi',
+          status: 'Executing',
+          resultDisplay: 'running',
+          result_display: 'running',
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'tool_v2',
+          call_id: 'tool_v2',
+          name: 'bash',
+          description: 'echo hi',
+          status: 'Success',
+          resultDisplay: 'done',
+          result_display: 'done',
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'tool_fail',
+          call_id: 'tool_fail',
+          name: 'grep',
+          description: 'needle',
+          status: 'Executing',
+          resultDisplay: '',
+          result_display: '',
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'tool_fail',
+          call_id: 'tool_fail',
+          name: 'grep',
+          description: 'needle',
+          status: 'Error',
+          resultDisplay: 'boom',
+          result_display: 'boom',
+        },
+      },
+      { type: 'content', content: 'tools done' },
+    ]);
+  });
+
   it('streams OpenCode question events and can reply or reject them', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const client = createOpenCodeClient({

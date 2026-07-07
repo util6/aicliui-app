@@ -517,6 +517,7 @@ function subscribeOpenCodeSessionEvents(input: {
       const decoder = new TextDecoder();
       const extractTextDelta = createOpenCodeTextDeltaExtractor(input.sessionId);
       const extractReasoningEvent = createOpenCodeReasoningEventExtractor(input.sessionId);
+      const extractToolUpdate = createOpenCodeToolUpdateExtractor(input.sessionId);
       const extractPermissionEvent = createOpenCodePermissionEventExtractor(input.sessionId);
       const extractQuestionEvent = createOpenCodeQuestionEventExtractor(input.sessionId);
       const parse = createSseParser((event) => {
@@ -526,7 +527,7 @@ function subscribeOpenCodeSessionEvents(input: {
         const reasoning = extractReasoningEvent(event);
         if (reasoning) input.handlers.onThinking(reasoning);
 
-        const tool = extractOpenCodeToolUpdate(event, input.sessionId);
+        const tool = extractToolUpdate(event);
         if (tool) input.handlers.onTool(tool);
 
         const permissionEvent = extractPermissionEvent(event);
@@ -640,7 +641,19 @@ function extractOpenCodeReasoningEvent(event: unknown, sessionId: string): OpenC
   return null;
 }
 
-function extractOpenCodeToolUpdate(event: unknown, sessionId: string): OpenCodeToolUpdate | null {
+function createOpenCodeToolUpdateExtractor(sessionId: string): (event: unknown) => OpenCodeToolUpdate | null {
+  const toolByCallId = new Map<string, { name: string; description: string }>();
+  return (event) => extractOpenCodeToolUpdate(event, sessionId, toolByCallId);
+}
+
+function extractOpenCodeToolUpdate(
+  event: unknown,
+  sessionId: string,
+  toolByCallId: Map<string, { name: string; description: string }>,
+): OpenCodeToolUpdate | null {
+  const nextTool = extractOpenCodeNextToolUpdate(event, sessionId, toolByCallId);
+  if (nextTool) return nextTool;
+
   if (!isRecord(event)) return null;
   const payload = isRecord(event.payload) ? event.payload : event;
   const type = typeof payload.type === 'string' ? payload.type : '';
@@ -655,12 +668,58 @@ function extractOpenCodeToolUpdate(event: unknown, sessionId: string): OpenCodeT
   if (!callId) return null;
 
   const resultDisplay = openCodeToolResultDisplay(state);
+  const name = typeof part.tool === 'string' && part.tool ? part.tool : 'tool';
+  const description = openCodeToolTitle(part, state);
+  toolByCallId.set(callId, { name, description });
+  return openCodeToolUpdate(callId, name, description, openCodeToolStatus(state.status), resultDisplay);
+}
+
+function extractOpenCodeNextToolUpdate(
+  event: unknown,
+  sessionId: string,
+  toolByCallId: Map<string, { name: string; description: string }>,
+): OpenCodeToolUpdate | null {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (data.sessionID !== sessionId) return null;
+  const callId = stringValue(data.callID);
+  if (!callId) return null;
+
+  if (type === 'session.next.tool.called') {
+    const name = stringValue(data.tool) ?? 'tool';
+    const description = openCodeToolTitle({ tool: name }, { input: data.input });
+    toolByCallId.set(callId, { name, description });
+    return openCodeToolUpdate(callId, name, description, 'Executing', '');
+  }
+
+  const cached = toolByCallId.get(callId) ?? { name: 'tool', description: callId };
+  if (type === 'session.next.tool.progress') {
+    return openCodeToolUpdate(callId, cached.name, cached.description, 'Executing', openCodeNextToolDisplay(data));
+  }
+  if (type === 'session.next.tool.success') {
+    return openCodeToolUpdate(callId, cached.name, cached.description, 'Success', openCodeNextToolDisplay(data));
+  }
+  if (type === 'session.next.tool.failed') {
+    return openCodeToolUpdate(callId, cached.name, cached.description, 'Error', openCodeNextToolErrorDisplay(data));
+  }
+  return null;
+}
+
+function openCodeToolUpdate(
+  callId: string,
+  name: string,
+  description: string,
+  status: OpenCodeToolUpdate['status'],
+  resultDisplay: string,
+): OpenCodeToolUpdate {
   return {
     callId,
     call_id: callId,
-    name: typeof part.tool === 'string' && part.tool ? part.tool : 'tool',
-    description: openCodeToolTitle(part, state),
-    status: openCodeToolStatus(state.status),
+    name,
+    description,
+    status,
     resultDisplay,
     result_display: resultDisplay,
   };
@@ -759,6 +818,39 @@ function openCodeToolResultDisplay(state: Record<string, unknown>): string {
   if (typeof state.output === 'string' && state.output) return state.output;
   if (typeof state.error === 'string' && state.error) return state.error;
   if (Array.isArray(state.content) && state.content.length) return JSON.stringify(state.content);
+  return '';
+}
+
+function openCodeNextToolDisplay(data: Record<string, unknown>): string {
+  if (Array.isArray(data.content)) {
+    const content = data.content.map(openCodeToolContentDisplay).filter(Boolean).join('\n');
+    if (content) return content;
+  }
+  if (typeof data.result === 'string' && data.result) return data.result;
+  if (data.result !== undefined) return jsonDisplay(data.result);
+  if (isRecord(data.structured) && Object.keys(data.structured).length) return jsonDisplay(data.structured);
+  if (Array.isArray(data.outputPaths) && data.outputPaths.length) {
+    return data.outputPaths.filter((item): item is string => typeof item === 'string' && item.length > 0).join('\n');
+  }
+  return '';
+}
+
+function openCodeToolContentDisplay(item: unknown): string {
+  if (typeof item === 'string') return item;
+  if (!isRecord(item)) return '';
+  if (typeof item.text === 'string') return item.text;
+  if (typeof item.content === 'string') return item.content;
+  if (typeof item.data === 'string') return item.data;
+  if (typeof item.name === 'string') return item.name;
+  return '';
+}
+
+function openCodeNextToolErrorDisplay(data: Record<string, unknown>): string {
+  const error = data.error;
+  if (typeof error === 'string') return error;
+  if (isRecord(error) && typeof error.message === 'string') return error.message;
+  if (error !== undefined) return jsonDisplay(error);
+  if (data.result !== undefined) return jsonDisplay(data.result);
   return '';
 }
 
@@ -866,4 +958,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function jsonDisplay(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }

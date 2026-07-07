@@ -1326,10 +1326,14 @@ function extractOpenCodeReasoningEvent(event, sessionId) {
 }
 
 function createOpenCodeToolUpdateExtractor(sessionId) {
-  return (event) => extractOpenCodeToolUpdate(event, sessionId);
+  const toolByCallId = new Map();
+  return (event) => extractOpenCodeToolUpdate(event, sessionId, toolByCallId);
 }
 
-function extractOpenCodeToolUpdate(event, sessionId) {
+function extractOpenCodeToolUpdate(event, sessionId, toolByCallId) {
+  const nextTool = extractOpenCodeNextToolUpdate(event, sessionId, toolByCallId);
+  if (nextTool) return nextTool;
+
   if (!isRecord(event)) return null;
   const payload = isRecord(event.payload) ? event.payload : event;
   const type = typeof payload.type === 'string' ? payload.type : '';
@@ -1343,12 +1347,50 @@ function extractOpenCodeToolUpdate(event, sessionId) {
   const callId = typeof part.callID === 'string' ? part.callID : typeof part.id === 'string' ? part.id : '';
   if (!callId) return null;
 
+  const name = typeof part.tool === 'string' && part.tool ? part.tool : 'tool';
+  const description = openCodeToolTitle(part, state);
+  toolByCallId.set(callId, { name, description });
+  return openCodeToolUpdate(callId, name, description, openCodeToolStatus(state.status), openCodeToolResultDisplay(state));
+}
+
+function extractOpenCodeNextToolUpdate(event, sessionId, toolByCallId) {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (data.sessionID !== sessionId) return null;
+  const callId = stringValue(data.callID);
+  if (!callId) return null;
+
+  if (type === 'session.next.tool.called') {
+    const name = stringValue(data.tool) || 'tool';
+    const description = openCodeToolTitle({ tool: name }, { input: data.input });
+    toolByCallId.set(callId, { name, description });
+    return openCodeToolUpdate(callId, name, description, 'Executing', '');
+  }
+
+  const cached = toolByCallId.get(callId) || { name: 'tool', description: callId };
+  if (type === 'session.next.tool.progress') {
+    return openCodeToolUpdate(callId, cached.name, cached.description, 'Executing', openCodeNextToolDisplay(data));
+  }
+  if (type === 'session.next.tool.success') {
+    return openCodeToolUpdate(callId, cached.name, cached.description, 'Success', openCodeNextToolDisplay(data));
+  }
+  if (type === 'session.next.tool.failed') {
+    return openCodeToolUpdate(callId, cached.name, cached.description, 'Error', openCodeNextToolErrorDisplay(data));
+  }
+  return null;
+}
+
+function openCodeToolUpdate(callId, name, description, status, resultDisplay) {
   return {
     callId,
-    name: typeof part.tool === 'string' && part.tool ? part.tool : 'tool',
-    description: openCodeToolTitle(part, state),
-    status: openCodeToolStatus(state.status),
-    resultDisplay: openCodeToolResultDisplay(state),
+    call_id: callId,
+    name,
+    description,
+    status,
+    resultDisplay,
+    result_display: resultDisplay,
   };
 }
 
@@ -1664,6 +1706,39 @@ function openCodeToolResultDisplay(state) {
   if (typeof state.output === 'string' && state.output) return state.output;
   if (typeof state.error === 'string' && state.error) return state.error;
   if (Array.isArray(state.content) && state.content.length) return JSON.stringify(state.content);
+  return '';
+}
+
+function openCodeNextToolDisplay(data) {
+  if (Array.isArray(data.content)) {
+    const content = data.content.map(openCodeToolContentDisplay).filter(Boolean).join('\n');
+    if (content) return content;
+  }
+  if (typeof data.result === 'string' && data.result) return data.result;
+  if (data.result !== undefined) return safeJsonStringify(data.result);
+  if (isRecord(data.structured) && Object.keys(data.structured).length) return safeJsonStringify(data.structured);
+  if (Array.isArray(data.outputPaths) && data.outputPaths.length) {
+    return data.outputPaths.filter((item) => typeof item === 'string' && item.length > 0).join('\n');
+  }
+  return '';
+}
+
+function openCodeToolContentDisplay(item) {
+  if (typeof item === 'string') return item;
+  if (!isRecord(item)) return '';
+  if (typeof item.text === 'string') return item.text;
+  if (typeof item.content === 'string') return item.content;
+  if (typeof item.data === 'string') return item.data;
+  if (typeof item.name === 'string') return item.name;
+  return '';
+}
+
+function openCodeNextToolErrorDisplay(data) {
+  const error = data.error;
+  if (typeof error === 'string') return error;
+  if (isRecord(error) && typeof error.message === 'string') return error.message;
+  if (error !== undefined) return safeJsonStringify(error);
+  if (data.result !== undefined) return safeJsonStringify(data.result);
   return '';
 }
 
