@@ -1,5 +1,7 @@
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { TouchableOpacity, View, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
 import { MarkdownContent } from './MarkdownContent';
 import { ConfirmationCard } from './ConfirmationCard';
@@ -99,9 +101,59 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       );
     }
 
+    case 'thinking':
+      return <ThinkingBlock message={message} />;
+
     default:
       return null;
   }
+}
+
+function ThinkingBlock({ message }: { message: TMessage }) {
+  const { t } = useTranslation();
+  const surface = useThemeColor({}, 'surface');
+  const border = useThemeColor({}, 'border');
+  const icon = useThemeColor({}, 'icon');
+  const tint = useThemeColor({}, 'tint');
+  const textSecondary = useThemeColor({}, 'textSecondary');
+  const isDone = message.content?.status === 'done';
+  const [expanded, setExpanded] = useState(!isDone);
+
+  const summary = isDone
+    ? `${t('chat.thoughtComplete', { defaultValue: 'Thought complete' })} · ${formatDuration(
+        Number(message.content?.duration || 0),
+      )}`
+    : message.content?.subject || t('chat.thinking');
+
+  return (
+    <View style={[styles.row, styles.rowLeft]}>
+      <View style={[styles.thinkingContainer, { backgroundColor: surface, borderColor: border }]}>
+        <TouchableOpacity
+          style={styles.thinkingHeader}
+          onPress={() => setExpanded((value) => !value)}
+          activeOpacity={0.75}
+        >
+          <Ionicons name={isDone ? 'bulb-outline' : 'sync-circle'} size={16} color={isDone ? icon : tint} />
+          <ThemedText style={styles.thinkingSummary} numberOfLines={1}>
+            {summary}
+          </ThemedText>
+          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={15} color={icon} />
+        </TouchableOpacity>
+        {expanded && Boolean(message.content?.content) && (
+          <View style={[styles.thinkingBody, { borderTopColor: border }]}>
+            <ThemedText style={[styles.thinkingText, { color: textSecondary }]}>{message.content.content}</ThemedText>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${seconds % 60}s`;
 }
 
 const styles = StyleSheet.create({
@@ -168,5 +220,32 @@ const styles = StyleSheet.create({
   },
   planEntry: {
     paddingVertical: 2,
+  },
+  thinkingContainer: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    maxWidth: '90%',
+    overflow: 'hidden',
+  },
+  thinkingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  thinkingSummary: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  thinkingBody: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  thinkingText: {
+    fontSize: 13,
+    lineHeight: 19,
   },
 });
