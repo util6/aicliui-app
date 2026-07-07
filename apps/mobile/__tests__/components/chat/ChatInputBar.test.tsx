@@ -40,4 +40,29 @@ describe('ChatInputBar slash commands', () => {
 
     expect(input.props.value).toBe('/review ');
   });
+
+  it('selects the first slash command on submit instead of sending a partial query', () => {
+    const onSend = jest.fn();
+    const screen = render(
+      <ChatInputBar
+        onSend={onSend}
+        slashCommands={[
+          {
+            name: 'review',
+            description: 'Review current changes',
+            kind: 'template',
+            source: 'acp',
+            selectionBehavior: 'insert',
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('chat.inputPlaceholder');
+    fireEvent.changeText(input, '/rev');
+    fireEvent(input, 'submitEditing');
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input.props.value).toBe('/review ');
+  });
 });

@@ -28,6 +28,11 @@ export function ChatInputBar({ onSend, onStop, isStreaming, disabled, slashComma
   const showSlashCommands = matchingSlashCommands.length > 0;
 
   const handleSend = () => {
+    if (showSlashCommands) {
+      handleSelectSlashCommand(matchingSlashCommands[0]);
+      return;
+    }
+
     const trimmed = text.trim();
     if (!trimmed) return;
     onSend(trimmed);
