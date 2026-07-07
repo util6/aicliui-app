@@ -68,7 +68,13 @@ function RuntimeProbe() {
       </Text>
       <Text testID='thought'>{thought?.subject ?? ''}</Text>
       <Text testID='messages'>{messages.map((message) => message.content?.content ?? '').join('|')}</Text>
+      <Text testID='message-count'>{messages.length}</Text>
       <Text testID='message-types'>{messages.map((message) => message.type).join('|')}</Text>
+      <Text testID='message-meta'>
+        {messages
+          .map((message) => `${message.msg_id ?? ''}:${message.position ?? ''}:${message.status ?? ''}:${message.created_at ?? message.createdAt ?? ''}`)
+          .join('|')}
+      </Text>
       <Text testID='permission-titles'>
         {messages
           .filter((message) => message.type === 'acp_permission')
@@ -429,6 +435,41 @@ describe('ChatContext runtime state', () => {
         conversation_id: 'conv-1',
       }),
     );
+  });
+
+  it('merges AionUi message.userCreated events into optimistic user messages', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('can-send').props.children).toBe('can-send'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('send'));
+    });
+
+    const sendPayload = mockRequest.mock.calls.find(([name]) => name === 'chat.send.message')?.[1] as
+      | { msg_id?: string }
+      | undefined;
+    expect(sendPayload?.msg_id).toBeTruthy();
+
+    await act(async () => {
+      listeners.get('message.userCreated')?.({
+        conversation_id: 'conv-1',
+        msg_id: sendPayload?.msg_id,
+        content: 'hello',
+        position: 'right',
+        status: 'finish',
+        hidden: false,
+        created_at: 4321,
+      });
+    });
+
+    expect(screen.getByTestId('message-count').props.children).toBe(1);
+    expect(screen.getByTestId('messages').props.children).toBe('hello');
+    expect(screen.getByTestId('message-meta').props.children).toBe(`${sendPayload?.msg_id}:right:finish:4321`);
   });
 
   it('removes a queued command before the queue drains', async () => {

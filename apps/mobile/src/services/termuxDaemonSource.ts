@@ -694,6 +694,18 @@ function buildTurnCompletedEvent({ conversation, conversationId, turnId, backend
   };
 }
 
+function buildUserCreatedEvent(message) {
+  return {
+    conversation_id: message.conversation_id,
+    msg_id: message.msg_id,
+    content: message.content.content,
+    position: 'right',
+    status: 'finish',
+    hidden: false,
+    created_at: message.createdAt,
+  };
+}
+
 function turnStateFromRuntime(runtime) {
   if (runtime.state === 'idle') return 'ai_waiting_input';
   if (runtime.state === 'waiting_confirmation') return 'ai_waiting_confirmation';
@@ -809,7 +821,8 @@ async function sendMessage(params, emit) {
   conversation.runtime = runningRuntimeSummary('running', assistantMsgId, pendingConfirmationCount(conversationId));
   conversation.modifyTime = Date.now();
 
-  await addTextMessage(conversationId, userMsgId, 'right', input);
+  const userMessage = await addTextMessage(conversationId, userMsgId, 'right', input);
+  emit('message.userCreated', buildUserCreatedEvent(userMessage));
   emit('chat.response.stream', { type: 'start', msg_id: assistantMsgId, conversation_id: conversationId, data: null });
 
   try {

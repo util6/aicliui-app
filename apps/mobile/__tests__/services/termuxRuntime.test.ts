@@ -142,6 +142,11 @@ describe('termuxRuntime', () => {
     expect(script).toContain("detail: ''");
     expect(script).toContain('last_message: {');
     expect(script).toContain('return message;');
+    expect(script).toContain("emit('message.userCreated', buildUserCreatedEvent(userMessage));");
+    expect(script).toContain('function buildUserCreatedEvent(message)');
+    expect(script).toContain("position: 'right'");
+    expect(script).toContain("status: 'finish'");
+    expect(script).toContain('created_at: message.createdAt');
     expect(script).toContain('function parseModelOptions(raw, fallback)');
     expect(script).toContain("if (key === 'conversation.get') return conversations.get(requiredString(params.conversation_id)) || null;");
     expect(script).toContain("if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);");

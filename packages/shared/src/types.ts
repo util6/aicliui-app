@@ -162,6 +162,16 @@ export type ConversationTurnCompletedEvent = {
   };
 };
 
+export type ConversationUserCreatedEvent = {
+  conversation_id: string;
+  msg_id: string;
+  content: string;
+  position: 'right';
+  status: 'finish';
+  hidden: boolean;
+  created_at: number;
+};
+
 export type IResponseMessage = {
   type: string;
   data: unknown;

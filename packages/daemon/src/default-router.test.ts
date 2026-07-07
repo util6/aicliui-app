@@ -400,18 +400,27 @@ describe('default bridge routes', () => {
 
     expect(messages.map((message) => message.name)).toEqual([
       'subscribe.callback-chat.send.messagem_send',
+      'message.userCreated',
       'chat.response.stream',
       'chat.response.stream',
       'chat.response.stream',
       'turn.completed',
     ]);
-    expect(messages[1].data).toMatchObject({ type: 'start', conversation_id: 'id-1' });
-    expect(messages[2].data).toMatchObject({
+    expect(messages[1].data).toMatchObject({
+      conversation_id: 'id-1',
+      msg_id: 'user-msg-1',
+      content: 'hello daemon',
+      position: 'right',
+      status: 'finish',
+      hidden: false,
+    });
+    expect(messages[2].data).toMatchObject({ type: 'start', conversation_id: 'id-1' });
+    expect(messages[3].data).toMatchObject({
       type: 'content',
       conversation_id: 'id-1',
       data: { content: 'Local daemon received: hello daemon' },
     });
-    expect(messages[3].data).toMatchObject({ type: 'finish', conversation_id: 'id-1' });
+    expect(messages[4].data).toMatchObject({ type: 'finish', conversation_id: 'id-1' });
 
     const [history] = await router.handleIncoming({
       name: 'subscribe-database.get-conversation-messages',
@@ -477,24 +486,25 @@ describe('default bridge routes', () => {
 
     expect(messages.map((message) => message.name)).toEqual([
       'subscribe.callback-chat.send.messagem_send_adapter',
+      'message.userCreated',
       'chat.response.stream',
       'chat.response.stream',
       'chat.response.stream',
       'chat.response.stream',
       'turn.completed',
     ]);
-    expect(messages[1].data).toMatchObject({ type: 'start', conversation_id: 'adapter-id-1' });
-    expect(messages[2].data).toMatchObject({
+    expect(messages[2].data).toMatchObject({ type: 'start', conversation_id: 'adapter-id-1' });
+    expect(messages[3].data).toMatchObject({
       type: 'thought',
       conversation_id: 'adapter-id-1',
       data: { subject: 'OpenCode', description: 'received use opencode' },
     });
-    expect(messages[3].data).toMatchObject({
+    expect(messages[4].data).toMatchObject({
       type: 'content',
       conversation_id: 'adapter-id-1',
       data: { content: 'adapter response' },
     });
-    expect(messages[4].data).toMatchObject({ type: 'finish', conversation_id: 'adapter-id-1' });
+    expect(messages[5].data).toMatchObject({ type: 'finish', conversation_id: 'adapter-id-1' });
 
     const [history] = await router.handleIncoming({
       name: 'subscribe-database.get-conversation-messages',
@@ -628,19 +638,20 @@ describe('default bridge routes', () => {
 
     expect(messages.map((message) => message.name)).toEqual([
       'subscribe.callback-chat.send.messagem_send_failure',
+      'message.userCreated',
       'chat.response.stream',
       'chat.response.stream',
       'chat.response.stream',
       'turn.completed',
     ]);
     expect(messages[0].data).toEqual({ success: true });
-    expect(messages[1].data).toMatchObject({ type: 'start', conversation_id: 'failure-id-1' });
-    expect(messages[2].data).toMatchObject({
+    expect(messages[2].data).toMatchObject({ type: 'start', conversation_id: 'failure-id-1' });
+    expect(messages[3].data).toMatchObject({
       type: 'content',
       conversation_id: 'failure-id-1',
       data: { content: 'Codex CLI runtime failed: codex failed apiKey=[redacted]' },
     });
-    expect(messages[3].data).toMatchObject({ type: 'finish', conversation_id: 'failure-id-1' });
+    expect(messages[4].data).toMatchObject({ type: 'finish', conversation_id: 'failure-id-1' });
     expect(JSON.stringify(messages)).not.toContain('local-value');
 
     const [history] = await router.handleIncoming({
@@ -737,6 +748,7 @@ describe('default bridge routes', () => {
 
     expect(messages.map((message) => message.name)).toEqual([
       'subscribe.callback-chat.send.messagem_send_stream',
+      'message.userCreated',
       'chat.response.stream',
       'chat.response.stream',
       'chat.response.stream',
@@ -747,27 +759,27 @@ describe('default bridge routes', () => {
       'chat.response.stream',
       'turn.completed',
     ]);
-    expect(messages[2].data).toMatchObject({
+    expect(messages[3].data).toMatchObject({
       type: 'thinking',
       conversation_id: 'stream-id-1',
       data: { content: 'Inspecting workspace', subject: 'OpenCode', status: 'thinking' },
     });
-    expect(messages[3].data).toMatchObject({
+    expect(messages[4].data).toMatchObject({
       type: 'tool_group',
       conversation_id: 'stream-id-1',
       data: [expect.objectContaining({ callId: 'tool-1', call_id: 'tool-1', name: 'read' })],
     });
-    expect(messages[4].data).toMatchObject({
+    expect(messages[5].data).toMatchObject({
       type: 'acp_tool_call',
       conversation_id: 'stream-id-1',
       data: { update: { tool_call_id: 'acp-tool-1', status: 'in_progress' } },
     });
-    expect(messages[5].data).toMatchObject({
+    expect(messages[6].data).toMatchObject({
       type: 'acp_context_usage',
       conversation_id: 'stream-id-1',
       data: { used: 12, size: 100 },
     });
-    expect(messages[6].data).toMatchObject({
+    expect(messages[7].data).toMatchObject({
       type: 'plan',
       conversation_id: 'stream-id-1',
       data: { session_id: 'plan-1' },

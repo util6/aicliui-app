@@ -6,6 +6,7 @@ import type {
   ConversationRuntimeSummary,
   ConversationStatus,
   ConversationTurnCompletedEvent,
+  ConversationUserCreatedEvent,
   EnsureConversationRuntimeResponse,
   RuntimeStatus,
   SetConfigOptionResponse,
@@ -151,12 +152,13 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       runtime: runningRuntimeSummary('running', assistantMsgId, pendingConfirmationCount(pendingConfirmations, conversationId)),
     });
 
-    store.addTextMessage({
+    const userMessage = store.addTextMessage({
       conversationId,
       msgId: userMsgId,
       position: 'right',
       content: input,
     });
+    context.emit('message.userCreated', buildUserCreatedEvent(userMessage));
 
     context.emit('chat.response.stream', {
       type: 'start',
@@ -532,6 +534,18 @@ function buildTurnCompletedEvent({
       status: 'finish',
       created_at: assistantMessage.createdAt,
     },
+  };
+}
+
+function buildUserCreatedEvent(message: StoredMessage): ConversationUserCreatedEvent {
+  return {
+    conversation_id: message.conversation_id,
+    msg_id: message.msg_id,
+    content: message.content.content,
+    position: 'right',
+    status: 'finish',
+    hidden: false,
+    created_at: message.createdAt,
   };
 }
 

@@ -54,4 +54,12 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('last_message: {');
     expect(TERMUX_DAEMON_SOURCE).toContain('return message;');
   });
+
+  it('emits AionUi-style message.userCreated events after persisting local user messages', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain("emit('message.userCreated', buildUserCreatedEvent(userMessage));");
+    expect(TERMUX_DAEMON_SOURCE).toContain('function buildUserCreatedEvent(message)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("position: 'right'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("status: 'finish'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('created_at: message.createdAt');
+  });
 });

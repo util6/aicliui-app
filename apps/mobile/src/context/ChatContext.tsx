@@ -16,6 +16,17 @@ type PendingConfirmation = {
   [key: string]: unknown;
 };
 
+type UserCreatedMessage = {
+  conversation_id?: unknown;
+  msg_id?: unknown;
+  content?: unknown;
+  position?: unknown;
+  status?: unknown;
+  hidden?: unknown;
+  created_at?: unknown;
+  createdAt?: unknown;
+};
+
 type RuntimeSummary = {
   state: 'idle' | 'starting' | 'running' | 'cancelling' | 'waiting_confirmation';
   can_send_message: boolean;
@@ -514,6 +525,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     });
 
     // Confirmation lifecycle events
+    const unsubUserCreated = bridge.on('message.userCreated', (data: unknown) => {
+      const message = normalizeUserCreatedMessage(data);
+      if (!message || message.conversation_id !== conversationId) return;
+      setMessages((prev) => mergeUserCreatedMessage(prev, message));
+    });
+
     const unsubConfirmAdd = bridge.on('confirmation.add', (data: unknown) => {
       const confirmation = data as PendingConfirmation;
       if (confirmation.conversation_id !== conversationId) return;
@@ -543,6 +560,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       unsub();
+      unsubUserCreated();
       unsubConfirmAdd();
       unsubConfirmUpdate();
       unsubConfirmRemove();
@@ -721,6 +739,46 @@ function isErrorStreamMessage(message: IResponseMessage): boolean {
     message.data !== null &&
     (message.data as { type?: unknown }).type === 'error'
   );
+}
+
+function normalizeUserCreatedMessage(value: unknown): TMessage | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const payload = value as UserCreatedMessage;
+  if (typeof payload.conversation_id !== 'string' || payload.conversation_id.length === 0) return null;
+  if (typeof payload.msg_id !== 'string' || payload.msg_id.length === 0) return null;
+  const createdAt = payload.created_at ?? payload.createdAt;
+  if (typeof createdAt !== 'number') return null;
+
+  return {
+    id: payload.msg_id,
+    msg_id: payload.msg_id,
+    conversation_id: payload.conversation_id,
+    type: 'text',
+    position: 'right',
+    status: payload.status === 'finish' ? 'finish' : undefined,
+    hidden: payload.hidden === true,
+    createdAt,
+    created_at: createdAt,
+    content: {
+      content: typeof payload.content === 'string' ? payload.content : String(payload.content ?? ''),
+    },
+  };
+}
+
+function mergeUserCreatedMessage(messages: TMessage[], incoming: TMessage): TMessage[] {
+  let changed = false;
+  const next = messages.map((message) => {
+    if (message.type !== 'text' || message.position !== 'right' || message.msg_id !== incoming.msg_id) {
+      return message;
+    }
+    changed = true;
+    return {
+      ...message,
+      ...incoming,
+      id: message.id,
+    };
+  });
+  return changed ? next : composeMessage(incoming, messages);
 }
 
 function normalizeContextUsage(value: unknown): { used: number; size: number } | null {
