@@ -171,6 +171,62 @@ describe('default bridge routes', () => {
     ]);
   });
 
+  it('passes selected files from chat sends to the backend adapter', async () => {
+    let nextId = 0;
+    const store = new InMemoryConversationStore({
+      now: () => 3500 + nextId,
+      id: () => `files-id-${++nextId}`,
+    });
+    const seen: unknown[] = [];
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'opencode',
+          name: 'opencode',
+          label: 'OpenCode',
+          probe: async () => ({ backend: 'opencode', state: 'ready' }),
+          sendMessage: async function* (input) {
+            seen.push(input);
+            yield { type: 'content', content: 'adapter response' };
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_files',
+        data: {
+          type: 'acp',
+          name: 'hello',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'opencode' },
+        },
+      },
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-chat.send.message',
+      data: {
+        id: 'm_send_files',
+        data: {
+          conversation_id: 'files-id-1',
+          msg_id: 'user-msg-files',
+          input: 'use files',
+          files: ['/tmp/project/README.md', 123, '/tmp/project/src/app.ts'],
+        },
+      },
+    });
+
+    expect(seen).toEqual([
+      expect.objectContaining({
+        files: ['/tmp/project/README.md', '/tmp/project/src/app.ts'],
+      }),
+    ]);
+  });
+
   it('returns slash commands from the active conversation backend adapter', async () => {
     let nextId = 0;
     const store = new InMemoryConversationStore({

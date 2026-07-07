@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildGeminiCommand, parseGeminiStreamJsonLine } from './agent-adapters/gemini-adapter.js';
 import { buildOpenCodeServeCommand, createOpenCodeAdapter } from './agent-adapters/opencode-adapter.js';
 import { createAgentAdapterRegistry } from './agent-adapters/registry.js';
@@ -191,6 +194,66 @@ describe('agent adapters', () => {
         },
       },
     ]);
+  });
+
+  it('passes selected files to OpenCode slash commands as command parts', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'aicliui-opencode-'));
+    try {
+      const filePath = join(tempDir, 'README.md');
+      await writeFile(filePath, '# hello', 'utf8');
+      const calls: unknown[] = [];
+      const adapter = createOpenCodeAdapter(
+        {
+          commandExists: async () => true,
+        },
+        {
+          client: {
+            sendPrompt: async (input) => {
+              calls.push({ type: 'prompt', input });
+              return { sessionId: 'ses_reuse', text: 'prompt response' };
+            },
+            sendCommand: async (input) => {
+              calls.push({ type: 'command', input });
+              return { sessionId: 'ses_reuse', text: 'command response' };
+            },
+            listCommands: async () => [{ command: 'review', description: 'Review code' }],
+          },
+        },
+      );
+
+      const events = [];
+      for await (const event of adapter.sendMessage({
+        conversationId: 'conv-1',
+        input: '/review selected files',
+        workspace: tempDir,
+        files: [filePath],
+      })) {
+        events.push(event);
+      }
+
+      expect(events).toEqual([
+        { type: 'thought', subject: 'OpenCode', description: 'session ses_reuse' },
+        { type: 'content', content: 'command response' },
+      ]);
+      expect(calls).toEqual([
+        {
+          type: 'command',
+          input: expect.objectContaining({
+            command: 'review',
+            parts: [
+              {
+                type: 'file',
+                mime: 'text/markdown',
+                filename: 'README.md',
+                url: expect.stringMatching(/README\.md$/),
+              },
+            ],
+          }),
+        },
+      ]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('uses an OpenCode server manager when a direct client was not injected', async () => {

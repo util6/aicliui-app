@@ -1,6 +1,9 @@
+import { stat } from 'node:fs/promises';
+import { basename } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { AgentHealth } from '@aicliui/shared';
 import type { CliAgentAdapter, CommandRunner, CommandSpec, SendMessageInput } from './types.js';
-import type { OpenCodeSessionClient } from './opencode-client.js';
+import type { OpenCodeCommandPart, OpenCodeSessionClient } from './opencode-client.js';
 import type { OpenCodeServerManager } from './opencode-server.js';
 
 export type OpenCodeServeCommandOptions = {
@@ -43,6 +46,7 @@ export function createOpenCodeAdapter(
         const slashCommand = parseOpenCodeSlashCommand(input.input);
         let result;
         if (slashCommand && (await isKnownOpenCodeCommand(activeClient, slashCommand.command, input.workspace))) {
+          const parts = await buildOpenCodeCommandParts(input.files);
           result = await activeClient.sendCommand({
             command: slashCommand.command,
             arguments: slashCommand.arguments,
@@ -50,6 +54,7 @@ export function createOpenCodeAdapter(
             directory: input.workspace,
             model: input.model,
             agent: input.sessionMode,
+            ...(parts.length ? { parts } : {}),
           });
         } else {
           result = await activeClient.sendPrompt({
@@ -101,6 +106,41 @@ async function isKnownOpenCodeCommand(
   } catch {
     return false;
   }
+}
+
+async function buildOpenCodeCommandParts(files: string[] = []): Promise<OpenCodeCommandPart[]> {
+  const parts: OpenCodeCommandPart[] = [];
+  for (const filePath of files) {
+    try {
+      const fileStats = await stat(filePath);
+      if (!fileStats.isFile()) continue;
+      parts.push({
+        type: 'file',
+        mime: fileMimeType(filePath),
+        filename: basename(filePath),
+        url: pathToFileURL(filePath).toString(),
+      });
+    } catch {
+      // Ignore files that disappeared between selection and send.
+    }
+  }
+  return parts;
+}
+
+function fileMimeType(path: string): string {
+  const ext = path.toLowerCase().split('.').pop() ?? '';
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'svg') return 'image/svg+xml';
+  if (ext === 'bmp') return 'image/bmp';
+  if (ext === 'avif') return 'image/avif';
+  if (ext === 'json') return 'application/json';
+  if (ext === 'html' || ext === 'htm') return 'text/html';
+  if (ext === 'css') return 'text/css';
+  if (ext === 'csv') return 'text/csv';
+  if (ext === 'md' || ext === 'markdown') return 'text/markdown';
+  return 'text/plain';
 }
 
 export function parseOpenCodeSlashCommand(input: string): { command: string; arguments: string } | null {

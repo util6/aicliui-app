@@ -18,6 +18,7 @@ export type SendMessageInput = {
   workspace?: string;
   model?: string;
   sessionMode?: string;
+  files?: string[];
 };
 
 export type SlashCommandInfo = {

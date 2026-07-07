@@ -69,6 +69,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     const params = asRecord(data);
     const conversationId = stringParam(params.conversation_id);
     const input = stringParam(params.input);
+    const files = stringArrayParam(params.files);
     const userMsgId = typeof params.msg_id === 'string' ? params.msg_id : undefined;
     const assistantMsgId = `assistant_${userMsgId || Date.now().toString(36)}`;
     const conversation = store.getConversation(conversationId);
@@ -100,6 +101,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       workspace: conversation?.extra.workspace,
       model: typeof conversation?.extra.currentModelId === 'string' ? conversation.extra.currentModelId : undefined,
       sessionMode: typeof conversation?.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined,
+      ...(files.length ? { files } : {}),
     })) {
       if (event.type === 'thought') {
         context.emit('chat.response.stream', {
@@ -183,6 +185,10 @@ function stringParam(value: unknown, fallback?: string): string {
 
 function numberParam(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function stringArrayParam(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
 function isModel(value: unknown): value is { id: string; useModel: string } {
