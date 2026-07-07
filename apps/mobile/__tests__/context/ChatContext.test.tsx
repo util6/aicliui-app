@@ -31,6 +31,7 @@ function RuntimeProbe() {
     isStreaming,
     canSendMessage,
     queuedCommands,
+    queuedCommandWarning,
     thought,
     messages,
     contextUsage,
@@ -56,6 +57,7 @@ function RuntimeProbe() {
         {queuedCommands.map((command) => `${command.input}:${command.files.length}`).join('|')}
       </Text>
       <Text testID='queue-paused'>{isQueuePaused ? 'paused' : 'active'}</Text>
+      <Text testID='queue-warning'>{queuedCommandWarning ?? ''}</Text>
       <Text testID='thought'>{thought?.subject ?? ''}</Text>
       <Text testID='messages'>{messages.map((message) => message.content?.content ?? '').join('|')}</Text>
       <Text testID='message-types'>{messages.map((message) => message.type).join('|')}</Text>
@@ -89,6 +91,15 @@ function RuntimeProbe() {
       </Text>
       <Text testID='send-files' onPress={() => sendMessage('with files', ['src/App.tsx', 'src/App.tsx', ''])}>
         send-files
+      </Text>
+      <Text
+        testID='send-too-many-files'
+        onPress={() => sendMessage(
+          'too many files',
+          Array.from({ length: 51 }, (_, index) => `src/file-${index}.ts`),
+        )}
+      >
+        send-too-many-files
       </Text>
       <Text testID='remove-first-queued' onPress={() => {
         const [first] = queuedCommands;
@@ -519,6 +530,50 @@ describe('ChatContext runtime state', () => {
     expect(screen.getByTestId('queued-items').props.children).toBe('second:0');
   });
 
+  it('rejects queue overflow without dropping existing queued commands', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('can-send').props.children).toBe('can-send'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('send'));
+      for (let index = 0; index < 21; index += 1) {
+        fireEvent.press(screen.getByTestId('send-second'));
+      }
+    });
+
+    expect(screen.getByTestId('queued-count').props.children).toBe(20);
+    expect(screen.getByTestId('queue-warning').props.children).toBe('queueFull');
+
+    const lastPersisted = mockAsyncStorage.setItem.mock.calls
+      .filter(([key]) => key === 'chat-command-queue/conv-1')
+      .at(-1)?.[1];
+    const payload = JSON.parse(lastPersisted ?? '{}') as { items?: unknown[] };
+    expect(payload.items).toHaveLength(20);
+  });
+
+  it('rejects queued commands with too many files', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('can-send').props.children).toBe('can-send'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('send'));
+      fireEvent.press(screen.getByTestId('send-too-many-files'));
+    });
+
+    expect(screen.getByTestId('queued-count').props.children).toBe(0);
+    expect(screen.getByTestId('queue-warning').props.children).toBe('tooManyFiles');
+  });
+
   it('restores queued commands from local storage for the active conversation', async () => {
     mockAsyncStorage.getItem.mockImplementation((key: string) => {
       if (key === 'chat-command-queue/conv-1') {
@@ -535,6 +590,18 @@ describe('ChatContext runtime state', () => {
               input: '   ',
               files: [],
               createdAt: 456,
+            },
+            {
+              id: 'invalid-long',
+              input: 'x'.repeat(20001),
+              files: [],
+              createdAt: 789,
+            },
+            {
+              id: 'invalid-files',
+              input: 'too many files',
+              files: Array.from({ length: 51 }, (_, index) => `src/file-${index}.ts`),
+              createdAt: 999,
             },
           ]),
         );

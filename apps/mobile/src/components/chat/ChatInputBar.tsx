@@ -12,9 +12,12 @@ type ChatInputBarProps = {
   isStreaming?: boolean;
   canSend?: boolean;
   queuedCount?: number;
+  queueWarning?: QueueWarningReason | null;
   disabled?: boolean;
   slashCommands?: SlashCommandItem[];
 };
+
+type QueueWarningReason = 'emptyInput' | 'inputTooLong' | 'tooManyFiles' | 'queueFull' | 'queueTooLarge';
 
 export function ChatInputBar({
   onSend,
@@ -22,6 +25,7 @@ export function ChatInputBar({
   isStreaming,
   canSend = true,
   queuedCount = 0,
+  queueWarning = null,
   disabled,
   slashCommands = [],
 }: ChatInputBarProps) {
@@ -31,6 +35,7 @@ export function ChatInputBar({
   const surface = useThemeColor({}, 'surface');
   const border = useThemeColor({}, 'border');
   const error = useThemeColor({}, 'error');
+  const warning = useThemeColor({}, 'warning');
   const textColor = useThemeColor({}, 'text');
   const textSecondary = useThemeColor({}, 'textSecondary');
   const [text, setText] = useState('');
@@ -66,6 +71,14 @@ export function ChatInputBar({
 
   return (
     <View style={[styles.container, { borderTopColor: border, backgroundColor: background }]}>
+      {queueWarning && (
+        <View style={styles.queueWarning}>
+          <Ionicons name='warning-outline' size={13} color={warning} />
+          <ThemedText style={[styles.queueWarningText, { color: warning }]} numberOfLines={2}>
+            {getQueueWarningText(t, queueWarning)}
+          </ThemedText>
+        </View>
+      )}
       {queuedCount > 0 && (
         <View style={styles.queueStatus}>
           <Ionicons name='list-outline' size={13} color={textSecondary} />
@@ -134,6 +147,28 @@ export function ChatInputBar({
   );
 }
 
+function getQueueWarningText(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  reason: QueueWarningReason,
+): string {
+  const warningKeyMap: Record<QueueWarningReason, string> = {
+    emptyInput: 'chat.queuedCommandEmptyInput',
+    inputTooLong: 'chat.queuedCommandInputTooLong',
+    tooManyFiles: 'chat.queuedCommandTooManyFiles',
+    queueFull: 'chat.queuedCommandQueueFull',
+    queueTooLarge: 'chat.queuedCommandQueueTooLarge',
+  };
+  const defaultValueMap: Record<QueueWarningReason, string> = {
+    emptyInput: 'Queued commands cannot be empty.',
+    inputTooLong: 'This queued command is too long. Shorten it before sending.',
+    tooManyFiles: 'Too many files are attached to this queued command.',
+    queueFull: 'Queue is full. Remove a command before adding more.',
+    queueTooLarge: 'Queue data is too large. Remove some queued commands first.',
+  };
+
+  return t(warningKeyMap[reason], { defaultValue: defaultValueMap[reason] });
+}
+
 const styles = StyleSheet.create({
   container: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -183,6 +218,19 @@ const styles = StyleSheet.create({
   },
   queueStatusText: {
     fontSize: 12,
+    fontWeight: '600',
+  },
+  queueWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 6,
+  },
+  queueWarningText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '600',
   },
   inputRow: {

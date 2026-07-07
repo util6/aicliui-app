@@ -116,6 +116,11 @@
     "clearQueuedCommands": "Clear",
     "queuePaused": "Paused",
     "resumeQueuedCommands": "Resume",
+    "queuedCommandEmptyInput": "Queued commands cannot be empty.",
+    "queuedCommandInputTooLong": "This queued command is too long. Shorten it before sending.",
+    "queuedCommandTooManyFiles": "Too many files are attached to this queued command.",
+    "queuedCommandQueueFull": "Queue is full. Remove a command before adding more.",
+    "queuedCommandQueueTooLarge": "Queue data is too large. Remove some queued commands first.",
     "toolSummaryExecuting": "Executing...",
     "toolSummaryCompleted": "Executed {{count}} steps",
     "toolSummaryWithErrors": "Executed {{count}} steps ({{errorCount}} failed)"

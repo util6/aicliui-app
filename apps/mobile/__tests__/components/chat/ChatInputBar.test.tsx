@@ -116,4 +116,11 @@ describe('ChatInputBar slash commands', () => {
     fireEvent.press(screen.getByText('stop-circle'));
     expect(onStop).toHaveBeenCalledTimes(1);
   });
+
+  it('shows queued command validation warnings', () => {
+    const screen = render(<ChatInputBar onSend={jest.fn()} queueWarning='queueFull' />);
+
+    expect(screen.getByText('warning-outline')).toBeTruthy();
+    expect(screen.getByText('Queue is full. Remove a command before adding more.')).toBeTruthy();
+  });
 });

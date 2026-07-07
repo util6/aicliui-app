@@ -38,11 +38,22 @@ export type QueuedCommand = {
 };
 
 export type QueuedCommandMoveDirection = 'up' | 'down';
+export type QueuedCommandWarningReason =
+  | 'emptyInput'
+  | 'inputTooLong'
+  | 'tooManyFiles'
+  | 'queueFull'
+  | 'queueTooLarge';
 
 type QueuedCommandState = {
   items: QueuedCommand[];
   isPaused: boolean;
 };
+
+const MAX_QUEUED_COMMANDS = 20;
+const MAX_QUEUED_COMMAND_INPUT_LENGTH = 20_000;
+const MAX_QUEUED_COMMAND_FILES = 50;
+const MAX_QUEUED_COMMAND_STATE_BYTES = 256 * 1024;
 
 type ChatContextType = {
   messages: TMessage[];
@@ -50,6 +61,7 @@ type ChatContextType = {
   canSendMessage: boolean;
   queuedCommands: QueuedCommand[];
   isQueuePaused: boolean;
+  queuedCommandWarning: QueuedCommandWarningReason | null;
   conversationId: string | null;
   confirmations: any[];
   contextUsage: { used: number; size: number } | null;
@@ -73,6 +85,7 @@ const ChatContext = createContext<ChatContextType>({
   canSendMessage: true,
   queuedCommands: [],
   isQueuePaused: false,
+  queuedCommandWarning: null,
   conversationId: null,
   confirmations: [],
   contextUsage: null,
@@ -94,6 +107,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [canSendMessage, setCanSendMessageState] = useState(true);
   const [queuedCommands, setQueuedCommandsState] = useState<QueuedCommand[]>([]);
   const [isQueuePaused, setIsQueuePausedState] = useState(false);
+  const [queuedCommandWarning, setQueuedCommandWarning] = useState<QueuedCommandWarningReason | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [confirmations, setConfirmations] = useState<any[]>([]);
   const [contextUsage, setContextUsage] = useState<{ used: number; size: number } | null>(null);
@@ -173,6 +187,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     (text: string, files?: string[], options?: ExecuteSendOptions) => {
       const trimmed = text.trim();
       if (!conversationId || !trimmed) return false;
+      setQueuedCommandWarning(null);
 
       const msgId = uuid();
       const userMsg: TMessage = {
@@ -211,15 +226,25 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     (text: string, files?: string[]) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      setQueuedCommands((prev) => [
-        ...prev,
-        {
-          id: uuid(),
-          input: trimmed,
-          files: uniqueFiles(files),
-          createdAt: Date.now(),
-        },
-      ]);
+      const item: QueuedCommand = {
+        id: uuid(),
+        input: trimmed,
+        files: uniqueFiles(files),
+        createdAt: Date.now(),
+      };
+      const nextState: QueuedCommandState = {
+        items: [...queuedCommandsRef.current, item],
+        isPaused: isQueuePausedRef.current,
+      };
+      const failureReason = getQueuedCommandValidationFailureReason(nextState);
+
+      if (failureReason) {
+        setQueuedCommandWarning(failureReason);
+        return;
+      }
+
+      setQueuedCommandWarning(null);
+      setQueuedCommands(nextState.items);
     },
     [setQueuedCommands],
   );
@@ -318,6 +343,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setConfirmations([]);
     setContextUsage(null);
     setSlashCommands([]);
+    setQueuedCommandWarning(null);
     setThought(null);
 
     try {
@@ -551,6 +577,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     (commandId: string) => {
       setQueuedCommands((prev) => prev.filter((command) => command.id !== commandId));
       setQueuePaused(false);
+      setQueuedCommandWarning(null);
     },
     [setQueuePaused, setQueuedCommands],
   );
@@ -567,10 +594,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const clearQueuedCommands = useCallback(() => {
     setQueuedCommands([]);
     setQueuePaused(false);
+    setQueuedCommandWarning(null);
   }, [setQueuePaused, setQueuedCommands]);
 
   const resumeQueuedCommands = useCallback(() => {
     setQueuePaused(false);
+    setQueuedCommandWarning(null);
     drainNextQueuedCommand();
   }, [drainNextQueuedCommand, setQueuePaused]);
 
@@ -621,6 +650,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         canSendMessage,
         queuedCommands,
         isQueuePaused,
+        queuedCommandWarning,
         conversationId,
         confirmations,
         contextUsage,
@@ -749,6 +779,39 @@ function restoreQueuedCommand(commands: QueuedCommand[], failedCommand: QueuedCo
   return [failedCommand, ...commands.filter((command) => command.id !== failedCommand.id)];
 }
 
+function getQueuedCommandValidationFailureReason(state: QueuedCommandState): QueuedCommandWarningReason | null {
+  if (state.items.length > MAX_QUEUED_COMMANDS) {
+    return 'queueFull';
+  }
+
+  if (state.items.some((item) => item.input.trim().length === 0)) {
+    return 'emptyInput';
+  }
+
+  if (state.items.some((item) => item.input.length > MAX_QUEUED_COMMAND_INPUT_LENGTH)) {
+    return 'inputTooLong';
+  }
+
+  if (state.items.some((item) => item.files.length > MAX_QUEUED_COMMAND_FILES)) {
+    return 'tooManyFiles';
+  }
+
+  if (measureQueuedCommandStateBytes(state) > MAX_QUEUED_COMMAND_STATE_BYTES) {
+    return 'queueTooLarge';
+  }
+
+  return null;
+}
+
+function measureQueuedCommandStateBytes(state: QueuedCommandState): number {
+  const serialized = JSON.stringify(state);
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(serialized).length;
+  }
+
+  return serialized.length;
+}
+
 function moveQueuedCommandInDirection(
   commands: QueuedCommand[],
   commandId: string,
@@ -789,25 +852,37 @@ function normalizeStoredQueuedCommandState(value: string | null): QueuedCommandS
   try {
     const parsed = JSON.parse(value) as unknown;
     if (Array.isArray(parsed)) {
-      return {
-        items: normalizeStoredQueuedCommandItems(parsed),
-        isPaused: false,
-      };
+      return normalizeQueuedCommandState({ items: parsed, isPaused: false });
     }
     if (typeof parsed !== 'object' || parsed === null) return { items: [], isPaused: false };
-    const state = parsed as Partial<QueuedCommandState>;
-    const items = Array.isArray(state.items) ? normalizeStoredQueuedCommandItems(state.items) : [];
-    return {
-      items,
-      isPaused: items.length > 0 ? state.isPaused === true : false,
-    };
+    return normalizeQueuedCommandState(parsed);
   } catch {
     return { items: [], isPaused: false };
   }
 }
 
-function normalizeStoredQueuedCommandItems(items: unknown[]): QueuedCommand[] {
-  return items.map(normalizeStoredQueuedCommand).filter((item): item is QueuedCommand => item !== null);
+function normalizeQueuedCommandState(value: unknown): QueuedCommandState {
+  if (typeof value !== 'object' || value === null) return { items: [], isPaused: false };
+  const state = value as Partial<QueuedCommandState>;
+  const rawItems = Array.isArray(state.items) ? state.items : [];
+  const items: QueuedCommand[] = [];
+
+  for (const rawItem of rawItems) {
+    if (items.length >= MAX_QUEUED_COMMANDS) break;
+    const item = normalizeStoredQueuedCommand(rawItem);
+    if (!item) continue;
+    const nextState = {
+      items: [...items, item],
+      isPaused: state.isPaused === true,
+    };
+    if (measureQueuedCommandStateBytes(nextState) > MAX_QUEUED_COMMAND_STATE_BYTES) break;
+    items.push(item);
+  }
+
+  return {
+    items,
+    isPaused: items.length > 0 ? state.isPaused === true : false,
+  };
 }
 
 function normalizeStoredQueuedCommand(value: unknown): QueuedCommand | null {
@@ -820,11 +895,15 @@ function normalizeStoredQueuedCommand(value: unknown): QueuedCommand | null {
 
   const input = command.input.trim();
   if (!input) return null;
+  if (input.length > MAX_QUEUED_COMMAND_INPUT_LENGTH) return null;
+
+  const files = uniqueFiles(command.files);
+  if (files.length > MAX_QUEUED_COMMAND_FILES) return null;
 
   return {
     id: command.id,
     input,
-    files: uniqueFiles(command.files),
+    files,
     createdAt: command.createdAt,
   };
 }

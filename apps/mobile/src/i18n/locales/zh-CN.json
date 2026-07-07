@@ -116,6 +116,11 @@
     "clearQueuedCommands": "清空",
     "queuePaused": "已暂停",
     "resumeQueuedCommands": "继续",
+    "queuedCommandEmptyInput": "排队命令不能为空。",
+    "queuedCommandInputTooLong": "这条排队命令过长，请缩短后再发送。",
+    "queuedCommandTooManyFiles": "这条排队命令附加的文件过多。",
+    "queuedCommandQueueFull": "队列已满，请先移除一条命令。",
+    "queuedCommandQueueTooLarge": "队列数据过大，请先移除部分排队命令。",
     "toolSummaryExecuting": "正在执行…",
     "toolSummaryCompleted": "执行了 {{count}} 个步骤",
     "toolSummaryWithErrors": "执行了 {{count}} 个步骤（{{errorCount}} 个失败）"
