@@ -44,7 +44,11 @@ export function ConversationItem({ conversation, onPress, onDelete }: Conversati
   const agentType = conversation.extra?.backend || conversation.type;
   const badgeColor = agentBadgeColors[agentType] || '#6B7280';
   const statusDot =
-    conversation.status === 'running' ? success : conversation.status === 'pending' ? warning : undefined;
+    conversation.status === 'running'
+      ? success
+      : conversation.status === 'pending' || conversation.status === 'waiting_confirmation'
+        ? warning
+        : undefined;
 
   const handleLongPress = () => {
     if (!onDelete) return;

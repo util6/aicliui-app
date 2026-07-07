@@ -41,6 +41,12 @@ describe('ChatSessionBar', () => {
     expect(screen.getByText('Auto Edit')).toBeTruthy();
   });
 
+  it('renders a waiting confirmation chip while permission is pending', () => {
+    const screen = render(<ChatSessionBar conversation={{ ...conversation, status: 'waiting_confirmation' }} />);
+
+    expect(screen.getByText('chat.waitingForConfirmation')).toBeTruthy();
+  });
+
   it('returns no chips when conversation has no execution context', () => {
     const chips = buildSessionChips({ ...conversation, extra: {} }, (key) => key);
 

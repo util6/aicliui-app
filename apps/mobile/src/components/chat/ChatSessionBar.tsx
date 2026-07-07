@@ -54,6 +54,14 @@ export function buildSessionChips(
   const { extra } = conversation;
   const chips: SessionChip[] = [];
 
+  if (conversation.status === 'waiting_confirmation') {
+    chips.push({
+      key: 'waiting_confirmation',
+      icon: 'shield-checkmark-outline',
+      label: t('chat.waitingForConfirmation', { defaultValue: 'Waiting for confirmation' }),
+    });
+  }
+
   if (extra.workspace) {
     chips.push({
       key: 'workspace',

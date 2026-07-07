@@ -90,6 +90,7 @@
     "processing": "Processing...",
     "responseSentSuccessfully": "Response sent",
     "confirmationFailed": "Failed to send response",
+    "waitingForConfirmation": "Waiting for confirmation",
     "newChat": "New Chat",
     "noConversation": "No conversation selected",
     "startChatHint": "Create a new conversation to get started",

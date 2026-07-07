@@ -581,11 +581,19 @@ async function sendMessage(params, emit) {
   };
   const emitAssistantPermission = (confirmation) => {
     if (!confirmation || !confirmation.id) return;
+    conversation.status = 'waiting_confirmation';
+    conversation.modifyTime = Date.now();
+    void saveStore();
     emit('confirmation.add', confirmation);
   };
   const emitAssistantPermissionResolved = (confirmationId) => {
     if (!confirmationId) return;
     pendingConfirmations.delete(confirmationId);
+    if (activeRuns.get(conversationId) === run) {
+      conversation.status = 'running';
+      conversation.modifyTime = Date.now();
+      void saveStore();
+    }
     emit('confirmation.remove', { conversation_id: conversationId, id: confirmationId });
   };
   activeRuns.set(conversationId, run);
@@ -1107,6 +1115,12 @@ async function confirmPendingPermission(params, emit) {
 
   await replyOpenCodePermission(record, reply);
   pendingConfirmations.delete(confirmationId);
+  const conversation = conversations.get(record.conversationId);
+  if (conversation && activeRuns.has(record.conversationId)) {
+    conversation.status = 'running';
+    conversation.modifyTime = Date.now();
+    void saveStore();
+  }
   emit('confirmation.remove', { conversation_id: record.conversationId, id: confirmationId });
   return { success: true };
 }

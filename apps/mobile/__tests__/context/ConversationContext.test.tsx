@@ -103,6 +103,63 @@ describe('ConversationContext stream status sync', () => {
     expect(screen.getByTestId('status').props.children).toBe('running');
   });
 
+  it('marks a conversation waiting while a confirmation is pending', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-user-conversations') return Promise.resolve([conversationWithStatus('running')]);
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <Probe />
+      </ConversationProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('status').props.children).toBe('running'));
+
+    await act(async () => {
+      listeners.get('confirmation.add')?.({
+        id: 'permission-1',
+        conversation_id: 'conv-1',
+      });
+    });
+
+    expect(screen.getByTestId('status').props.children).toBe('waiting_confirmation');
+
+    await act(async () => {
+      listeners.get('confirmation.remove')?.({
+        id: 'permission-1',
+        conversation_id: 'conv-1',
+      });
+    });
+
+    expect(screen.getByTestId('status').props.children).toBe('running');
+  });
+
+  it('marks stream permission messages as waiting for confirmation', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-user-conversations') return Promise.resolve([conversationWithStatus('running')]);
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <Probe />
+      </ConversationProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('status').props.children).toBe('running'));
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'acp_permission',
+        conversation_id: 'conv-1',
+      });
+    });
+
+    expect(screen.getByTestId('status').props.children).toBe('waiting_confirmation');
+  });
+
   it('marks a conversation finished when a stream terminates', async () => {
     let persistedStatus: Conversation['status'] = 'running';
     mockRequest.mockImplementation((name: string) => {
@@ -158,6 +215,14 @@ describe('ConversationContext stream status sync', () => {
       });
       listeners.get('chat.response.stream')?.({
         type: 'thought',
+        conversation_id: 'conv-1',
+      });
+      listeners.get('chat.response.stream')?.({
+        type: 'acp_permission',
+        conversation_id: 'conv-1',
+      });
+      listeners.get('confirmation.add')?.({
+        id: 'permission-late',
         conversation_id: 'conv-1',
       });
     });

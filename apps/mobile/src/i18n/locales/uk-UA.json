@@ -76,6 +76,7 @@
     "processing": "Обробка...",
     "responseSentSuccessfully": "Відповідь надіслано",
     "confirmationFailed": "Не вдалося надіслати відповідь",
+    "waitingForConfirmation": "Очікується підтвердження",
     "newChat": "Новий чат",
     "noConversation": "Діалог не вибрано",
     "startChatHint": "Створіть новий діалог, щоб почати",

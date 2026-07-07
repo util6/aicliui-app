@@ -90,6 +90,7 @@
     "processing": "处理中...",
     "responseSentSuccessfully": "已发送响应",
     "confirmationFailed": "响应发送失败",
+    "waitingForConfirmation": "等待权限确认",
     "newChat": "新建聊天",
     "noConversation": "未选择对话",
     "startChatHint": "创建一个新对话开始使用",

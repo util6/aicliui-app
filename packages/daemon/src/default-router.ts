@@ -178,11 +178,15 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
           case 'permission': {
             const confirmation = normalizeConfirmation(event.confirmation, conversationId, assistantMsgId);
             pendingConfirmations.set(confirmation.id, { backend, confirmation });
+            store.updateConversation(conversationId, { status: 'waiting_confirmation' });
             context.emit('confirmation.add', confirmation);
             break;
           }
           case 'permission_resolved':
             if (pendingConfirmations.delete(event.confirmationId)) {
+              if (activeRuns.get(conversationId) === runController) {
+                store.updateConversation(conversationId, { status: 'running' });
+              }
               context.emit('confirmation.remove', { conversation_id: conversationId, id: event.confirmationId });
             }
             break;
@@ -260,6 +264,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     }
 
     const adapter = adapters.get(record.backend);
+    const recordConversationId = stringParam(record.confirmation.conversation_id);
     const callId =
       typeof params.callId === 'string'
         ? params.callId
@@ -267,13 +272,16 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
           ? params.call_id
           : record.confirmation.callId ?? record.confirmation.call_id;
     const result = await adapter?.confirm?.({
-      conversationId: stringParam(record.confirmation.conversation_id),
+      conversationId: recordConversationId,
       confirmationId,
       ...(callId ? { callId } : {}),
       data: params.data,
     });
 
     pendingConfirmations.delete(confirmationId);
+    if (activeRuns.has(recordConversationId)) {
+      store.updateConversation(recordConversationId, { status: 'running' });
+    }
     context.emit('confirmation.remove', {
       conversation_id: record.confirmation.conversation_id,
       id: confirmationId,

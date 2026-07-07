@@ -156,7 +156,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         conversation_id: id,
       });
       if (requestId !== loadRequestRef.current) return;
-      if (conversation?.status === 'running') {
+      if (isProcessingConversationStatus(conversation?.status)) {
         turnFinishedRef.current = false;
         setStreamingState(true);
       }
@@ -515,6 +515,10 @@ function removeConfirmationMessages(messages: TMessage[], confirmationId: unknow
 
 function isConfirmationMessage(message: TMessage): boolean {
   return message.type === 'acp_permission' || message.type === 'codex_permission';
+}
+
+function isProcessingConversationStatus(status: unknown): boolean {
+  return status === 'running' || status === 'waiting_confirmation';
 }
 
 function getBridgeFailureMessage(response: unknown): string | null {

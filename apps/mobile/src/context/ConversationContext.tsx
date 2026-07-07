@@ -12,7 +12,7 @@ export type Conversation = {
   id: string;
   name: string;
   type: string;
-  status?: 'pending' | 'running' | 'finished';
+  status?: 'pending' | 'running' | 'waiting_confirmation' | 'finished';
   createTime: number;
   modifyTime: number;
   model: { id: string; useModel: string };
@@ -187,10 +187,10 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
       const status = getStreamConversationStatus(raw, completedConversationIdsRef.current);
       if (!status) return;
 
-      if (status === 'running') {
-        completedConversationIdsRef.current.delete(conversationId);
-      } else {
+      if (status === 'finished') {
         completedConversationIdsRef.current.add(conversationId);
+      } else {
+        completedConversationIdsRef.current.delete(conversationId);
       }
 
       setConversations((prev) => patchConversationStatus(prev, conversationId, status));
@@ -199,8 +199,24 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
       debounceRef.timer = setTimeout(() => void refresh(), 1000);
     });
 
+    const unsubConfirmAdd = bridge.on('confirmation.add', (data: unknown) => {
+      const conversationId = getConversationId(data);
+      if (!conversationId) return;
+      if (completedConversationIdsRef.current.has(conversationId)) return;
+      completedConversationIdsRef.current.delete(conversationId);
+      setConversations((prev) => patchConversationStatus(prev, conversationId, 'waiting_confirmation'));
+    });
+
+    const unsubConfirmRemove = bridge.on('confirmation.remove', (data: unknown) => {
+      const conversationId = getConversationId(data);
+      if (!conversationId || completedConversationIdsRef.current.has(conversationId)) return;
+      setConversations((prev) => patchConversationStatus(prev, conversationId, 'running'));
+    });
+
     return () => {
       unsub();
+      unsubConfirmAdd();
+      unsubConfirmRemove();
       if (debounceRef.timer) clearTimeout(debounceRef.timer);
     };
   }, [refresh]);
@@ -361,8 +377,14 @@ function getStreamConversationStatus(
   if (message.type === 'finish' || message.type === 'error') return 'finished';
   if (isErrorTipMessage(message)) return 'finished';
   if (message.type === 'agent_status' && isTerminalAgentStatus(message.data)) return 'finished';
+  if (message.conversation_id && completedConversationIds.has(message.conversation_id)) return null;
+  if (isPermissionStreamMessage(message.type)) return 'waiting_confirmation';
   if (!isGeneratingStreamMessage(message.type)) return null;
-  return message.conversation_id && completedConversationIds.has(message.conversation_id) ? null : 'running';
+  return 'running';
+}
+
+function isPermissionStreamMessage(type: unknown): boolean {
+  return type === 'acp_permission' || type === 'permission' || type === 'codex_permission';
 }
 
 function isGeneratingStreamMessage(type: unknown): boolean {
@@ -374,8 +396,6 @@ function isGeneratingStreamMessage(type: unknown): boolean {
     type === 'tool_group' ||
     type === 'acp_tool_call' ||
     type === 'codex_tool_call' ||
-    type === 'acp_permission' ||
-    type === 'permission' ||
     type === 'plan'
   );
 }
@@ -409,4 +429,10 @@ function isTerminalAgentStatus(data: unknown): boolean {
   if (typeof data !== 'object' || data === null) return false;
   const status = (data as { status?: unknown }).status;
   return status === 'error' || status === 'disconnected';
+}
+
+function getConversationId(data: unknown): string | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const conversationId = (data as { conversation_id?: unknown }).conversation_id;
+  return typeof conversationId === 'string' && conversationId.length > 0 ? conversationId : null;
 }

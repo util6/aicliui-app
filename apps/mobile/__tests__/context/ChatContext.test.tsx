@@ -405,6 +405,30 @@ describe('ChatContext runtime state', () => {
     await waitFor(() => expect(screen.getByTestId('streaming').props.children).toBe('streaming'));
   });
 
+  it('restores streaming state when a conversation is waiting for confirmation', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-conversation-messages') return Promise.resolve([]);
+      if (name === 'conversation.get') {
+        return Promise.resolve({
+          id: 'conv-1',
+          status: 'waiting_confirmation',
+          extra: {},
+        });
+      }
+      if (name === 'confirmation.list') return Promise.resolve([]);
+      if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('streaming').props.children).toBe('streaming'));
+  });
+
   it('restores pending confirmations when a conversation is opened', async () => {
     mockRequest.mockImplementation((name: string) => {
       if (name === 'database.get-conversation-messages') return Promise.resolve([]);

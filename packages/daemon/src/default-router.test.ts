@@ -938,4 +938,101 @@ describe('default bridge routes', () => {
     });
     expect(finished.data).toMatchObject({ id: 'status-id-1', status: 'finished' });
   });
+
+  it('marks a conversation waiting while an adapter confirmation is pending', async () => {
+    let nextId = 0;
+    let permissionResolve!: () => void;
+    let continueResolve!: () => void;
+    const permissionYielded = new Promise<void>((resolve) => {
+      permissionResolve = resolve;
+    });
+    const shouldContinue = new Promise<void>((resolve) => {
+      continueResolve = resolve;
+    });
+    const store = new InMemoryConversationStore({
+      now: () => 7000 + nextId,
+      id: () => `waiting-id-${++nextId}`,
+    });
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'opencode',
+          name: 'opencode',
+          label: 'OpenCode',
+          probe: async () => ({ backend: 'opencode', state: 'ready' }),
+          sendMessage: async function* () {
+            yield {
+              type: 'permission',
+              confirmation: {
+                id: 'permission-waiting',
+                title: 'OpenCode permission',
+                call_id: 'call-waiting',
+                options: [{ label: 'Allow once', value: 'once' }],
+              },
+            };
+            permissionResolve();
+            await shouldContinue;
+            yield { type: 'content', content: 'done' };
+          },
+          confirm: async () => ({ success: true }),
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_waiting',
+        data: {
+          type: 'acp',
+          name: 'waiting',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'opencode' },
+        },
+      },
+    });
+
+    const sendPromise = router.handleIncoming({
+      name: 'subscribe-chat.send.message',
+      data: {
+        id: 'm_send_waiting',
+        data: { conversation_id: 'waiting-id-1', msg_id: 'user-msg-waiting', input: 'needs permission' },
+      },
+    });
+
+    await permissionYielded;
+    const [waiting] = await router.handleIncoming({
+      name: 'subscribe-conversation.get',
+      data: { id: 'm_get_waiting', data: { conversation_id: 'waiting-id-1' } },
+    });
+    expect(waiting.data).toMatchObject({ id: 'waiting-id-1', status: 'waiting_confirmation' });
+
+    await router.handleIncoming({
+      name: 'subscribe-confirmation.confirm',
+      data: {
+        id: 'm_confirm_waiting',
+        data: {
+          conversation_id: 'waiting-id-1',
+          msg_id: 'permission-waiting',
+          callId: 'call-waiting',
+          data: 'once',
+        },
+      },
+    });
+    const [running] = await router.handleIncoming({
+      name: 'subscribe-conversation.get',
+      data: { id: 'm_get_running_after_confirm', data: { conversation_id: 'waiting-id-1' } },
+    });
+    expect(running.data).toMatchObject({ id: 'waiting-id-1', status: 'running' });
+
+    continueResolve();
+    await sendPromise;
+
+    const [finished] = await router.handleIncoming({
+      name: 'subscribe-conversation.get',
+      data: { id: 'm_get_finished_after_waiting', data: { conversation_id: 'waiting-id-1' } },
+    });
+    expect(finished.data).toMatchObject({ id: 'waiting-id-1', status: 'finished' });
+  });
 });

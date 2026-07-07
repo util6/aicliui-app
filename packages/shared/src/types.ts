@@ -22,7 +22,7 @@ export type Conversation = {
   id: string;
   name: string;
   type: string;
-  status?: 'pending' | 'running' | 'finished';
+  status?: 'pending' | 'running' | 'waiting_confirmation' | 'finished';
   createTime: number;
   modifyTime: number;
   model: { id: string; useModel: string };

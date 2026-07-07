@@ -76,6 +76,7 @@
     "processing": "Wird verarbeitet...",
     "responseSentSuccessfully": "Antwort gesendet",
     "confirmationFailed": "Antwort konnte nicht gesendet werden",
+    "waitingForConfirmation": "Wartet auf Bestätigung",
     "newChat": "Neuer Chat",
     "noConversation": "Keine Unterhaltung ausgewählt",
     "startChatHint": "Erstelle eine neue Unterhaltung, um zu beginnen",
