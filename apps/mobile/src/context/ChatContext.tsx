@@ -8,6 +8,13 @@ import { useConnection } from './ConnectionContext';
 
 export type ThoughtData = { subject: string; description: string } | null;
 
+type PendingConfirmation = {
+  id?: string;
+  msg_id?: string;
+  conversation_id?: string;
+  [key: string]: unknown;
+};
+
 type ChatContextType = {
   messages: TMessage[];
   isStreaming: boolean;
@@ -102,6 +109,20 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const restorePendingConfirmations = useCallback(async (id: string, requestId = loadRequestRef.current) => {
+    try {
+      const list = await bridge.request<PendingConfirmation[]>('confirmation.list', {
+        conversation_id: id,
+      });
+      if (requestId !== loadRequestRef.current) return;
+      if (!Array.isArray(list)) return;
+      setConfirmations(list);
+      setMessages((prev) => appendConfirmationMessages(prev, id, list));
+    } catch (e) {
+      console.warn('[Chat] Failed to restore confirmations:', e);
+    }
+  }, []);
+
   // Load message history
   const loadConversation = useCallback(async (id: string) => {
     const requestId = ++loadRequestRef.current;
@@ -147,8 +168,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       console.warn('[Chat] Failed to load conversation context:', e);
     }
 
+    await restorePendingConfirmations(id, requestId);
     await refreshSlashCommands(id, requestId);
-  }, [refreshSlashCommands, setStreamingState]);
+  }, [refreshSlashCommands, restorePendingConfirmations, setStreamingState]);
 
   // Subscribe to streaming responses
   useEffect(() => {
@@ -243,20 +265,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
     // Confirmation lifecycle events
     const unsubConfirmAdd = bridge.on('confirmation.add', (data: unknown) => {
-      const confirmation = data as any;
+      const confirmation = data as PendingConfirmation;
       if (confirmation.conversation_id !== conversationId) return;
-      setConfirmations((prev) => [...prev, confirmation]);
-
-      // Also inject as acp_permission message for inline rendering
-      const permMsg: TMessage = {
-        id: uuid(),
-        msg_id: confirmation.msg_id,
-        conversation_id: conversationId,
-        type: 'acp_permission',
-        position: 'left',
-        content: confirmation,
-      };
-      setMessages((prev) => [...prev, permMsg]);
+      setConfirmations((prev) => upsertConfirmation(prev, confirmation));
+      setMessages((prev) => appendConfirmationMessages(prev, conversationId, [confirmation]));
     });
 
     const unsubConfirmUpdate = bridge.on('confirmation.update', (data: unknown) => {
@@ -283,16 +295,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     prevConnectionStateRef.current = connectionState;
 
     if (wasDisconnected && connectionState === 'connected' && conversationId) {
-      bridge
-        .request<any[]>('confirmation.list', { conversation_id: conversationId })
-        .then((list) => {
-          if (Array.isArray(list)) {
-            setConfirmations(list);
-          }
-        })
-        .catch((e) => console.warn('[Chat] Failed to restore confirmations:', e));
+      void restorePendingConfirmations(conversationId);
     }
-  }, [connectionState, conversationId]);
+  }, [connectionState, conversationId, restorePendingConfirmations]);
 
   // Auto-send initial message when conversation was created via commitNewChat
   useEffect(() => {
@@ -421,4 +426,46 @@ function normalizeContextUsage(value: unknown): { used: number; size: number } |
   return typeof usage.used === 'number' && typeof usage.size === 'number'
     ? { used: usage.used, size: usage.size }
     : null;
+}
+
+function upsertConfirmation(
+  confirmations: PendingConfirmation[],
+  confirmation: PendingConfirmation,
+): PendingConfirmation[] {
+  if (!confirmation.id) return [...confirmations, confirmation];
+  const index = confirmations.findIndex((item) => item.id === confirmation.id);
+  if (index === -1) return [...confirmations, confirmation];
+  const next = [...confirmations];
+  next[index] = confirmation;
+  return next;
+}
+
+function appendConfirmationMessages(
+  messages: TMessage[],
+  conversationId: string,
+  confirmations: PendingConfirmation[],
+): TMessage[] {
+  let next = messages;
+  const existingConfirmationIds = new Set(
+    messages
+      .filter((message) => message.type === 'acp_permission')
+      .map((message) => (message.content as PendingConfirmation | undefined)?.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0),
+  );
+
+  for (const confirmation of confirmations) {
+    if (!confirmation.id || existingConfirmationIds.has(confirmation.id)) continue;
+    if (next === messages) next = [...messages];
+    existingConfirmationIds.add(confirmation.id);
+    next.push({
+      id: `confirmation_${confirmation.id}`,
+      msg_id: confirmation.msg_id || confirmation.id,
+      conversation_id: confirmation.conversation_id || conversationId,
+      type: 'acp_permission',
+      position: 'left',
+      content: confirmation,
+    });
+  }
+
+  return next;
 }

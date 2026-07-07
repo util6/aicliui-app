@@ -24,7 +24,7 @@ function Probe() {
 }
 
 function RuntimeProbe() {
-  const { loadConversation, isStreaming, thought, messages, contextUsage, sendMessage } = useChat();
+  const { loadConversation, isStreaming, thought, messages, contextUsage, confirmations, sendMessage } = useChat();
 
   useEffect(() => {
     loadConversation('conv-1');
@@ -35,6 +35,8 @@ function RuntimeProbe() {
       <Text testID='streaming'>{isStreaming ? 'streaming' : 'idle'}</Text>
       <Text testID='thought'>{thought?.subject ?? ''}</Text>
       <Text testID='messages'>{messages.map((message) => message.content?.content ?? '').join('|')}</Text>
+      <Text testID='message-types'>{messages.map((message) => message.type).join('|')}</Text>
+      <Text testID='confirmations'>{confirmations.map((confirmation) => confirmation.id).join('|')}</Text>
       <Text testID='context-usage'>
         {contextUsage ? `${contextUsage.used}/${contextUsage.size}` : ''}
       </Text>
@@ -67,6 +69,7 @@ describe('ChatContext slash commands', () => {
     mockRequest.mockImplementation((name: string) => {
       if (name === 'database.get-conversation-messages') return Promise.resolve([]);
       if (name === 'conversation.get') return Promise.resolve(null);
+      if (name === 'confirmation.list') return Promise.resolve([]);
       if (name === 'conversation.get-slash-commands') {
         return Promise.resolve([
           {
@@ -95,6 +98,7 @@ describe('ChatContext slash commands', () => {
     mockRequest.mockImplementation((name: string) => {
       if (name === 'database.get-conversation-messages') return Promise.resolve([]);
       if (name === 'conversation.get') return Promise.resolve(null);
+      if (name === 'confirmation.list') return Promise.resolve([]);
       if (name === 'conversation.get-slash-commands') {
         const command = mockRequest.mock.calls.filter(([requestName]) => requestName === name).length === 1
           ? 'review'
@@ -144,6 +148,7 @@ describe('ChatContext runtime state', () => {
       if (name === 'database.get-conversation-messages') return Promise.resolve([]);
       if (name === 'conversation.get') return Promise.resolve(null);
       if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
+      if (name === 'confirmation.list') return Promise.resolve([]);
       if (name === 'chat.send.message') return Promise.resolve({ success: true });
       return Promise.reject(new Error(`Unexpected bridge request ${name}`));
     });
@@ -328,6 +333,7 @@ describe('ChatContext runtime state', () => {
           },
         });
       }
+      if (name === 'confirmation.list') return Promise.resolve([]);
       if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
       return Promise.reject(new Error(`Unexpected bridge request ${name}`));
     });
@@ -354,6 +360,7 @@ describe('ChatContext runtime state', () => {
           extra: {},
         });
       }
+      if (name === 'confirmation.list') return Promise.resolve([]);
       if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
       return Promise.reject(new Error(`Unexpected bridge request ${name}`));
     });
@@ -365,5 +372,38 @@ describe('ChatContext runtime state', () => {
     );
 
     await waitFor(() => expect(screen.getByTestId('streaming').props.children).toBe('streaming'));
+  });
+
+  it('restores pending confirmations when a conversation is opened', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-conversation-messages') return Promise.resolve([]);
+      if (name === 'conversation.get') return Promise.resolve({ id: 'conv-1', extra: {} });
+      if (name === 'confirmation.list') {
+        return Promise.resolve([
+          {
+            id: 'permission-1',
+            msg_id: 'assistant-1',
+            conversation_id: 'conv-1',
+            title: 'OpenCode permission',
+            callId: 'call-1',
+            options: [{ label: 'Allow once', value: 'once' }],
+          },
+        ]);
+      }
+      if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('confirmations').props.children).toBe('permission-1'));
+    expect(screen.getByTestId('message-types').props.children).toContain('acp_permission');
+    expect(mockRequest).toHaveBeenCalledWith('confirmation.list', {
+      conversation_id: 'conv-1',
+    });
   });
 });
