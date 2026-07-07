@@ -403,6 +403,7 @@ describe('default bridge routes', () => {
       'chat.response.stream',
       'chat.response.stream',
       'chat.response.stream',
+      'turn.completed',
     ]);
     expect(messages[1].data).toMatchObject({ type: 'start', conversation_id: 'id-1' });
     expect(messages[2].data).toMatchObject({
@@ -480,6 +481,7 @@ describe('default bridge routes', () => {
       'chat.response.stream',
       'chat.response.stream',
       'chat.response.stream',
+      'turn.completed',
     ]);
     expect(messages[1].data).toMatchObject({ type: 'start', conversation_id: 'adapter-id-1' });
     expect(messages[2].data).toMatchObject({
@@ -502,6 +504,84 @@ describe('default bridge routes', () => {
       { position: 'right', content: { content: 'use opencode' } },
       { position: 'left', content: { content: 'adapter response' } },
     ]);
+  });
+
+  it('emits an AionUi-style turn.completed event with the final runtime summary', async () => {
+    let nextId = 0;
+    const store = new InMemoryConversationStore({
+      now: () => 3050 + nextId,
+      id: () => `turn-id-${++nextId}`,
+    });
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'codex',
+          name: 'codex',
+          label: 'Codex CLI',
+          probe: async () => ({ backend: 'codex', state: 'ready' }),
+          sendMessage: async function* () {
+            yield { type: 'content', content: 'turn done' };
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_turn',
+        data: {
+          type: 'codex',
+          name: 'turn',
+          model: { id: 'gpt-5-codex', useModel: 'GPT-5 Codex' },
+          extra: {
+            backend: 'codex',
+            workspace: '/tmp/project',
+            currentModelId: 'gpt-5-codex',
+            currentModelLabel: 'GPT-5 Codex',
+          },
+        },
+      },
+    });
+
+    const messages = await router.handleIncoming({
+      name: 'subscribe-chat.send.message',
+      data: {
+        id: 'm_send_turn',
+        data: { conversation_id: 'turn-id-1', msg_id: 'user-msg-turn', input: 'finish with runtime' },
+      },
+    });
+
+    const turnCompleted = messages.find((message) => message.name === 'turn.completed');
+    expect(turnCompleted?.data).toMatchObject({
+      session_id: 'turn-id-1',
+      turn_id: 'assistant_user-msg-turn',
+      status: 'finished',
+      state: 'ai_waiting_input',
+      detail: '',
+      can_send_message: true,
+      runtime: {
+        state: 'idle',
+        can_send_message: true,
+        has_task: false,
+        task_status: 'finished',
+        is_processing: false,
+        pending_confirmations: 0,
+        turn_id: null,
+      },
+      workspace: '/tmp/project',
+      model: {
+        platform: 'codex',
+        name: 'Codex CLI',
+        use_model: 'GPT-5 Codex',
+      },
+      last_message: {
+        type: 'text',
+        content: { content: 'turn done' },
+        status: 'finish',
+      },
+    });
   });
 
   it('streams adapter runtime failures as assistant content and finishes the turn', async () => {
@@ -551,6 +631,7 @@ describe('default bridge routes', () => {
       'chat.response.stream',
       'chat.response.stream',
       'chat.response.stream',
+      'turn.completed',
     ]);
     expect(messages[0].data).toEqual({ success: true });
     expect(messages[1].data).toMatchObject({ type: 'start', conversation_id: 'failure-id-1' });
@@ -664,6 +745,7 @@ describe('default bridge routes', () => {
       'chat.response.stream',
       'chat.response.stream',
       'chat.response.stream',
+      'turn.completed',
     ]);
     expect(messages[2].data).toMatchObject({
       type: 'thinking',
@@ -1092,7 +1174,16 @@ describe('default bridge routes', () => {
         }),
       }),
     );
-    expect(sendMessages.at(-1)?.data).toMatchObject({ type: 'finish', conversation_id: 'stop-id-1' });
+    expect(sendMessages).toContainEqual(
+      expect.objectContaining({
+        name: 'chat.response.stream',
+        data: expect.objectContaining({ type: 'finish', conversation_id: 'stop-id-1' }),
+      }),
+    );
+    expect(sendMessages.at(-1)).toMatchObject({
+      name: 'turn.completed',
+      data: { session_id: 'stop-id-1', turn_id: 'assistant_user-msg-stop' },
+    });
   });
 
   it('marks conversations running while an adapter stream is active and finished when it ends', async () => {

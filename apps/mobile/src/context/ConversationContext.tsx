@@ -105,6 +105,15 @@ type StreamStatusMessage = {
   data?: unknown;
 };
 
+type TurnCompletedMessage = {
+  session_id?: unknown;
+  sessionId?: unknown;
+  conversation_id?: unknown;
+  conversationId?: unknown;
+  status?: unknown;
+  runtime?: unknown;
+};
+
 const ConversationContext = createContext<ConversationContextType>({
   conversations: [],
   isLoading: false,
@@ -202,6 +211,10 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
   // events to pick up persisted metadata such as modifyTime.
   useEffect(() => {
     const debounceRef = { timer: null as ReturnType<typeof setTimeout> | null };
+    const scheduleRefresh = () => {
+      if (debounceRef.timer) clearTimeout(debounceRef.timer);
+      debounceRef.timer = setTimeout(() => void refresh(), 1000);
+    };
 
     const unsub = bridge.on('chat.response.stream', (data: unknown) => {
       const raw = data as StreamStatusMessage;
@@ -218,8 +231,25 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
 
       setConversations((prev) => patchConversationStatus(prev, conversationId, status));
       if (status !== 'finished') return;
-      if (debounceRef.timer) clearTimeout(debounceRef.timer);
-      debounceRef.timer = setTimeout(() => void refresh(), 1000);
+      scheduleRefresh();
+    });
+
+    const unsubTurnCompleted = bridge.on('turn.completed', (data: unknown) => {
+      const completed = normalizeTurnCompleted(data);
+      if (!completed) return;
+
+      if (completed.status === 'finished') {
+        completedConversationIdsRef.current.add(completed.conversationId);
+      } else {
+        completedConversationIdsRef.current.delete(completed.conversationId);
+      }
+
+      setConversations((prev) =>
+        patchConversationRuntime(prev, completed.conversationId, completed.status, completed.runtime),
+      );
+      if (completed.status === 'finished') {
+        scheduleRefresh();
+      }
     });
 
     const unsubConfirmAdd = bridge.on('confirmation.add', (data: unknown) => {
@@ -238,6 +268,7 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
 
     return () => {
       unsub();
+      unsubTurnCompleted();
       unsubConfirmAdd();
       unsubConfirmRemove();
       if (debounceRef.timer) clearTimeout(debounceRef.timer);
@@ -469,6 +500,100 @@ function patchConversationStatus(
     return { ...conversation, status };
   });
   return changed ? next : conversations;
+}
+
+function patchConversationRuntime(
+  conversations: Conversation[],
+  conversationId: string,
+  status: Conversation['status'],
+  runtime: NonNullable<Conversation['runtime']>,
+): Conversation[] {
+  let changed = false;
+  const next = conversations.map((conversation) => {
+    if (conversation.id !== conversationId) {
+      return conversation;
+    }
+    changed = true;
+    return {
+      ...conversation,
+      status,
+      runtime,
+    };
+  });
+  return changed ? next : conversations;
+}
+
+function normalizeTurnCompleted(value: unknown): {
+  conversationId: string;
+  status: NonNullable<Conversation['status']>;
+  runtime: NonNullable<Conversation['runtime']>;
+} | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const event = value as TurnCompletedMessage;
+  const conversationId = firstNonEmptyString(
+    event.session_id,
+    event.sessionId,
+    event.conversation_id,
+    event.conversationId,
+  );
+  if (!conversationId) return null;
+  const runtime = normalizeRuntimeSummary(event.runtime);
+  if (!runtime) return null;
+  return {
+    conversationId,
+    status: isConversationStatus(event.status) ? event.status : runtime.task_status ?? 'finished',
+    runtime,
+  };
+}
+
+function normalizeRuntimeSummary(value: unknown): NonNullable<Conversation['runtime']> | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const runtime = value as Record<string, unknown>;
+  const state = runtime.state;
+  const canSendMessage = runtime.can_send_message ?? runtime.canSendMessage;
+  const hasTask = runtime.has_task ?? runtime.hasTask;
+  const taskStatus = runtime.task_status ?? runtime.taskStatus;
+  const isProcessing = runtime.is_processing ?? runtime.isProcessing;
+  const pendingConfirmations = runtime.pending_confirmations ?? runtime.pendingConfirmations;
+  const turnId = runtime.turn_id ?? runtime.turnId ?? null;
+  if (!isRuntimeState(state)) return null;
+  if (typeof canSendMessage !== 'boolean') return null;
+  if (typeof hasTask !== 'boolean') return null;
+  if (typeof isProcessing !== 'boolean') return null;
+  if (typeof pendingConfirmations !== 'number') return null;
+  if (turnId !== null && typeof turnId !== 'string') return null;
+  return {
+    state,
+    can_send_message: canSendMessage,
+    has_task: hasTask,
+    ...(isConversationStatus(taskStatus) ? { task_status: taskStatus } : {}),
+    is_processing: isProcessing,
+    pending_confirmations: pendingConfirmations,
+    turn_id: turnId,
+  };
+}
+
+function firstNonEmptyString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function isRuntimeState(value: unknown): value is NonNullable<Conversation['runtime']>['state'] {
+  return (
+    value === 'idle' ||
+    value === 'starting' ||
+    value === 'running' ||
+    value === 'cancelling' ||
+    value === 'waiting_confirmation'
+  );
+}
+
+function isConversationStatus(value: unknown): value is NonNullable<Conversation['status']> {
+  return value === 'pending' || value === 'running' || value === 'waiting_confirmation' || value === 'finished';
 }
 
 function isErrorTipMessage(message: { type?: string; data?: unknown }): boolean {

@@ -136,6 +136,12 @@ describe('termuxRuntime', () => {
     expect(script).toContain('function runningRuntimeSummary(status, turnId, pendingConfirmationCount)');
     expect(script).toContain('can_send_message: false');
     expect(script).toContain('function idleRuntimeSummary(status, pendingConfirmationCount)');
+    expect(script).toContain("emit('turn.completed', buildTurnCompletedEvent");
+    expect(script).toContain('function buildTurnCompletedEvent');
+    expect(script).toContain('state: turnStateFromRuntime(runtime)');
+    expect(script).toContain("detail: ''");
+    expect(script).toContain('last_message: {');
+    expect(script).toContain('return message;');
     expect(script).toContain('function parseModelOptions(raw, fallback)');
     expect(script).toContain("if (key === 'conversation.get') return conversations.get(requiredString(params.conversation_id)) || null;");
     expect(script).toContain("if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);");

@@ -25,6 +25,18 @@ function Probe() {
   return <Text testID='status'>{conversations.map((conversation) => conversation.status).join(',')}</Text>;
 }
 
+function RuntimeProbe() {
+  const { conversations } = useConversations();
+  const conversation = conversations.find((item) => item.id === 'conv-1');
+  return (
+    <Text testID='runtime'>
+      {conversation
+        ? `${conversation.status}|${conversation.runtime?.state ?? ''}|${String(conversation.runtime?.can_send_message)}|${conversation.runtime?.turn_id ?? ''}`
+        : ''}
+    </Text>
+  );
+}
+
 function conversationWithStatus(status: Conversation['status']): Conversation {
   return {
     id: 'conv-1',
@@ -245,6 +257,106 @@ describe('ConversationContext stream status sync', () => {
     await waitFor(() =>
       expect(mockRequest.mock.calls.filter(([name]) => name === 'database.get-user-conversations')).toHaveLength(2),
     );
+  });
+
+  it('applies turn.completed runtime summaries from the local daemon', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-user-conversations') {
+        return Promise.resolve([
+          {
+            ...conversationWithStatus('running'),
+            runtime: {
+              state: 'running',
+              can_send_message: false,
+              has_task: true,
+              task_status: 'running',
+              is_processing: true,
+              pending_confirmations: 0,
+              turn_id: 'assistant_user-msg-turn',
+            },
+          },
+        ]);
+      }
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <RuntimeProbe />
+      </ConversationProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('runtime').props.children).toBe('running|running|false|assistant_user-msg-turn'),
+    );
+
+    await act(async () => {
+      listeners.get('turn.completed')?.({
+        session_id: 'conv-1',
+        turn_id: 'assistant_user-msg-turn',
+        status: 'finished',
+        runtime: {
+          state: 'idle',
+          can_send_message: true,
+          has_task: false,
+          task_status: 'finished',
+          is_processing: false,
+          pending_confirmations: 0,
+          turn_id: null,
+        },
+      });
+    });
+
+    expect(screen.getByTestId('runtime').props.children).toBe('finished|idle|true|');
+  });
+
+  it('accepts AionUi bridge aliases on turn.completed runtime summaries', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-user-conversations') {
+        return Promise.resolve([
+          {
+            ...conversationWithStatus('running'),
+            runtime: {
+              state: 'running',
+              can_send_message: false,
+              has_task: true,
+              task_status: 'running',
+              is_processing: true,
+              pending_confirmations: 0,
+              turn_id: 'assistant_user-msg-turn',
+            },
+          },
+        ]);
+      }
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <RuntimeProbe />
+      </ConversationProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('runtime').props.children).toBe('running|running|false|assistant_user-msg-turn'),
+    );
+
+    await act(async () => {
+      listeners.get('turn.completed')?.({
+        sessionId: 'conv-1',
+        runtime: {
+          state: 'idle',
+          canSendMessage: true,
+          hasTask: false,
+          taskStatus: 'finished',
+          isProcessing: false,
+          pendingConfirmations: 0,
+          turnId: null,
+        },
+      });
+    });
+
+    expect(screen.getByTestId('runtime').props.children).toBe('finished|idle|true|');
   });
 
   it('ignores late generation output after a stream terminates until the next start', async () => {

@@ -662,6 +662,47 @@ function idleRuntimeSummary(status, pendingConfirmationCount) {
   };
 }
 
+function buildTurnCompletedEvent({ conversation, conversationId, turnId, backend, assistantMessage }) {
+  const runtime = conversation.runtime || idleRuntimeSummary('finished', 0);
+  const extra = isRecord(conversation.extra) ? conversation.extra : {};
+  const model = isRecord(conversation.model) ? conversation.model : {};
+  return {
+    session_id: conversationId,
+    turn_id: turnId,
+    status: conversation.status || 'finished',
+    state: turnStateFromRuntime(runtime),
+    detail: '',
+    can_send_message: runtime.can_send_message,
+    runtime,
+    workspace: typeof extra.workspace === 'string' ? extra.workspace : '',
+    model: {
+      platform: backend,
+      name: (typeof extra.agentName === 'string' && extra.agentName) || runtimeDisplayName(backend),
+      use_model:
+        (typeof model.useModel === 'string' && model.useModel) ||
+        (typeof extra.currentModelLabel === 'string' && extra.currentModelLabel) ||
+        (typeof extra.currentModelId === 'string' && extra.currentModelId) ||
+        '',
+    },
+    last_message: {
+      id: assistantMessage.id,
+      type: assistantMessage.type,
+      content: assistantMessage.content,
+      status: 'finish',
+      created_at: assistantMessage.createdAt,
+    },
+  };
+}
+
+function turnStateFromRuntime(runtime) {
+  if (runtime.state === 'idle') return 'ai_waiting_input';
+  if (runtime.state === 'waiting_confirmation') return 'ai_waiting_confirmation';
+  if (runtime.state === 'starting') return 'initializing';
+  if (runtime.state === 'cancelling') return 'stopped';
+  if (runtime.state === 'running') return 'ai_generating';
+  return 'unknown';
+}
+
 function pendingConfirmationCount(conversationId) {
   let count = 0;
   for (const record of pendingConfirmations.values()) {
@@ -865,7 +906,7 @@ async function sendMessage(params, emit) {
     }
   }
 
-  await addTextMessage(conversationId, assistantMsgId, 'left', assistantContent);
+  const assistantMessage = await addTextMessage(conversationId, assistantMsgId, 'left', assistantContent);
   if (!assistantContentStreamed) {
     emit('chat.response.stream', {
       type: 'content',
@@ -875,6 +916,7 @@ async function sendMessage(params, emit) {
     });
   }
   emit('chat.response.stream', { type: 'finish', msg_id: assistantMsgId, conversation_id: conversationId, data: null });
+  emit('turn.completed', buildTurnCompletedEvent({ conversation, conversationId, turnId: assistantMsgId, backend, assistantMessage }));
   return { success: true };
 }
 
@@ -1998,6 +2040,7 @@ async function addTextMessage(conversationId, msgId, position, content) {
   messages.get(conversationId).push(message);
   conversations.get(conversationId).modifyTime = now;
   await saveStore();
+  return message;
 }
 
 function upsertToolGroupMessage(conversationId, msgId, tool) {

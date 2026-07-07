@@ -45,4 +45,13 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("conversation.runtime = runningRuntimeSummary('waiting_confirmation', assistantMsgId, pendingConfirmationCount(conversationId));");
     expect(TERMUX_DAEMON_SOURCE).toContain("conversation.runtime = idleRuntimeSummary('finished', pendingConfirmationCount(conversationId));");
   });
+
+  it('emits AionUi-style turn.completed events after local turns finish', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain("emit('turn.completed', buildTurnCompletedEvent");
+    expect(TERMUX_DAEMON_SOURCE).toContain('function buildTurnCompletedEvent');
+    expect(TERMUX_DAEMON_SOURCE).toContain('state: turnStateFromRuntime(runtime)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("detail: ''");
+    expect(TERMUX_DAEMON_SOURCE).toContain('last_message: {');
+    expect(TERMUX_DAEMON_SOURCE).toContain('return message;');
+  });
 });

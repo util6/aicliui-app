@@ -5,6 +5,7 @@ import type {
   Conversation,
   ConversationRuntimeSummary,
   ConversationStatus,
+  ConversationTurnCompletedEvent,
   EnsureConversationRuntimeResponse,
   RuntimeStatus,
   SetConfigOptionResponse,
@@ -13,7 +14,7 @@ import { getAgentModes } from '@aicliui/shared';
 import { createDefaultAgentAdapterRegistry } from './agent-adapters/default-registry.js';
 import type { AgentAdapterRegistry } from './agent-adapters/registry.js';
 import { BridgeRouter } from './bridge-router.js';
-import { InMemoryConversationStore, type CreateConversationInput } from './conversation-store.js';
+import { InMemoryConversationStore, type CreateConversationInput, type StoredMessage } from './conversation-store.js';
 import { getFileTreeByDir, getWorkspaceTree, readImageBase64, readTextFile } from './local-files.js';
 import type { CliConfirmation } from './agent-adapters/types.js';
 
@@ -293,7 +294,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       }
     }
 
-    store.addTextMessage({
+    const assistantMessage = store.addTextMessage({
       conversationId,
       msgId: assistantMsgId,
       position: 'left',
@@ -305,6 +306,17 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       conversation_id: conversationId,
       data: null,
     });
+    const completedConversation = requireConversation(store, conversationId);
+    context.emit(
+      'turn.completed',
+      buildTurnCompletedEvent({
+        conversation: completedConversation,
+        conversationId,
+        turnId: assistantMsgId,
+        backend,
+        assistantMessage,
+      }),
+    );
 
     return { success: true };
   });
@@ -483,6 +495,53 @@ function emitChatStream(
     conversation_id: conversationId,
     data,
   });
+}
+
+function buildTurnCompletedEvent({
+  conversation,
+  conversationId,
+  turnId,
+  backend,
+  assistantMessage,
+}: {
+  conversation: Conversation;
+  conversationId: string;
+  turnId: string;
+  backend: string;
+  assistantMessage: StoredMessage;
+}): ConversationTurnCompletedEvent {
+  const runtime = conversation.runtime ?? idleRuntimeSummary('finished', 0);
+  return {
+    session_id: conversationId,
+    turn_id: turnId,
+    status: conversation.status ?? 'finished',
+    state: turnStateFromRuntime(runtime),
+    detail: '',
+    can_send_message: runtime.can_send_message,
+    runtime,
+    workspace: conversation.extra.workspace ?? '',
+    model: {
+      platform: backend,
+      name: conversation.extra.agentName || runtimeDisplayName(backend),
+      use_model: conversation.model.useModel || conversation.extra.currentModelLabel || conversation.extra.currentModelId || '',
+    },
+    last_message: {
+      id: assistantMessage.id,
+      type: assistantMessage.type,
+      content: assistantMessage.content,
+      status: 'finish',
+      created_at: assistantMessage.createdAt,
+    },
+  };
+}
+
+function turnStateFromRuntime(runtime: ConversationRuntimeSummary): string {
+  if (runtime.state === 'idle') return 'ai_waiting_input';
+  if (runtime.state === 'waiting_confirmation') return 'ai_waiting_confirmation';
+  if (runtime.state === 'starting') return 'initializing';
+  if (runtime.state === 'cancelling') return 'stopped';
+  if (runtime.state === 'running') return 'ai_generating';
+  return 'unknown';
 }
 
 function normalizeConfirmation(

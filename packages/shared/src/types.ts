@@ -139,6 +139,29 @@ export type ConversationRuntimeSummary = {
   turn_id: string | null;
 };
 
+export type ConversationTurnCompletedEvent = {
+  session_id: string;
+  turn_id: string;
+  status: ConversationStatus;
+  state: string;
+  detail: string;
+  can_send_message: boolean;
+  runtime: ConversationRuntimeSummary;
+  workspace: string;
+  model: {
+    platform: string;
+    name: string;
+    use_model: string;
+  };
+  last_message: {
+    id?: string;
+    type?: string;
+    content: unknown;
+    status?: string | null;
+    created_at: number;
+  };
+};
+
 export type IResponseMessage = {
   type: string;
   data: unknown;
