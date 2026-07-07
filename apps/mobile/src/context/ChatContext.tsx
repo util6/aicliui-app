@@ -46,8 +46,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [thought, setThought] = useState<ThoughtData>(null);
   const messagesRef = useRef<TMessage[]>([]);
   const loadRequestRef = useRef(0);
+  const isStreamingRef = useRef(false);
+  const turnFinishedRef = useRef(false);
   const { connectionState } = useConnection();
   const prevConnectionStateRef = useRef(connectionState);
+
+  const setStreamingState = useCallback((value: boolean) => {
+    isStreamingRef.current = value;
+    setIsStreaming(value);
+  }, []);
 
   // Keep ref in sync
   useEffect(() => {
@@ -71,7 +78,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const requestId = ++loadRequestRef.current;
     setConversationId(id);
     setMessages([]);
-    setIsStreaming(false);
+    turnFinishedRef.current = false;
+    setStreamingState(false);
     setConfirmations([]);
     setContextUsage(null);
     setSlashCommands([]);
@@ -90,7 +98,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
 
     await refreshSlashCommands(id, requestId);
-  }, [refreshSlashCommands]);
+  }, [refreshSlashCommands, setStreamingState]);
 
   // Subscribe to streaming responses
   useEffect(() => {
@@ -102,17 +110,34 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       // Track streaming state
       if (raw.type === 'start') {
-        setIsStreaming(true);
+        turnFinishedRef.current = false;
+        setStreamingState(true);
         return;
       }
       if (raw.type === 'finish') {
-        setIsStreaming(false);
+        turnFinishedRef.current = true;
+        setStreamingState(false);
         setThought(null);
+        return;
+      }
+
+      if (isErrorStreamMessage(raw)) {
+        turnFinishedRef.current = true;
+        setStreamingState(false);
+        setThought(null);
+        const msg = transformMessage(raw);
+        if (msg) {
+          setMessages((prev) => composeMessage(msg, prev));
+        }
         return;
       }
 
       // Ephemeral thought — update state, don't add to message list
       if (raw.type === 'thought') {
+        if (turnFinishedRef.current) return;
+        if (!isStreamingRef.current) {
+          setStreamingState(true);
+        }
         const data = raw.data as { subject: string; description: string };
         setThought({ subject: data.subject, description: data.description });
         return;
@@ -120,6 +145,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       // Clear thought when content arrives
       if (raw.type === 'content') {
+        if (!turnFinishedRef.current && !isStreamingRef.current) {
+          setStreamingState(true);
+        }
         setThought(null);
       }
 
@@ -179,7 +207,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       unsubConfirmUpdate();
       unsubConfirmRemove();
     };
-  }, [conversationId, refreshSlashCommands]);
+  }, [conversationId, refreshSlashCommands, setStreamingState]);
 
   // Restore pending confirmations on reconnect (Issue 2)
   useEffect(() => {
@@ -215,6 +243,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       createdAt: Date.now(),
     };
     setMessages((prev) => [...prev, userMsg]);
+    turnFinishedRef.current = false;
 
     bridge
       .request('chat.send.message', {
@@ -242,6 +271,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         createdAt: Date.now(),
       };
       setMessages((prev) => [...prev, userMsg]);
+      turnFinishedRef.current = false;
 
       // Send via bridge
       bridge
@@ -258,11 +288,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const stopGeneration = useCallback(() => {
     if (!conversationId) return;
-    setIsStreaming(false);
+    turnFinishedRef.current = true;
+    setStreamingState(false);
+    setThought(null);
     bridge
       .request('chat.stop.stream', { conversation_id: conversationId })
       .catch((e) => console.warn('[Chat] stop stream failed:', e));
-  }, [conversationId]);
+  }, [conversationId, setStreamingState]);
 
   const confirmAction = useCallback(
     (confirmationId: string, callId: string, confirmKey: string) => {
@@ -302,4 +334,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
 export function useChat() {
   return useContext(ChatContext);
+}
+
+function isErrorStreamMessage(message: IResponseMessage): boolean {
+  if (message.type === 'error') return true;
+  if (message.type !== 'tips') return false;
+  return (
+    typeof message.data === 'object' &&
+    message.data !== null &&
+    (message.data as { type?: unknown }).type === 'error'
+  );
 }
