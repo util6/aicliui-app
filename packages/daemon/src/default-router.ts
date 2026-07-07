@@ -3,6 +3,7 @@ import type {
   AgentInfo,
   AgentModelInfo,
   Conversation,
+  ConversationArtifact,
   ConversationArtifactStatus,
   ConversationListChangedEvent,
   ConversationRuntimeSummary,
@@ -264,6 +265,11 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
                 size: event.size,
               });
               break;
+            case 'artifact': {
+              const artifact = store.upsertArtifact(normalizeAdapterArtifact(event.artifact, conversationId));
+              context.emit('conversation.artifact', artifact);
+              break;
+            }
             case 'agent_status':
               emitChatStream(context, conversationId, assistantMsgId, 'agent_status', event.data);
               break;
@@ -549,6 +555,14 @@ function emitChatStream(
     conversation_id: conversationId,
     data,
   });
+}
+
+function normalizeAdapterArtifact(artifact: ConversationArtifact, conversationId: string): ConversationArtifact {
+  if (artifact.conversation_id === conversationId) return artifact;
+  return {
+    ...artifact,
+    conversation_id: conversationId,
+  };
 }
 
 function buildTurnCompletedEvent({

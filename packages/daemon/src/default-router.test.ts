@@ -159,6 +159,92 @@ describe('default bridge routes', () => {
     });
   });
 
+  it('persists and streams artifact events emitted by local CLI adapters', async () => {
+    let now = 1300;
+    const store = new InMemoryConversationStore({
+      now: () => now++,
+      id: () => `artifact-event-${now}`,
+    });
+    const artifact: ConversationArtifact = {
+      id: 'artifact-from-adapter',
+      conversation_id: 'artifact-event-1300',
+      kind: 'skill_suggest',
+      status: 'pending',
+      payload: {
+        cron_job_id: 'cron-1',
+        name: 'Review skill',
+        description: 'Review current workspace',
+        skill_content: '# Review',
+      },
+      created_at: 1350,
+      updated_at: 1350,
+    };
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'opencode',
+          name: 'opencode',
+          label: 'OpenCode',
+          probe: async () => ({ backend: 'opencode', state: 'ready' }),
+          sendMessage: async function* () {
+            yield { type: 'artifact', artifact };
+            yield { type: 'content', content: 'done' };
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    const [conversation] = await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_artifact_event',
+        data: {
+          type: 'acp',
+          name: 'artifact event',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'opencode' },
+        },
+      },
+    });
+    const expectedArtifact = {
+      ...artifact,
+      conversation_id: (conversation.data as { id: string }).id,
+    };
+    const turnMessages = await router.handleIncoming({
+      name: 'subscribe-chat.send.message',
+      data: {
+        id: 'm_send_artifact_event',
+        data: {
+          conversation_id: (conversation.data as { id: string }).id,
+          input: 'suggest a skill',
+          msg_id: 'user-artifact-event',
+        },
+      },
+    });
+    const [listed] = await router.handleIncoming({
+      name: 'subscribe-conversation.list-artifacts',
+      data: {
+        id: 'm_list_artifact_event',
+        data: { conversation_id: (conversation.data as { id: string }).id },
+      },
+    });
+
+    expect(turnMessages).toContainEqual({
+      name: 'conversation.artifact',
+      data: expectedArtifact,
+    });
+    expect(turnMessages).not.toContainEqual(
+      expect.objectContaining({
+        name: 'chat.response.stream',
+        data: expect.objectContaining({
+          type: 'skill_suggest',
+        }),
+      }),
+    );
+    expect(listed.data).toEqual([expectedArtifact]);
+  });
+
   it('normalizes selected mobile model context into the conversation model shape', async () => {
     const store = new InMemoryConversationStore({ now: () => 1100, id: () => 'model-conv-1' });
     const router = createDefaultRouter({ store, adapters: createFallbackAgentAdapterRegistry() });

@@ -1,4 +1,4 @@
-import type { AgentHealth, AgentModelInfo } from '@aicliui/shared';
+import type { AgentHealth, AgentModelInfo, ConversationArtifact } from '@aicliui/shared';
 
 export type CliAgentEvent =
   | {
@@ -41,6 +41,10 @@ export type CliAgentEvent =
       type: 'context_usage';
       used: number;
       size: number;
+    }
+  | {
+      type: 'artifact';
+      artifact: ConversationArtifact;
     }
   | {
       type: 'agent_status';
