@@ -100,6 +100,8 @@
     "filesSelected": "已选择 {{count}} 个文件",
     "browseFiles": "浏览文件",
     "done": "完成",
+    "contextUsed": "上下文已使用",
+    "contextUsageHigh": "高",
     "toolSummaryExecuting": "正在执行…",
     "toolSummaryCompleted": "执行了 {{count}} 个步骤",
     "toolSummaryWithErrors": "执行了 {{count}} 个步骤（{{errorCount}} 个失败）"

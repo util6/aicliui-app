@@ -100,6 +100,8 @@
     "filesSelected": "{{count}} file(s) selected",
     "browseFiles": "Browse Files",
     "done": "Done",
+    "contextUsed": "context used",
+    "contextUsageHigh": "High",
     "toolSummaryExecuting": "Executing...",
     "toolSummaryCompleted": "Executed {{count}} steps",
     "toolSummaryWithErrors": "Executed {{count}} steps ({{errorCount}} failed)"
