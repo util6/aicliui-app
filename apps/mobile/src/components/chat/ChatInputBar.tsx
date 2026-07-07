@@ -24,12 +24,14 @@ export function ChatInputBar({ onSend, onStop, isStreaming, disabled, slashComma
   const textColor = useThemeColor({}, 'text');
   const textSecondary = useThemeColor({}, 'textSecondary');
   const [text, setText] = useState('');
+  const isDisabled = disabled === true;
   const slashQuery = matchSlashQuery(text);
   const matchingSlashCommands =
     slashQuery === null ? [] : filterSlashCommands(slashCommands, slashQuery).slice(0, 6);
-  const showSlashCommands = matchingSlashCommands.length > 0;
+  const showSlashCommands = !isDisabled && matchingSlashCommands.length > 0;
 
   const handleSend = () => {
+    if (isDisabled) return;
     if (showSlashCommands) {
       handleSelectSlashCommand(matchingSlashCommands[0]);
       return;
@@ -42,10 +44,12 @@ export function ChatInputBar({ onSend, onStop, isStreaming, disabled, slashComma
   };
 
   const handleSelectSlashCommand = (command: SlashCommandItem) => {
+    if (isDisabled) return;
     setText(`/${command.name} `);
   };
 
-  const showSend = text.trim().length > 0;
+  const showSend = !isDisabled && text.trim().length > 0;
+  const showStop = !isDisabled && isStreaming;
 
   return (
     <View style={[styles.container, { borderTopColor: border, backgroundColor: background }]}>
@@ -86,11 +90,11 @@ export function ChatInputBar({ onSend, onStop, isStreaming, disabled, slashComma
           placeholderTextColor={textSecondary}
           multiline
           maxLength={10000}
-          editable={!disabled}
+          editable={!isDisabled}
           onSubmitEditing={handleSend}
           blurOnSubmit={false}
         />
-        {isStreaming ? (
+        {showStop ? (
           <TouchableOpacity style={styles.stopButton} onPress={onStop} activeOpacity={0.7}>
             <Ionicons name='stop-circle' size={28} color={error} />
           </TouchableOpacity>

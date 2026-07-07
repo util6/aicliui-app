@@ -65,4 +65,36 @@ describe('ChatInputBar slash commands', () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(input.props.value).toBe('/review ');
   });
+
+  it('blocks sending and slash command selection while disabled', () => {
+    const onSend = jest.fn();
+    const onStop = jest.fn();
+    const slashCommands = [
+      {
+        name: 'review',
+        description: 'Review current changes',
+        kind: 'template' as const,
+        source: 'acp' as const,
+        selectionBehavior: 'insert' as const,
+      },
+    ];
+
+    const screen = render(<ChatInputBar onSend={onSend} onStop={onStop} slashCommands={slashCommands} />);
+    const input = screen.getByPlaceholderText('chat.inputPlaceholder');
+    fireEvent.changeText(input, '/rev');
+    expect(screen.getByText('/review')).toBeTruthy();
+
+    screen.rerender(
+      <ChatInputBar onSend={onSend} onStop={onStop} slashCommands={slashCommands} disabled />,
+    );
+
+    expect(screen.queryByText('/review')).toBeNull();
+    fireEvent(input, 'submitEditing');
+    expect(onSend).not.toHaveBeenCalled();
+
+    screen.rerender(
+      <ChatInputBar onSend={onSend} onStop={onStop} slashCommands={slashCommands} disabled isStreaming />,
+    );
+    expect(screen.queryByText('stop-circle')).toBeNull();
+  });
 });
