@@ -83,11 +83,17 @@ describe('termuxRuntime', () => {
     expect(script).toContain('npm install -g @google/gemini-cli@latest');
     expect(script).toContain("import { WebSocketServer } from 'ws';");
     expect(script).toContain("import { spawn } from 'node:child_process';");
-    expect(script).toContain("import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';");
+    expect(script).toContain("import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';");
     expect(script).toContain("const storePath = process.env.AICLIUI_STORE_PATH || dataRoot + '/daemon/store.json';");
     expect(script).toContain('const storeReady = loadStore();');
     expect(script).toContain('await storeReady;');
     expect(script).toContain('await rename(tmpPath, storePath);');
+    expect(script).toContain("if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);");
+    expect(script).toContain("if (key === 'get-file-by-dir') return await getFileTreeByDir(params);");
+    expect(script).toContain("if (key === 'read-file') return await readTextFile(requiredString(params.path));");
+    expect(script).toContain("if (key === 'get-image-base64') return await readImageBase64(requiredString(params.path));");
+    expect(script).toContain("throw new Error('Path is outside the workspace: ' + path);");
+    expect(script).toContain("return 'data:' + imageMimeType(filePath) + ';base64,' + buffer.toString('base64');");
     expect(script).toContain("opencode', ['serve', '--hostname', '127.0.0.1', '--port'");
     expect(script).toContain("buildGeminiArgs({ input, model, approvalMode }).slice(1)");
     expect(script).toContain("'--output-format'");

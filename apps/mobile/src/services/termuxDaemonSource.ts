@@ -1,8 +1,12 @@
-export const TERMUX_DAEMON_SOURCE = String.raw`import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+export const TERMUX_DAEMON_SOURCE = String.raw`import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { WebSocketServer } from 'ws';
 
+const IGNORED_ENTRY_NAMES = new Set(['.git', 'node_modules', '.expo', '.next', 'dist', 'build']);
+const MAX_WORKSPACE_TREE_DEPTH = 4;
+const MAX_WORKSPACE_TREE_ENTRIES = 1000;
+const MAX_TEXT_FILE_BYTES = 1024 * 1024 * 2;
 const port = Number.parseInt(process.env.AICLIUI_DAEMON_PORT || '43117', 10);
 const openCodePort = Number.parseInt(process.env.AICLIUI_OPENCODE_PORT || '4096', 10);
 const dataRoot = process.env.AICLIUI_HOME || (process.env.HOME ? process.env.HOME + '/.aicliui' : '.aicliui');
@@ -82,7 +86,10 @@ async function route(key, data, emit) {
   if (key === 'chat.stop.stream') return { success: true };
   if (key === 'confirmation.list') return [];
   if (key === 'confirmation.confirm') return { success: true };
-  if (key === 'conversation.get-workspace') return [];
+  if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);
+  if (key === 'get-file-by-dir') return await getFileTreeByDir(params);
+  if (key === 'read-file') return await readTextFile(requiredString(params.path));
+  if (key === 'get-image-base64') return await readImageBase64(requiredString(params.path));
   throw new Error("No bridge handler registered for '" + key + "'");
 }
 
@@ -155,6 +162,130 @@ async function writeStore() {
 
 function isNodeErrorCode(error, code) {
   return isRecord(error) && error.code === code;
+}
+
+async function getWorkspaceTree(params) {
+  const workspace = resolveLocalPath(requiredString(params.workspace || params.path));
+  const targetPath = resolveLocalPath(typeof params.path === 'string' ? params.path : workspace);
+  const search = typeof params.search === 'string' ? params.search.trim() : '';
+  const target = ensurePathInsideRoot(targetPath, workspace);
+  const counter = { count: 0 };
+  const rootNode = await readDirectoryNode(target, workspace, 0, search, counter);
+  return rootNode ? [rootNode] : [];
+}
+
+async function getFileTreeByDir(params) {
+  const root = resolveLocalPath(requiredString(params.root || params.dir));
+  const dir = ensurePathInsideRoot(resolveLocalPath(requiredString(params.dir)), root);
+  const counter = { count: 0 };
+  const rootNode = await readDirectoryNode(dir, root, 0, '', counter);
+  return rootNode ? [rootNode] : [];
+}
+
+async function readDirectoryNode(targetPath, rootPath, depth, search, counter) {
+  if (counter.count >= MAX_WORKSPACE_TREE_ENTRIES) return null;
+
+  let stats;
+  try {
+    stats = await stat(targetPath);
+  } catch {
+    return null;
+  }
+  if (!stats.isDirectory() && !stats.isFile()) return null;
+
+  counter.count += 1;
+  const node = {
+    name: basename(targetPath) || targetPath,
+    fullPath: targetPath,
+    relativePath: normalizeRelativePath(relative(rootPath, targetPath)),
+    isDir: stats.isDirectory(),
+    isFile: stats.isFile(),
+  };
+
+  if (stats.isFile()) {
+    return matchesSearch(node, search) ? node : search ? null : node;
+  }
+
+  const children = [];
+  if (depth < MAX_WORKSPACE_TREE_DEPTH) {
+    let entries = [];
+    try {
+      entries = await readdir(targetPath, { withFileTypes: true });
+    } catch {
+      entries = [];
+    }
+
+    entries.sort((a, b) => {
+      if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    for (const entry of entries) {
+      if (IGNORED_ENTRY_NAMES.has(entry.name)) continue;
+      if (counter.count >= MAX_WORKSPACE_TREE_ENTRIES) break;
+      const childPath = join(targetPath, entry.name);
+      const child = await readDirectoryNode(childPath, rootPath, depth + 1, search, counter);
+      if (child) children.push(child);
+    }
+  }
+
+  if (children.length > 0) {
+    node.children = children;
+  }
+
+  if (!search || matchesSearch(node, search) || children.length > 0) return node;
+  return null;
+}
+
+async function readTextFile(path) {
+  const filePath = resolveLocalPath(path);
+  const stats = await stat(filePath);
+  if (!stats.isFile()) throw new Error('Path is not a file: ' + filePath);
+  if (stats.size > MAX_TEXT_FILE_BYTES) {
+    throw new Error('File is too large to preview: ' + filePath);
+  }
+  return await readFile(filePath, 'utf8');
+}
+
+async function readImageBase64(path) {
+  const filePath = resolveLocalPath(path);
+  const stats = await stat(filePath);
+  if (!stats.isFile()) throw new Error('Path is not a file: ' + filePath);
+  const buffer = await readFile(filePath);
+  return 'data:' + imageMimeType(filePath) + ';base64,' + buffer.toString('base64');
+}
+
+function imageMimeType(path) {
+  const ext = path.toLowerCase().split('.').pop() || '';
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'svg') return 'image/svg+xml';
+  if (ext === 'bmp') return 'image/bmp';
+  if (ext === 'avif') return 'image/avif';
+  return 'image/png';
+}
+
+function matchesSearch(node, search) {
+  if (!search) return true;
+  const lower = search.toLowerCase();
+  return node.name.toLowerCase().includes(lower) || node.relativePath.toLowerCase().includes(lower);
+}
+
+function normalizeRelativePath(path) {
+  return path === '' ? '' : path.split('\\').join('/');
+}
+
+function resolveLocalPath(path) {
+  if (typeof path !== 'string' || !path.trim()) throw new Error('Expected non-empty path');
+  if (path.includes('\0')) throw new Error('Path contains a null byte');
+  return resolve(path.replace(/^~(?=\/|$)/, process.env.HOME || '.'));
+}
+
+function ensurePathInsideRoot(path, root) {
+  const rel = relative(root, path);
+  if (rel === '' || (!rel.startsWith('..') && !rel.startsWith('/'))) return path;
+  throw new Error('Path is outside the workspace: ' + path);
 }
 
 async function createConversation(params) {
