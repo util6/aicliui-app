@@ -465,6 +465,30 @@ describe('default bridge routes', () => {
       conversation_id: 'stream-id-1',
       data: { session_id: 'plan-1' },
     });
+
+    const [conversation] = await router.handleIncoming({
+      name: 'subscribe-conversation.get',
+      data: { id: 'm_get_stream', data: { conversation_id: 'stream-id-1' } },
+    });
+    expect(conversation.data).toMatchObject({
+      id: 'stream-id-1',
+      extra: {
+        lastContextUsage: { used: 12, size: 100 },
+      },
+    });
+
+    const [listed] = await router.handleIncoming({
+      name: 'subscribe-database.get-user-conversations',
+      data: { id: 'm_list_stream', data: { page: 0, pageSize: 100 } },
+    });
+    expect(listed.data).toEqual([
+      expect.objectContaining({
+        id: 'stream-id-1',
+        extra: expect.objectContaining({
+          lastContextUsage: { used: 12, size: 100 },
+        }),
+      }),
+    ]);
   });
 
   it('tracks adapter confirmations for the mobile permission UI', async () => {

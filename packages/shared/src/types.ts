@@ -36,6 +36,10 @@ export type Conversation = {
     pinnedAt?: number;
     currentModelId?: string;
     sessionMode?: string;
+    lastContextUsage?: {
+      used: number;
+      size: number;
+    };
   };
 };
 

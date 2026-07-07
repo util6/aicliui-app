@@ -24,6 +24,10 @@ export type Conversation = {
     defaultFiles?: string[];
     currentModelId?: string;
     sessionMode?: string;
+    lastContextUsage?: {
+      used: number;
+      size: number;
+    };
     pinned?: boolean;
     pinnedAt?: number;
   };

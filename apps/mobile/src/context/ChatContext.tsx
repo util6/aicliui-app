@@ -127,6 +127,19 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       console.warn('[Chat] Failed to load messages:', e);
     }
 
+    try {
+      const conversation = await bridge.request<{ extra?: { lastContextUsage?: unknown } } | null>('conversation.get', {
+        conversation_id: id,
+      });
+      if (requestId !== loadRequestRef.current) return;
+      const restoredUsage = normalizeContextUsage(conversation?.extra?.lastContextUsage);
+      if (restoredUsage) {
+        setContextUsage(restoredUsage);
+      }
+    } catch (e) {
+      console.warn('[Chat] Failed to load conversation context:', e);
+    }
+
     await refreshSlashCommands(id, requestId);
   }, [refreshSlashCommands, setStreamingState]);
 
@@ -393,4 +406,12 @@ function isErrorStreamMessage(message: IResponseMessage): boolean {
     message.data !== null &&
     (message.data as { type?: unknown }).type === 'error'
   );
+}
+
+function normalizeContextUsage(value: unknown): { used: number; size: number } | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const usage = value as { used?: unknown; size?: unknown };
+  return typeof usage.used === 'number' && typeof usage.size === 'number'
+    ? { used: usage.used, size: usage.size }
+    : null;
 }

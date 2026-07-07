@@ -24,7 +24,7 @@ function Probe() {
 }
 
 function RuntimeProbe() {
-  const { loadConversation, isStreaming, thought, messages, sendMessage } = useChat();
+  const { loadConversation, isStreaming, thought, messages, contextUsage, sendMessage } = useChat();
 
   useEffect(() => {
     loadConversation('conv-1');
@@ -35,6 +35,9 @@ function RuntimeProbe() {
       <Text testID='streaming'>{isStreaming ? 'streaming' : 'idle'}</Text>
       <Text testID='thought'>{thought?.subject ?? ''}</Text>
       <Text testID='messages'>{messages.map((message) => message.content?.content ?? '').join('|')}</Text>
+      <Text testID='context-usage'>
+        {contextUsage ? `${contextUsage.used}/${contextUsage.size}` : ''}
+      </Text>
       <Text testID='thinking-status'>
         {messages.filter((message) => message.type === 'thinking').map((message) => message.content?.status).join('|')}
       </Text>
@@ -63,6 +66,7 @@ describe('ChatContext slash commands', () => {
   it('loads slash commands when a conversation is opened', async () => {
     mockRequest.mockImplementation((name: string) => {
       if (name === 'database.get-conversation-messages') return Promise.resolve([]);
+      if (name === 'conversation.get') return Promise.resolve(null);
       if (name === 'conversation.get-slash-commands') {
         return Promise.resolve([
           {
@@ -90,6 +94,7 @@ describe('ChatContext slash commands', () => {
   it('refreshes slash commands when the agent reports command updates', async () => {
     mockRequest.mockImplementation((name: string) => {
       if (name === 'database.get-conversation-messages') return Promise.resolve([]);
+      if (name === 'conversation.get') return Promise.resolve(null);
       if (name === 'conversation.get-slash-commands') {
         const command = mockRequest.mock.calls.filter(([requestName]) => requestName === name).length === 1
           ? 'review'
@@ -137,6 +142,7 @@ describe('ChatContext runtime state', () => {
     mockRequest.mockReset();
     mockRequest.mockImplementation((name: string) => {
       if (name === 'database.get-conversation-messages') return Promise.resolve([]);
+      if (name === 'conversation.get') return Promise.resolve(null);
       if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
       if (name === 'chat.send.message') return Promise.resolve({ success: true });
       return Promise.reject(new Error(`Unexpected bridge request ${name}`));
@@ -309,5 +315,32 @@ describe('ChatContext runtime state', () => {
 
     expect(screen.getByTestId('thinking-status').props.children).toBe('done');
     expect(screen.getByTestId('thinking-duration').props.children).toBe('800');
+  });
+
+  it('restores persisted context usage when a conversation is opened', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-conversation-messages') return Promise.resolve([]);
+      if (name === 'conversation.get') {
+        return Promise.resolve({
+          id: 'conv-1',
+          extra: {
+            lastContextUsage: { used: 42, size: 100 },
+          },
+        });
+      }
+      if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('context-usage').props.children).toBe('42/100'));
+    expect(mockRequest).toHaveBeenCalledWith('conversation.get', {
+      conversation_id: 'conv-1',
+    });
   });
 });

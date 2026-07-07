@@ -43,6 +43,10 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     const params = asRecord(data);
     return store.getMessages(stringParam(params.conversation_id));
   });
+  router.register('conversation.get', (data) => {
+    const params = asRecord(data);
+    return store.getConversation(stringParam(params.conversation_id)) ?? null;
+  });
   router.register('conversation.get-slash-commands', async (data) => {
     const params = asRecord(data);
     const conversationId = stringParam(params.conversation_id);
@@ -149,6 +153,14 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
             emitChatStream(context, conversationId, assistantMsgId, 'plan', event.data);
             break;
           case 'context_usage':
+            store.updateConversation(conversationId, {
+              extra: {
+                lastContextUsage: {
+                  used: event.used,
+                  size: event.size,
+                },
+              },
+            });
             emitChatStream(context, conversationId, assistantMsgId, 'acp_context_usage', {
               used: event.used,
               size: event.size,

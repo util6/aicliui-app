@@ -120,6 +120,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain('if (isRecord(model) && (model.id || model.useModel))');
     expect(script).toContain('useModel: modelLabel(currentModelId, extra.backend)');
     expect(script).toContain('function parseModelOptions(raw, fallback)');
+    expect(script).toContain("if (key === 'conversation.get') return conversations.get(requiredString(params.conversation_id)) || null;");
     expect(script).toContain("if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);");
     expect(script).toContain("if (key === 'get-file-by-dir') return await getFileTreeByDir(params);");
     expect(script).toContain("if (key === 'read-file') return await readTextFile(requiredString(params.path));");

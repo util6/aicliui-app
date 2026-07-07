@@ -107,6 +107,7 @@ async function route(key, data, emit) {
   if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: await getModelInfo(params.backend) } };
   if (key === 'database.get-user-conversations') return listConversations(params.page, params.pageSize);
   if (key === 'database.get-conversation-messages') return messages.get(requiredString(params.conversation_id)) || [];
+  if (key === 'conversation.get') return conversations.get(requiredString(params.conversation_id)) || null;
   if (key === 'conversation.get-slash-commands') return await getSlashCommands(params);
   if (key === 'create-conversation') return await createConversation(params);
   if (key === 'remove-conversation') return await removeConversation(requiredString(params.id));
