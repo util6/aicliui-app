@@ -92,6 +92,7 @@ export type SendMessageInput = {
   model?: string;
   sessionMode?: string;
   files?: string[];
+  signal?: AbortSignal;
 };
 
 export type SlashCommandInfo = {

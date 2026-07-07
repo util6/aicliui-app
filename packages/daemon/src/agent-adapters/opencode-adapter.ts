@@ -90,6 +90,7 @@ export function createOpenCodeAdapter(
             directory: input.workspace,
             model: input.model,
             agent: input.sessionMode,
+            ...(input.signal ? { signal: input.signal } : {}),
             ...(parts.length ? { parts } : {}),
           };
           if (activeClient.streamCommand) {
@@ -118,6 +119,7 @@ export function createOpenCodeAdapter(
               prompt: input.input,
               sessionId: cachedSessionId,
               directory: input.workspace,
+              ...(input.signal ? { signal: input.signal } : {}),
               ...(input.model ? { model: input.model } : {}),
               ...(input.sessionMode ? { agent: input.sessionMode } : {}),
               ...(promptFiles.length ? { files: promptFiles } : {}),
@@ -131,6 +133,7 @@ export function createOpenCodeAdapter(
           prompt: input.input,
           sessionId: cachedSessionId,
           directory: input.workspace,
+          ...(input.signal ? { signal: input.signal } : {}),
           ...(input.model ? { model: input.model } : {}),
           ...(input.sessionMode ? { agent: input.sessionMode } : {}),
           ...(promptFiles.length ? { files: promptFiles } : {}),

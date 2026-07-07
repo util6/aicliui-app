@@ -103,6 +103,7 @@ export function createGeminiAdapter(runner: CommandRunner): CliAgentAdapter {
 
       const run = runner.runCommand(command, {
         cwd: input.workspace || process.env.HOME || process.cwd(),
+        signal: input.signal,
         onStdout: handleStdout,
       });
       const finalized = run.then(

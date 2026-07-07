@@ -153,6 +153,28 @@ describe('agent adapters', () => {
     ]);
   });
 
+  it('passes abort signals to Gemini CLI command runs', async () => {
+    const controller = new AbortController();
+    const signals: Array<AbortSignal | undefined> = [];
+    const adapter = createGeminiAdapter({
+      commandExists: async () => true,
+      runCommand: async (_spec, options) => {
+        signals.push(options?.signal);
+        return { stdout: JSON.stringify({ value: 'done' }) + '\n', stderr: '' };
+      },
+    });
+
+    for await (const _event of adapter.sendMessage({
+      conversationId: 'conv-1',
+      input: 'hello',
+      signal: controller.signal,
+    })) {
+      // Drain the stream.
+    }
+
+    expect(signals).toEqual([controller.signal]);
+  });
+
   it('builds Codex CLI exec commands for json output', () => {
     expect(buildCodexCommand({ prompt: 'hello', model: 'gpt-5', approvalMode: 'autoEdit' })).toEqual({
       command: 'codex',
@@ -363,6 +385,28 @@ describe('agent adapters', () => {
     ]);
   });
 
+  it('passes abort signals to Codex CLI command runs', async () => {
+    const controller = new AbortController();
+    const signals: Array<AbortSignal | undefined> = [];
+    const adapter = createCodexAdapter({
+      commandExists: async () => true,
+      runCommand: async (_spec, options) => {
+        signals.push(options?.signal);
+        return { stdout: JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'done' } }), stderr: '' };
+      },
+    });
+
+    for await (const _event of adapter.sendMessage({
+      conversationId: 'conv-1',
+      input: 'hello',
+      signal: controller.signal,
+    })) {
+      // Drain the stream.
+    }
+
+    expect(signals).toEqual([controller.signal]);
+  });
+
   it('builds the OpenCode local API server command shape', () => {
     expect(buildOpenCodeServeCommand({ port: 4096 })).toEqual({
       command: 'opencode',
@@ -436,6 +480,41 @@ describe('agent adapters', () => {
         model: 'anthropic/claude-sonnet-4',
         agent: 'plan',
       },
+    ]);
+  });
+
+  it('passes abort signals to OpenCode prompt sessions', async () => {
+    const controller = new AbortController();
+    const calls: unknown[] = [];
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async (input) => {
+            calls.push(input);
+            return { sessionId: 'ses_signal', text: 'from signal prompt' };
+          },
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+        },
+      },
+    );
+
+    for await (const _event of adapter.sendMessage({
+      conversationId: 'conv-1',
+      input: 'hello',
+      signal: controller.signal,
+    })) {
+      // Drain the stream.
+    }
+
+    expect(calls).toEqual([
+      expect.objectContaining({
+        prompt: 'hello',
+        signal: controller.signal,
+      }),
     ]);
   });
 

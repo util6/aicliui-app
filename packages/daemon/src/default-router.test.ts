@@ -681,4 +681,93 @@ describe('default bridge routes', () => {
       },
     ]);
   });
+
+  it('aborts the active adapter stream when chat.stop.stream is requested', async () => {
+    let nextId = 0;
+    let capturedSignal: AbortSignal | undefined;
+    let startedResolve!: () => void;
+    let stoppedResolve!: () => void;
+    const started = new Promise<void>((resolve) => {
+      startedResolve = resolve;
+    });
+    const stopped = new Promise<void>((resolve) => {
+      stoppedResolve = resolve;
+    });
+    const store = new InMemoryConversationStore({
+      now: () => 5000 + nextId,
+      id: () => `stop-id-${++nextId}`,
+    });
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'codex',
+          name: 'codex',
+          label: 'Codex CLI',
+          probe: async () => ({ backend: 'codex', state: 'ready' }),
+          sendMessage: async function* (input) {
+            capturedSignal = input.signal;
+            startedResolve();
+            if (!input.signal) return;
+            await new Promise<void>((resolve) => {
+              input.signal?.addEventListener(
+                'abort',
+                () => {
+                  stoppedResolve();
+                  resolve();
+                },
+                { once: true },
+              );
+            });
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_stop',
+        data: {
+          type: 'codex',
+          name: 'stop me',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'codex' },
+        },
+      },
+    });
+
+    const sendPromise = router.handleIncoming({
+      name: 'subscribe-chat.send.message',
+      data: {
+        id: 'm_send_stop',
+        data: { conversation_id: 'stop-id-1', msg_id: 'user-msg-stop', input: 'long running' },
+      },
+    });
+
+    await started;
+    expect(capturedSignal?.aborted).toBe(false);
+
+    const [stopResponse] = await router.handleIncoming({
+      name: 'subscribe-chat.stop.stream',
+      data: { id: 'm_stop', data: { conversation_id: 'stop-id-1' } },
+    });
+
+    expect(stopResponse.data).toEqual({ success: true, stopped: true });
+    await stopped;
+
+    const sendMessages = await sendPromise;
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(sendMessages).toContainEqual(
+      expect.objectContaining({
+        name: 'chat.response.stream',
+        data: expect.objectContaining({
+          type: 'content',
+          conversation_id: 'stop-id-1',
+          data: { content: 'Generation stopped.' },
+        }),
+      }),
+    );
+    expect(sendMessages.at(-1)?.data).toMatchObject({ type: 'finish', conversation_id: 'stop-id-1' });
+  });
 });

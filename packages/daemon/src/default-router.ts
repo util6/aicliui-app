@@ -24,6 +24,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       confirmation: CliConfirmation;
     }
   >();
+  const activeRuns = new Map<string, AbortController>();
 
   router.register('runtime.get-status', async () => getRuntimeStatus(adapters));
   router.register('acp.get-available-agents', () => ({
@@ -87,6 +88,9 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     if (!adapter) {
       throw new Error(`Agent adapter '${backend}' was not found`);
     }
+    stopActiveRun(activeRuns, conversationId);
+    const runController = new AbortController();
+    activeRuns.set(conversationId, runController);
 
     store.addTextMessage({
       conversationId,
@@ -103,74 +107,93 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     });
 
     let assistantContent = '';
-    for await (const event of adapter.sendMessage({
-      conversationId,
-      input,
-      msgId: userMsgId,
-      workspace: conversation?.extra.workspace,
-      model: typeof conversation?.extra.currentModelId === 'string' ? conversation.extra.currentModelId : undefined,
-      sessionMode: typeof conversation?.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined,
-      ...(files.length ? { files } : {}),
-    })) {
-      switch (event.type) {
-        case 'thought':
-          emitChatStream(context, conversationId, assistantMsgId, 'thought', {
-            subject: event.subject,
-            description: event.description,
-          });
-          break;
-        case 'thinking':
-          emitChatStream(context, conversationId, assistantMsgId, 'thinking', {
-            content: event.content,
-            ...(event.subject ? { subject: event.subject } : {}),
-            ...(event.duration !== undefined ? { duration: event.duration } : {}),
-            status: event.status ?? 'thinking',
-          });
-          break;
-        case 'tool_call':
-          emitChatStream(context, conversationId, assistantMsgId, 'tool_call', event.data);
-          break;
-        case 'tool_group':
-          emitChatStream(context, conversationId, assistantMsgId, 'tool_group', event.tools);
-          break;
-        case 'acp_tool_call':
-          emitChatStream(context, conversationId, assistantMsgId, 'acp_tool_call', event.data);
-          break;
-        case 'codex_tool_call':
-          emitChatStream(context, conversationId, assistantMsgId, 'codex_tool_call', event.data);
-          break;
-        case 'plan':
-          emitChatStream(context, conversationId, assistantMsgId, 'plan', event.data);
-          break;
-        case 'context_usage':
-          emitChatStream(context, conversationId, assistantMsgId, 'acp_context_usage', {
-            used: event.used,
-            size: event.size,
-          });
-          break;
-        case 'agent_status':
-          emitChatStream(context, conversationId, assistantMsgId, 'agent_status', event.data);
-          break;
-        case 'available_commands':
-          emitChatStream(context, conversationId, assistantMsgId, 'available_commands', {
-            commands: event.commands,
-          });
-          break;
-        case 'permission': {
-          const confirmation = normalizeConfirmation(event.confirmation, conversationId, assistantMsgId);
-          pendingConfirmations.set(confirmation.id, { backend, confirmation });
-          context.emit('confirmation.add', confirmation);
-          break;
-        }
-        case 'permission_resolved':
-          if (pendingConfirmations.delete(event.confirmationId)) {
-            context.emit('confirmation.remove', { conversation_id: conversationId, id: event.confirmationId });
+    try {
+      for await (const event of adapter.sendMessage({
+        conversationId,
+        input,
+        msgId: userMsgId,
+        workspace: conversation?.extra.workspace,
+        model: typeof conversation?.extra.currentModelId === 'string' ? conversation.extra.currentModelId : undefined,
+        sessionMode: typeof conversation?.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined,
+        signal: runController.signal,
+        ...(files.length ? { files } : {}),
+      })) {
+        switch (event.type) {
+          case 'thought':
+            emitChatStream(context, conversationId, assistantMsgId, 'thought', {
+              subject: event.subject,
+              description: event.description,
+            });
+            break;
+          case 'thinking':
+            emitChatStream(context, conversationId, assistantMsgId, 'thinking', {
+              content: event.content,
+              ...(event.subject ? { subject: event.subject } : {}),
+              ...(event.duration !== undefined ? { duration: event.duration } : {}),
+              status: event.status ?? 'thinking',
+            });
+            break;
+          case 'tool_call':
+            emitChatStream(context, conversationId, assistantMsgId, 'tool_call', event.data);
+            break;
+          case 'tool_group':
+            emitChatStream(context, conversationId, assistantMsgId, 'tool_group', event.tools);
+            break;
+          case 'acp_tool_call':
+            emitChatStream(context, conversationId, assistantMsgId, 'acp_tool_call', event.data);
+            break;
+          case 'codex_tool_call':
+            emitChatStream(context, conversationId, assistantMsgId, 'codex_tool_call', event.data);
+            break;
+          case 'plan':
+            emitChatStream(context, conversationId, assistantMsgId, 'plan', event.data);
+            break;
+          case 'context_usage':
+            emitChatStream(context, conversationId, assistantMsgId, 'acp_context_usage', {
+              used: event.used,
+              size: event.size,
+            });
+            break;
+          case 'agent_status':
+            emitChatStream(context, conversationId, assistantMsgId, 'agent_status', event.data);
+            break;
+          case 'available_commands':
+            emitChatStream(context, conversationId, assistantMsgId, 'available_commands', {
+              commands: event.commands,
+            });
+            break;
+          case 'permission': {
+            const confirmation = normalizeConfirmation(event.confirmation, conversationId, assistantMsgId);
+            pendingConfirmations.set(confirmation.id, { backend, confirmation });
+            context.emit('confirmation.add', confirmation);
+            break;
           }
-          break;
-        case 'content':
-          assistantContent += event.content;
-          emitChatStream(context, conversationId, assistantMsgId, 'content', { content: event.content });
-          break;
+          case 'permission_resolved':
+            if (pendingConfirmations.delete(event.confirmationId)) {
+              context.emit('confirmation.remove', { conversation_id: conversationId, id: event.confirmationId });
+            }
+            break;
+          case 'content':
+            assistantContent += event.content;
+            emitChatStream(context, conversationId, assistantMsgId, 'content', { content: event.content });
+            break;
+        }
+      }
+      if (runController.signal.aborted && !assistantContent) {
+        assistantContent = 'Generation stopped.';
+        emitChatStream(context, conversationId, assistantMsgId, 'content', { content: assistantContent });
+      }
+    } catch (error) {
+      if (!runController.signal.aborted && !isAbortError(error)) {
+        throw error;
+      }
+      if (!assistantContent) {
+        assistantContent = 'Generation stopped.';
+        emitChatStream(context, conversationId, assistantMsgId, 'content', { content: assistantContent });
+      }
+    } finally {
+      if (activeRuns.get(conversationId) === runController) {
+        activeRuns.delete(conversationId);
       }
     }
 
@@ -189,7 +212,10 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
 
     return { success: true };
   });
-  router.register('chat.stop.stream', () => ({ success: true }));
+  router.register('chat.stop.stream', (data) => {
+    const conversationId = stringParam(asRecord(data).conversation_id);
+    return { success: true, stopped: stopActiveRun(activeRuns, conversationId) };
+  });
   router.register('confirmation.list', (data) => {
     const params = asRecord(data);
     const conversationId = stringParam(params.conversation_id);
@@ -235,6 +261,21 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
   router.register('get-image-base64', async (data) => await readImageBase64(stringParam(asRecord(data).path)));
 
   return router;
+}
+
+function stopActiveRun(activeRuns: Map<string, AbortController>, conversationId: string): boolean {
+  const controller = activeRuns.get(conversationId);
+  if (!controller) return false;
+  controller.abort(new Error('Generation stopped by user'));
+  activeRuns.delete(conversationId);
+  return true;
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof Error && error.name === 'AbortError') ||
+    (error instanceof Error && error.message.toLowerCase().includes('aborted'))
+  );
 }
 
 function emitChatStream(

@@ -141,6 +141,7 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
     workspace?: string;
     model?: string;
     agent?: string;
+    signal?: AbortSignal;
   }): Promise<string> {
     const location = {
       ...(input.directory ? { directory: input.directory } : {}),
@@ -149,6 +150,7 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
     const model = parseOpenCodeModelRef(input.model);
     const response = await requestJson<{ data?: { id?: unknown } }>('/api/session', {
       method: 'POST',
+      signal: input.signal,
       body: JSON.stringify({
         ...(Object.keys(location).length ? { location } : {}),
         ...(model ? { model } : {}),
