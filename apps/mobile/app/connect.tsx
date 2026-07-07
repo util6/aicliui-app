@@ -10,6 +10,7 @@ import { useThemeColor } from '../src/hooks/useThemeColor';
 import { wsService } from '../src/services/websocket';
 import { getOrCreateLocalDaemonConfig, LOCAL_DAEMON_PORT } from '../src/services/localRuntime';
 import {
+  installOrStartLocalRuntime,
   openTermuxIfAvailable,
   probeTermuxRuntime,
   type ProbeState,
@@ -33,6 +34,7 @@ export default function ConnectScreen() {
   const border = useThemeColor({}, 'border');
   const textSecondary = useThemeColor({}, 'textSecondary');
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isInstalling, setIsInstalling] = useState(false);
   const [runtimeProbe, setRuntimeProbe] = useState<TermuxRuntimeProbe>({
     nativeModule: 'unavailable',
     termuxInstalled: 'unknown',
@@ -64,26 +66,34 @@ export default function ConnectScreen() {
   };
 
   const handleInstallRuntime = async () => {
-    const probe = await probeTermuxRuntime();
-    setRuntimeProbe(probe);
+    setIsInstalling(true);
+    try {
+      const result = await installOrStartLocalRuntime();
+      const probe = await probeTermuxRuntime();
+      setRuntimeProbe(probe);
 
-    if (probe.nativeModule === 'unavailable') {
-      Alert.alert(t('connect.installRuntime'), t('connect.nativeModuleUnavailable'));
-      return;
+      if (result.status === 'native_unavailable') {
+        Alert.alert(t('connect.installRuntime'), t('connect.nativeModuleUnavailable'));
+        return;
+      }
+
+      if (result.status === 'termux_missing') {
+        Alert.alert(t('connect.termux'), t('connect.termuxMissing'));
+        await openTermuxIfAvailable();
+        return;
+      }
+
+      if (result.status === 'permission_missing') {
+        Alert.alert(t('connect.termux'), t('connect.runCommandPermissionMissing'));
+        return;
+      }
+
+      Alert.alert(t('connect.installRuntime'), t('connect.runtimeStartRequested'));
+    } catch {
+      Alert.alert(t('common.error'), t('connect.runtimeStartFailed'));
+    } finally {
+      setIsInstalling(false);
     }
-
-    if (probe.termuxInstalled === 'no') {
-      Alert.alert(t('connect.termux'), t('connect.termuxMissing'));
-      await openTermuxIfAvailable();
-      return;
-    }
-
-    if (probe.runCommandPermission === 'no') {
-      Alert.alert(t('connect.termux'), t('connect.runCommandPermissionMissing'));
-      return;
-    }
-
-    Alert.alert(t('connect.installRuntime'), t('connect.installComingSoon'));
   };
 
   return (
@@ -142,11 +152,18 @@ export default function ConnectScreen() {
           style={[styles.secondaryButton, { borderColor: border }]}
           onPress={handleInstallRuntime}
           activeOpacity={0.8}
+          disabled={isInstalling}
         >
-          <Ionicons name='download-outline' size={20} color={tint} />
-          <ThemedText style={[styles.secondaryButtonText, { color: tint }]}>
-            {t('connect.installRuntime')}
-          </ThemedText>
+          {isInstalling ? (
+            <ActivityIndicator color={tint} />
+          ) : (
+            <>
+              <Ionicons name='download-outline' size={20} color={tint} />
+              <ThemedText style={[styles.secondaryButtonText, { color: tint }]}>
+                {t('connect.installRuntime')}
+              </ThemedText>
+            </>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>

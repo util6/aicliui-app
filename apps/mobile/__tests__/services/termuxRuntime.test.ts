@@ -2,8 +2,15 @@ import {
   hasRunCommandPermissionAsync,
   isTermuxInstalledAsync,
   openTermuxAppAsync,
+  runCommandAsync,
 } from '@aicliui/termux';
-import { openTermuxIfAvailable, probeTermuxRuntime } from '@/src/services/termuxRuntime';
+import * as localRuntime from '@/src/services/localRuntime';
+import {
+  buildTermuxBootstrapScript,
+  installOrStartLocalRuntime,
+  openTermuxIfAvailable,
+  probeTermuxRuntime,
+} from '@/src/services/termuxRuntime';
 
 jest.mock('@aicliui/termux', () => ({
   hasRunCommandPermissionAsync: jest.fn(),
@@ -15,6 +22,7 @@ jest.mock('@aicliui/termux', () => ({
 const mockIsTermuxInstalled = isTermuxInstalledAsync as jest.Mock;
 const mockHasRunCommandPermission = hasRunCommandPermissionAsync as jest.Mock;
 const mockOpenTermux = openTermuxAppAsync as jest.Mock;
+const mockRunCommand = runCommandAsync as jest.Mock;
 
 describe('termuxRuntime', () => {
   beforeEach(() => {
@@ -56,5 +64,54 @@ describe('termuxRuntime', () => {
   it('opens Termux when the native call succeeds', async () => {
     mockOpenTermux.mockResolvedValueOnce(true);
     await expect(openTermuxIfAvailable()).resolves.toBe(true);
+  });
+
+  it('builds a bootstrap script that prepares daemon directories and start command', () => {
+    const script = buildTermuxBootstrapScript({
+      host: '127.0.0.1',
+      port: '43117',
+      token: "tok'en",
+    });
+
+    expect(script).toContain('mkdir -p "$AICLIUI_HOME/bin" "$AICLIUI_HOME/daemon"');
+    expect(script).toContain("printf %s 'tok'\\''en' > \"$AICLIUI_HOME/daemon/token\"");
+    expect(script).toContain('pkg install -y nodejs');
+    expect(script).toContain('npm install --omit=dev --prefix "$AICLIUI_HOME/daemon"');
+    expect(script).toContain("import { WebSocketServer } from 'ws';");
+    expect(script).toContain("if (key === 'chat.send.message') return sendMessage(params, emit);");
+    expect(script).toContain('exec node ./aicliui-daemon.mjs');
+    expect(script).toContain('nohup "$AICLIUI_HOME/bin/start-daemon.sh"');
+  });
+
+  it('starts the local runtime through Termux RUN_COMMAND when prerequisites are ready', async () => {
+    jest.spyOn(localRuntime, 'getOrCreateLocalDaemonConfig').mockResolvedValueOnce({
+      host: '127.0.0.1',
+      port: '43117',
+      token: 'runtime-token',
+    });
+    mockIsTermuxInstalled.mockResolvedValueOnce(true);
+    mockHasRunCommandPermission.mockResolvedValueOnce(true);
+    mockRunCommand.mockResolvedValueOnce(true);
+
+    await expect(installOrStartLocalRuntime()).resolves.toEqual({
+      status: 'started',
+      config: { host: '127.0.0.1', port: '43117', token: 'runtime-token' },
+    });
+    expect(mockRunCommand).toHaveBeenCalledWith({
+      commandPath: '$PREFIX/bin/bash',
+      args: ['-s'],
+      stdin: expect.stringContaining('AICLIUI_HOME'),
+      workdir: '~',
+      background: true,
+      label: 'AICLIUI runtime bootstrap',
+    });
+  });
+
+  it('does not start Termux command when permission is missing', async () => {
+    mockIsTermuxInstalled.mockResolvedValueOnce(true);
+    mockHasRunCommandPermission.mockResolvedValueOnce(false);
+
+    await expect(installOrStartLocalRuntime()).resolves.toEqual({ status: 'permission_missing' });
+    expect(mockRunCommand).not.toHaveBeenCalled();
   });
 });
