@@ -7,6 +7,7 @@ import { ToolCallBlock } from './ToolCallBlock';
 import { useThemeColor } from '../../hooks/useThemeColor';
 import { isGroupComplete, countSteps, countErrors, getCurrentStepName } from '../../hooks/useProcessedMessages';
 import type { TMessage } from '../../utils/messageAdapter';
+import { normalizeToolMessages, type NormalizedToolStatus } from '../../utils/normalizeToolCall';
 
 type ToolCallSummaryProps = {
   messages: TMessage[];
@@ -179,56 +180,23 @@ function StepRowCollapsed({ message, onPress }: { message: TMessage; onPress: ()
 type StepItem = { name: string; status: 'executing' | 'success' | 'error' | 'pending' };
 
 function getStepItems(msg: TMessage, fallbackName: string): StepItem[] {
-  if (msg.type === 'tool_group' && Array.isArray(msg.content)) {
-    return msg.content.map((t: any) => ({
-      name: t.description || t.name || fallbackName,
-      status: normalizeStatus(t.status),
-    }));
-  }
-  if (msg.type === 'tool_call') {
-    return [
-      {
-        name: msg.content?.name || fallbackName,
-        status: normalizeStatus(msg.content?.status),
-      },
-    ];
-  }
-  if (msg.type === 'acp_tool_call') {
-    const update = msg.content?.update;
-    return [
-      {
-        name: update?.title || update?.kind || fallbackName,
-        status: normalizeAcpStatus(update?.status),
-      },
-    ];
-  }
-  if (msg.type === 'codex_tool_call') {
-    return [
-      {
-        name: msg.content?.title || msg.content?.description || msg.content?.kind || fallbackName,
-        status: normalizeStatus(msg.content?.status),
-      },
-    ];
-  }
-  return [{ name: fallbackName, status: 'pending' }];
+  const tools = normalizeToolMessages([msg]);
+  if (tools.length === 0) return [{ name: fallbackName, status: 'pending' }];
+
+  return tools.map((tool) => ({
+    name: tool.description || tool.name || fallbackName,
+    status: toStepStatus(tool.status),
+  }));
 }
 
-function normalizeStatus(s: string | undefined): StepItem['status'] {
-  if (!s) return 'executing';
-  const lower = s.toLowerCase();
-  if (lower === 'success' || lower === 'canceled') return 'success';
-  if (lower === 'error') return 'error';
-  if (lower === 'executing') return 'executing';
-  return 'pending';
-}
-
-function normalizeAcpStatus(s: string | undefined): StepItem['status'] {
-  switch (s) {
+function toStepStatus(status: NormalizedToolStatus): StepItem['status'] {
+  switch (status) {
     case 'completed':
+    case 'canceled':
       return 'success';
-    case 'failed':
+    case 'error':
       return 'error';
-    case 'in_progress':
+    case 'running':
       return 'executing';
     default:
       return 'pending';

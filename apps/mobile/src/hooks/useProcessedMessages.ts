@@ -1,5 +1,11 @@
 import { useMemo } from 'react';
 import type { TMessage, TMessageType } from '../utils/messageAdapter';
+import {
+  countNormalizedToolErrors,
+  getCurrentNormalizedToolName,
+  isNormalizedToolBatchComplete,
+  normalizeToolMessages,
+} from '../utils/normalizeToolCall';
 
 export type ToolSummaryVO = {
   type: 'tool_summary';
@@ -16,77 +22,19 @@ export function isToolCallType(type: TMessageType): boolean {
 }
 
 export function isGroupComplete(messages: TMessage[]): boolean {
-  return messages.every((msg) => {
-    if (msg.type === 'tool_group' && Array.isArray(msg.content)) {
-      return msg.content.every((t: any) => t.status === 'Success' || t.status === 'Error' || t.status === 'Canceled');
-    }
-    if (msg.type === 'tool_call') {
-      const s = msg.content?.status;
-      return isCompletedStatus(s) || isErrorStatus(s) || isCanceledStatus(s);
-    }
-    if (msg.type === 'acp_tool_call') {
-      const s = msg.content?.update?.status;
-      return s === 'completed' || s === 'failed';
-    }
-    if (msg.type === 'codex_tool_call') {
-      const s = msg.content?.status;
-      return isCompletedStatus(s) || isErrorStatus(s) || isCanceledStatus(s);
-    }
-    return true;
-  });
+  return isNormalizedToolBatchComplete(normalizeToolMessages(messages));
 }
 
 export function countSteps(messages: TMessage[]): number {
-  let count = 0;
-  for (const msg of messages) {
-    if (msg.type === 'tool_group' && Array.isArray(msg.content)) {
-      count += msg.content.length;
-    } else {
-      count += 1;
-    }
-  }
-  return count;
+  return normalizeToolMessages(messages).length;
 }
 
 export function countErrors(messages: TMessage[]): number {
-  let count = 0;
-  for (const msg of messages) {
-    if (msg.type === 'tool_group' && Array.isArray(msg.content)) {
-      count += msg.content.filter((t: any) => t.status === 'Error').length;
-    } else if (msg.type === 'tool_call') {
-      if (isErrorStatus(msg.content?.status)) count++;
-    } else if (msg.type === 'acp_tool_call') {
-      if (msg.content?.update?.status === 'failed') count++;
-    } else if (msg.type === 'codex_tool_call') {
-      if (isErrorStatus(msg.content?.status)) count++;
-    }
-  }
-  return count;
+  return countNormalizedToolErrors(normalizeToolMessages(messages));
 }
 
 export function getCurrentStepName(messages: TMessage[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.type === 'tool_group' && Array.isArray(msg.content)) {
-      for (let j = msg.content.length - 1; j >= 0; j--) {
-        const t = msg.content[j];
-        if (t.status === 'Executing') return t.description || t.name || '';
-      }
-    } else if (msg.type === 'tool_call') {
-      if (!isCompletedStatus(msg.content?.status) && !isErrorStatus(msg.content?.status)) {
-        return msg.content?.name || '';
-      }
-    } else if (msg.type === 'acp_tool_call') {
-      if (msg.content?.update?.status === 'in_progress') {
-        return msg.content?.update?.title || msg.content?.update?.kind || '';
-      }
-    } else if (msg.type === 'codex_tool_call') {
-      if (!isCompletedStatus(msg.content?.status) && !isErrorStatus(msg.content?.status)) {
-        return msg.content?.title || msg.content?.description || '';
-      }
-    }
-  }
-  return '';
+  return getCurrentNormalizedToolName(normalizeToolMessages(messages));
 }
 
 export function useProcessedMessages(messages: TMessage[]): ProcessedItem[] {
@@ -114,23 +62,4 @@ export function useProcessedMessages(messages: TMessage[]): ProcessedItem[] {
 
     return result;
   }, [messages]);
-}
-
-function normalizedStatus(status: string | undefined): string {
-  return typeof status === 'string' ? status.toLowerCase() : '';
-}
-
-function isCompletedStatus(status: string | undefined): boolean {
-  const value = normalizedStatus(status);
-  return value === 'success' || value === 'completed';
-}
-
-function isErrorStatus(status: string | undefined): boolean {
-  const value = normalizedStatus(status);
-  return value === 'error' || value === 'failed';
-}
-
-function isCanceledStatus(status: string | undefined): boolean {
-  const value = normalizedStatus(status);
-  return value === 'canceled' || value === 'cancelled';
 }
