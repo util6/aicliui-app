@@ -356,13 +356,18 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     const conversationId = stringParam(asRecord(data).conversation_id);
     const stopped = stopActiveRun(activeRuns, conversationId);
     activeTurnIds.delete(conversationId);
+    const runtime = idleRuntimeSummary('finished', pendingConfirmationCount(pendingConfirmations, conversationId));
     if (stopped) {
       store.updateConversation(conversationId, {
         status: 'finished',
-        runtime: idleRuntimeSummary('finished', pendingConfirmationCount(pendingConfirmations, conversationId)),
+        runtime,
       });
     }
-    return { success: true, stopped };
+    return {
+      success: true,
+      stopped,
+      runtime: stopped ? runtime : (store.getConversation(conversationId)?.runtime ?? runtime),
+    };
   });
   router.register('confirmation.list', (data) => {
     const params = asRecord(data);

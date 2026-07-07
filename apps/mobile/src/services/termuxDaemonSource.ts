@@ -968,15 +968,19 @@ function stopActiveRun(conversationId) {
 
 function stopStream(params) {
   const conversationId = requiredString(params.conversation_id);
-  if (!stopActiveRun(conversationId)) return { success: true, stopped: false };
+  const runtime = idleRuntimeSummary('finished', pendingConfirmationCount(conversationId));
+  if (!stopActiveRun(conversationId)) {
+    const conversation = conversations.get(conversationId);
+    return { success: true, stopped: false, runtime: conversation ? conversation.runtime || runtime : runtime };
+  }
   const conversation = conversations.get(conversationId);
   if (conversation) {
     conversation.status = 'finished';
-    conversation.runtime = idleRuntimeSummary('finished', pendingConfirmationCount(conversationId));
+    conversation.runtime = runtime;
     conversation.modifyTime = Date.now();
     void saveStore();
   }
-  return { success: true, stopped: true };
+  return { success: true, stopped: true, runtime };
 }
 
 async function sendOpenCodePrompt({

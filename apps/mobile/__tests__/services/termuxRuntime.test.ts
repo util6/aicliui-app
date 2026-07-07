@@ -301,7 +301,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain('const run = createActiveRun(conversationId, assistantMsgId);');
     expect(script).toContain('activeRuns.set(conversationId, run);');
     expect(script).toContain('activeRuns.delete(conversationId);');
-    expect(script).toContain("return { success: true, stopped: true };");
+    expect(script).toContain("return { success: true, stopped: true, runtime };");
     expect(script).toContain("runProcess('gemini', args, {");
     expect(script).toContain("runProcess('codex', args, {");
     expect(script).toContain('onTool: emitAssistantCodexTool');

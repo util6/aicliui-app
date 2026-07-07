@@ -1252,7 +1252,19 @@ describe('default bridge routes', () => {
       data: { id: 'm_stop', data: { conversation_id: 'stop-id-1' } },
     });
 
-    expect(stopResponse.data).toEqual({ success: true, stopped: true });
+    expect(stopResponse.data).toMatchObject({
+      success: true,
+      stopped: true,
+      runtime: {
+        state: 'idle',
+        can_send_message: true,
+        has_task: false,
+        task_status: 'finished',
+        is_processing: false,
+        pending_confirmations: 0,
+        turn_id: null,
+      },
+    });
     const [stoppedConversation] = await router.handleIncoming({
       name: 'subscribe-conversation.get',
       data: { id: 'm_get_stopped', data: { conversation_id: 'stop-id-1' } },

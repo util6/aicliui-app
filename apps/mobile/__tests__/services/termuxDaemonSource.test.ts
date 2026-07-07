@@ -54,6 +54,11 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('runtime: acceptedRuntime');
   });
 
+  it('returns an AionUi-style runtime acknowledgement when stopping local turns', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain("const runtime = idleRuntimeSummary('finished', pendingConfirmationCount(conversationId));");
+    expect(TERMUX_DAEMON_SOURCE).toContain('return { success: true, stopped: true, runtime };');
+  });
+
   it('emits AionUi-style turn.completed events after local turns finish', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("emit('turn.completed', buildTurnCompletedEvent");
     expect(TERMUX_DAEMON_SOURCE).toContain('function buildTurnCompletedEvent');
