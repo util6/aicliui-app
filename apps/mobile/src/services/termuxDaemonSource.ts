@@ -17,6 +17,7 @@ const token = process.env.AICLIUI_DAEMON_TOKEN || '';
 const startedAt = Date.now();
 const conversations = new Map();
 const messages = new Map();
+const activeRuns = new Map();
 let openCodeServerPromise = null;
 let saveQueue = Promise.resolve();
 const storeReady = loadStore();
@@ -50,7 +51,11 @@ server.on('connection', (socket, request) => {
     if (!id) return;
 
     const pushes = [];
-    const emit = (name, data) => pushes.push({ name, data });
+    const emit = (name, data) => {
+      const push = { name, data };
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(push));
+      else pushes.push(push);
+    };
     let data;
     try {
       data = await route(key, message.data.data, emit);
@@ -85,7 +90,7 @@ async function route(key, data, emit) {
   if (key === 'remove-conversation') return await removeConversation(requiredString(params.id));
   if (key === 'update-conversation') return await updateConversation(requiredString(params.id), isRecord(params.updates) ? params.updates : {});
   if (key === 'chat.send.message') return await sendMessage(params, emit);
-  if (key === 'chat.stop.stream') return { success: true };
+  if (key === 'chat.stop.stream') return stopStream(params);
   if (key === 'confirmation.list') return [];
   if (key === 'confirmation.confirm') return { success: true };
   if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);
@@ -357,6 +362,8 @@ async function sendMessage(params, emit) {
   const input = requiredString(params.input);
   const conversation = conversations.get(conversationId);
   if (!conversation) throw new Error("Conversation '" + conversationId + "' was not found");
+  stopActiveRun(conversationId);
+  const run = createActiveRun(conversationId);
   const userMsgId = typeof params.msg_id === 'string' ? params.msg_id : randomId();
   const assistantMsgId = 'assistant_' + userMsgId;
   const backend = typeof conversation.extra.backend === 'string' ? conversation.extra.backend : 'opencode';
@@ -368,6 +375,7 @@ async function sendMessage(params, emit) {
   const approvalMode = typeof conversation.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined;
   const selectedFiles = normalizeSelectedFiles(params.files, conversation.extra.defaultFiles, workspace);
   let assistantContent = '';
+  activeRuns.set(conversationId, run);
 
   await addTextMessage(conversationId, userMsgId, 'right', input);
   emit('chat.response.stream', { type: 'start', msg_id: assistantMsgId, conversation_id: conversationId, data: null });
@@ -383,7 +391,7 @@ async function sendMessage(params, emit) {
         conversation_id: conversationId,
         data: { subject: 'OpenCode', description: 'starting local server on 127.0.0.1:' + openCodePort },
       });
-      const result = await sendOpenCodePrompt({ input, workspace, files: selectedFiles });
+      const result = await sendOpenCodePrompt({ input, workspace, files: selectedFiles, signal: run.signal });
       emit('chat.response.stream', {
         type: 'thought',
         msg_id: assistantMsgId,
@@ -402,15 +410,19 @@ async function sendMessage(params, emit) {
         data: { subject: 'Gemini CLI', description: buildGeminiCommandDescription({ input, model, approvalMode }) },
       });
       assistantContent =
-        (await sendGeminiPrompt({ input, workspace, model, approvalMode, files: selectedFiles })) ||
+        (await sendGeminiPrompt({ input, workspace, model, approvalMode, files: selectedFiles, signal: run.signal })) ||
         'Gemini CLI completed, but no assistant text was returned.';
     } else {
       throw new Error("Agent backend '" + backend + "' is not supported by this Termux daemon.");
     }
   } catch (error) {
     assistantContent =
-      (backend === 'opencode' ? 'OpenCode runtime failed: ' : 'CLI runtime failed: ') +
-      (error instanceof Error ? error.message : 'Unknown runtime error');
+      run.signal.aborted || isAbortError(error)
+        ? 'Generation stopped.'
+        : (backend === 'opencode' ? 'OpenCode runtime failed: ' : 'CLI runtime failed: ') +
+          (error instanceof Error ? error.message : 'Unknown runtime error');
+  } finally {
+    if (activeRuns.get(conversationId) === run) activeRuns.delete(conversationId);
   }
 
   await addTextMessage(conversationId, assistantMsgId, 'left', assistantContent);
@@ -424,11 +436,37 @@ async function sendMessage(params, emit) {
   return { success: true };
 }
 
-async function sendOpenCodePrompt({ input, workspace, files }) {
+function createActiveRun(conversationId) {
+  const controller = new AbortController();
+  return {
+    conversationId,
+    signal: controller.signal,
+    cancel() {
+      controller.abort(new Error('Generation stopped by user'));
+    },
+  };
+}
+
+function stopActiveRun(conversationId) {
+  const run = activeRuns.get(conversationId);
+  if (!run) return false;
+  run.cancel();
+  activeRuns.delete(conversationId);
+  return true;
+}
+
+function stopStream(params) {
+  const conversationId = requiredString(params.conversation_id);
+  if (!stopActiveRun(conversationId)) return { success: true, stopped: false };
+  return { success: true, stopped: true };
+}
+
+async function sendOpenCodePrompt({ input, workspace, files, signal }) {
   const baseUrl = await ensureOpenCodeServer();
   const attachments = await buildOpenCodeFileAttachments(files, workspace);
   const session = await requestOpenCodeJson(baseUrl, '/api/session', {
     method: 'POST',
+    signal,
     body: JSON.stringify({
       ...(workspace ? { location: { directory: workspace } } : {}),
     }),
@@ -438,6 +476,7 @@ async function sendOpenCodePrompt({ input, workspace, files }) {
 
   await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/prompt', {
     method: 'POST',
+    signal,
     body: JSON.stringify({
       prompt: {
         text: input,
@@ -446,9 +485,10 @@ async function sendOpenCodePrompt({ input, workspace, files }) {
       },
     }),
   });
-  await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/wait', { method: 'POST' });
+  await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/wait', { method: 'POST', signal });
   const context = await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/context', {
     method: 'GET',
+    signal,
   });
 
   return {
@@ -475,10 +515,10 @@ function buildGeminiArgs({ input, model, approvalMode }) {
   ];
 }
 
-async function sendGeminiPrompt({ input, workspace, model, approvalMode, files }) {
+async function sendGeminiPrompt({ input, workspace, model, approvalMode, files, signal }) {
   const prompt = appendSelectedFilesToPrompt(input, files, workspace);
   const args = buildGeminiArgs({ input: prompt, model, approvalMode }).slice(1);
-  const result = await runProcess('gemini', args, { cwd: workspace || process.env.HOME || process.cwd() });
+  const result = await runProcess('gemini', args, { cwd: workspace || process.env.HOME || process.cwd(), signal });
   return extractGeminiStreamText(result.stdout) || result.stdout.trim();
 }
 
@@ -596,6 +636,11 @@ async function requestOpenCodeJson(baseUrl, path, init) {
 
 function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
+    const signal = options.signal;
+    if (signal?.aborted) {
+      reject(signal.reason || new Error('Process aborted'));
+      return;
+    }
     const child = spawn(command, args, {
       cwd: options.cwd || process.env.HOME || process.cwd(),
       env: process.env,
@@ -610,14 +655,28 @@ function runProcess(command, args, options = {}) {
       stderr += chunk.toString();
       if (stderr.length > 8000) stderr = stderr.slice(-8000);
     };
+    const abort = () => {
+      child.kill('SIGTERM');
+      setTimeout(() => child.kill('SIGKILL'), 1500).unref?.();
+    };
+    if (signal) signal.addEventListener('abort', abort);
     child.stdout.on('data', appendStdout);
     child.stderr.on('data', appendStderr);
     child.on('error', reject);
     child.on('exit', (code) => {
+      if (signal) signal.removeEventListener('abort', abort);
+      if (signal?.aborted) return reject(signal.reason || new Error('Process aborted'));
       if (code === 0) return resolve({ stdout, stderr });
       reject(new Error(command + ' exited with code ' + code + ': ' + (stderr || stdout).slice(-1000)));
     });
   });
+}
+
+function isAbortError(error) {
+  return (
+    isRecord(error) &&
+    (error.name === 'AbortError' || error.code === 'ABORT_ERR' || error.message === 'Generation stopped by user')
+  );
 }
 
 function extractGeminiStreamText(output) {

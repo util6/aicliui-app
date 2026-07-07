@@ -93,6 +93,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain("const storePath = process.env.AICLIUI_STORE_PATH || dataRoot + '/daemon/store.json';");
     expect(script).toContain("const bootstrapStatusPath = process.env.AICLIUI_BOOTSTRAP_STATUS || dataRoot + '/daemon/bootstrap.status';");
     expect(script).toContain('const storeReady = loadStore();');
+    expect(script).toContain('const activeRuns = new Map();');
     expect(script).toContain('bootstrap: await readBootstrapStatus()');
     expect(script).toContain('await storeReady;');
     expect(script).toContain('await rename(tmpPath, storePath);');
@@ -120,7 +121,15 @@ describe('termuxRuntime', () => {
     expect(script).toContain("'\\n\\nSelected files:\\n'");
     expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/wait'");
     expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/context'");
+    expect(script).toContain("if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(push));");
     expect(script).toContain("if (key === 'chat.send.message') return await sendMessage(params, emit);");
+    expect(script).toContain("if (key === 'chat.stop.stream') return stopStream(params);");
+    expect(script).toContain('const run = createActiveRun(conversationId);');
+    expect(script).toContain('activeRuns.set(conversationId, run);');
+    expect(script).toContain('activeRuns.delete(conversationId);');
+    expect(script).toContain("return { success: true, stopped: true };");
+    expect(script).toContain("runProcess('gemini', args, { cwd: workspace || process.env.HOME || process.cwd(), signal });");
+    expect(script).toContain("signal.addEventListener('abort', abort);");
     expect(script).toContain('exec node ./aicliui-daemon.mjs');
     expect(script).toContain('export AICLIUI_DAEMON_PID_FILE="$AICLIUI_HOME/daemon/daemon.pid"');
     expect(script).toContain('if [ -s "$AICLIUI_DAEMON_PID_FILE" ]; then');
