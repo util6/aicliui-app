@@ -403,14 +403,20 @@ async function sendMessage(params, emit) {
         conversation_id: conversationId,
         data: { subject: 'OpenCode', description: 'starting local server on 127.0.0.1:' + openCodePort },
       });
-      const result = await sendOpenCodePrompt({ input, workspace, files: selectedFiles, signal: run.signal });
+      const result = await sendOpenCodePrompt({
+        input,
+        workspace,
+        files: selectedFiles,
+        signal: run.signal,
+        onContent: emitAssistantContent,
+      });
       emit('chat.response.stream', {
         type: 'thought',
         msg_id: assistantMsgId,
         conversation_id: conversationId,
         data: { subject: 'OpenCode', description: 'session ' + result.sessionId },
       });
-      assistantContent = result.text || 'OpenCode completed, but no assistant text was returned from the session context.';
+      if (!assistantContent) assistantContent = result.text || 'OpenCode completed, but no assistant text was returned from the session context.';
     } else if (backend === 'gemini') {
       if (!(await commandExists('gemini'))) {
         throw new Error('gemini command not found. The bootstrap tried npm install -g @google/gemini-cli@latest; check Termux npm output in ~/.aicliui/logs/daemon.log.');
@@ -482,7 +488,7 @@ function stopStream(params) {
   return { success: true, stopped: true };
 }
 
-async function sendOpenCodePrompt({ input, workspace, files, signal }) {
+async function sendOpenCodePrompt({ input, workspace, files, signal, onContent }) {
   const baseUrl = await ensureOpenCodeServer();
   const attachments = await buildOpenCodeFileAttachments(files, workspace);
   const session = await requestOpenCodeJson(baseUrl, '/api/session', {
@@ -494,19 +500,26 @@ async function sendOpenCodePrompt({ input, workspace, files, signal }) {
   });
   const sessionId = session && session.data && typeof session.data.id === 'string' ? session.data.id : '';
   if (!sessionId) throw new Error('OpenCode session.create returned no session id');
+  const eventStream = subscribeOpenCodeTextDeltas(baseUrl, workspace, sessionId, signal, onContent);
 
-  await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/prompt', {
-    method: 'POST',
-    signal,
-    body: JSON.stringify({
-      prompt: {
-        text: input,
-        files: attachments,
-        agents: [],
-      },
-    }),
-  });
-  await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/wait', { method: 'POST', signal });
+  try {
+    await eventStream.ready;
+    await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/prompt', {
+      method: 'POST',
+      signal,
+      body: JSON.stringify({
+        prompt: {
+          text: input,
+          files: attachments,
+          agents: [],
+        },
+      }),
+    });
+    await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/wait', { method: 'POST', signal });
+  } finally {
+    eventStream.close();
+    await eventStream.done;
+  }
   const context = await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/context', {
     method: 'GET',
     signal,
@@ -516,6 +529,106 @@ async function sendOpenCodePrompt({ input, workspace, files, signal }) {
     sessionId,
     text: extractOpenCodeAssistantText(Array.isArray(context && context.data) ? context.data : []),
   };
+}
+
+function subscribeOpenCodeTextDeltas(baseUrl, workspace, sessionId, signal, onContent) {
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(signal.reason || new Error('OpenCode event stream aborted'));
+  if (signal?.aborted) abortFromParent();
+  else signal?.addEventListener('abort', abortFromParent, { once: true });
+
+  let resolveReady;
+  const ready = new Promise((resolve) => {
+    resolveReady = resolve;
+  });
+  const done = (async () => {
+    try {
+      const response = await fetch(
+        baseUrl + '/api/event?location%5Bdirectory%5D=' + encodeURIComponent(workspace),
+        { method: 'GET', signal: controller.signal },
+      );
+      resolveReady();
+      if (!response.ok || !response.body) return;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const extractTextDelta = createOpenCodeTextDeltaExtractor(sessionId);
+      const parse = createSseParser((event) => {
+        const text = extractTextDelta(event);
+        if (text) onContent(text);
+      });
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        parse(decoder.decode(next.value, { stream: true }));
+      }
+      parse(decoder.decode());
+    } catch (error) {
+      resolveReady();
+      if (!controller.signal.aborted && !signal?.aborted) {
+        console.warn('OpenCode event stream failed:', error instanceof Error ? error.message : error);
+      }
+    } finally {
+      signal?.removeEventListener('abort', abortFromParent);
+    }
+  })();
+
+  return {
+    ready,
+    done,
+    close() {
+      controller.abort(new Error('OpenCode event stream closed'));
+    },
+  };
+}
+
+function createSseParser(onEvent) {
+  let buffer = '';
+  return (chunk) => {
+    buffer += chunk;
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() || '';
+    for (const block of blocks) parseSseEventBlock(block, onEvent);
+  };
+}
+
+function parseSseEventBlock(block, onEvent) {
+  const data = block
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice('data:'.length).trimStart())
+    .join('\n');
+  if (!data) return;
+  try {
+    onEvent(JSON.parse(data));
+  } catch {
+    // Ignore malformed event frames.
+  }
+}
+
+function createOpenCodeTextDeltaExtractor(sessionId) {
+  const textByPartId = new Map();
+  return (event) => extractOpenCodeEventTextDelta(event, sessionId, textByPartId);
+}
+
+function extractOpenCodeEventTextDelta(event, sessionId, textByPartId) {
+  if (!isRecord(event)) return '';
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type === 'session.next.text.delta' && data.sessionID === sessionId && typeof data.delta === 'string') {
+    return data.delta;
+  }
+  if (type !== 'message.part.updated') return '';
+  const part = isRecord(data.part) ? data.part : {};
+  const partSessionId = typeof data.sessionID === 'string' ? data.sessionID : part.sessionID;
+  if (partSessionId !== sessionId || part.type !== 'text') return '';
+  if (typeof data.delta === 'string') return data.delta;
+
+  const partId = typeof part.id === 'string' ? part.id : '';
+  if (!partId || typeof part.text !== 'string') return '';
+  const previous = textByPartId.get(partId) || '';
+  textByPartId.set(partId, part.text);
+  return part.text.startsWith(previous) ? part.text.slice(previous.length) : '';
 }
 
 function buildGeminiCommandDescription({ input, model, approvalMode }) {

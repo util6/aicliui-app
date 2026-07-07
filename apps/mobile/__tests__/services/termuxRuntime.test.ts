@@ -121,6 +121,16 @@ describe('termuxRuntime', () => {
     expect(script).toContain('const selectedFiles = normalizeSelectedFiles(params.files, conversation.extra.defaultFiles, workspace);');
     expect(script).toContain("const rawPath = value.startsWith('/') || value.startsWith('~') ? value : join(root, value);");
     expect(script).toContain('const attachments = await buildOpenCodeFileAttachments(files, workspace);');
+    expect(script).toContain('const eventStream = subscribeOpenCodeTextDeltas(baseUrl, workspace, sessionId, signal, onContent);');
+    expect(script).toContain('await eventStream.ready;');
+    expect(script).toContain('eventStream.close();');
+    expect(script).toContain("'/api/event?location%5Bdirectory%5D=' + encodeURIComponent(workspace)");
+    expect(script).toContain('parseSseEventBlock');
+    expect(script).toContain('extractOpenCodeEventTextDelta');
+    expect(script).toContain('createOpenCodeTextDeltaExtractor');
+    expect(script).toContain("type !== 'message.part.updated'");
+    expect(script).toContain("part.type !== 'text'");
+    expect(script).toContain("type === 'session.next.text.delta'");
     expect(script).toContain('uri: pathToFileURL(filePath).toString()');
     expect(script).toContain('files: attachments');
     expect(script).toContain('appendSelectedFilesToPrompt(input, files, workspace)');
