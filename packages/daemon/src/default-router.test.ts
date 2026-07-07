@@ -466,6 +466,20 @@ describe('default bridge routes', () => {
       },
     });
 
+    expect(messages[0].data).toMatchObject({
+      success: true,
+      msg_id: 'user-msg-1',
+      turn_id: 'assistant_user-msg-1',
+      runtime: {
+        state: 'running',
+        can_send_message: false,
+        has_task: true,
+        task_status: 'running',
+        is_processing: true,
+        pending_confirmations: 0,
+        turn_id: 'assistant_user-msg-1',
+      },
+    });
     expect(messages.map((message) => message.name)).toEqual([
       'subscribe.callback-chat.send.messagem_send',
       'message.userCreated',
@@ -712,7 +726,12 @@ describe('default bridge routes', () => {
       'chat.response.stream',
       'turn.completed',
     ]);
-    expect(messages[0].data).toEqual({ success: true });
+    expect(messages[0].data).toMatchObject({
+      success: true,
+      msg_id: 'user-msg-failure',
+      turn_id: 'assistant_user-msg-failure',
+      runtime: { state: 'running', turn_id: 'assistant_user-msg-failure' },
+    });
     expect(messages[2].data).toMatchObject({ type: 'start', conversation_id: 'failure-id-1' });
     expect(messages[3].data).toMatchObject({
       type: 'content',

@@ -756,6 +756,7 @@ async function sendMessage(params, emit) {
   const model = typeof conversation.extra.currentModelId === 'string' ? conversation.extra.currentModelId : undefined;
   const approvalMode = typeof conversation.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined;
   const selectedFiles = normalizeSelectedFiles(params.files, conversation.extra.defaultFiles, workspace);
+  const acceptedRuntime = runningRuntimeSummary('running', assistantMsgId, pendingConfirmationCount(conversationId));
   let assistantContent = '';
   let assistantContentStreamed = false;
   const emitAssistantContent = (content) => {
@@ -820,13 +821,14 @@ async function sendMessage(params, emit) {
   };
   activeRuns.set(conversationId, run);
   conversation.status = 'running';
-  conversation.runtime = runningRuntimeSummary('running', assistantMsgId, pendingConfirmationCount(conversationId));
+  conversation.runtime = acceptedRuntime;
   conversation.modifyTime = Date.now();
 
   const userMessage = await addTextMessage(conversationId, userMsgId, 'right', input);
   emit('message.userCreated', buildUserCreatedEvent(userMessage));
   emit('chat.response.stream', { type: 'start', msg_id: assistantMsgId, conversation_id: conversationId, data: null });
 
+  void (async () => {
   try {
     if (backend === 'opencode') {
       if (!(await commandExists('opencode'))) {
@@ -932,7 +934,16 @@ async function sendMessage(params, emit) {
   }
   emit('chat.response.stream', { type: 'finish', msg_id: assistantMsgId, conversation_id: conversationId, data: null });
   emit('turn.completed', buildTurnCompletedEvent({ conversation, conversationId, turnId: assistantMsgId, backend, assistantMessage }));
-  return { success: true };
+  })().catch((error) => {
+    console.warn('AICLIUI detached send failed:', error instanceof Error ? error.message : error);
+  });
+
+  return {
+    success: true,
+    msg_id: userMessage.msg_id,
+    turn_id: assistantMsgId,
+    runtime: acceptedRuntime,
+  };
 }
 
 function createActiveRun(conversationId, turnId) {

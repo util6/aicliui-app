@@ -41,9 +41,17 @@ describe('Termux daemon OpenCode slash commands', () => {
   it('persists AionUi-style runtime summaries on local conversations', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("runtime: idleRuntimeSummary('finished', 0)");
     expect(TERMUX_DAEMON_SOURCE).toContain('function runningRuntimeSummary(status, turnId, pendingConfirmationCount)');
-    expect(TERMUX_DAEMON_SOURCE).toContain("conversation.runtime = runningRuntimeSummary('running', assistantMsgId, pendingConfirmationCount(conversationId));");
+    expect(TERMUX_DAEMON_SOURCE).toContain("const acceptedRuntime = runningRuntimeSummary('running', assistantMsgId");
+    expect(TERMUX_DAEMON_SOURCE).toContain('conversation.runtime = acceptedRuntime;');
     expect(TERMUX_DAEMON_SOURCE).toContain("conversation.runtime = runningRuntimeSummary('waiting_confirmation', assistantMsgId, pendingConfirmationCount(conversationId));");
     expect(TERMUX_DAEMON_SOURCE).toContain("conversation.runtime = idleRuntimeSummary('finished', pendingConfirmationCount(conversationId));");
+  });
+
+  it('returns an AionUi-style send acknowledgement before detached local turn work completes', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain('void (async () => {');
+    expect(TERMUX_DAEMON_SOURCE).toContain('msg_id: userMessage.msg_id');
+    expect(TERMUX_DAEMON_SOURCE).toContain('turn_id: assistantMsgId');
+    expect(TERMUX_DAEMON_SOURCE).toContain('runtime: acceptedRuntime');
   });
 
   it('emits AionUi-style turn.completed events after local turns finish', () => {

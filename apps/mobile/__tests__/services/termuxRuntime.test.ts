@@ -295,6 +295,9 @@ describe('termuxRuntime', () => {
     expect(script).toContain("if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(push));");
     expect(script).toContain("if (key === 'chat.send.message') return await sendMessage(params, emit);");
     expect(script).toContain("if (key === 'chat.stop.stream') return stopStream(params);");
+    expect(script).toContain("const acceptedRuntime = runningRuntimeSummary('running', assistantMsgId");
+    expect(script).toContain('void (async () => {');
+    expect(script).toContain('turn_id: assistantMsgId');
     expect(script).toContain('const run = createActiveRun(conversationId, assistantMsgId);');
     expect(script).toContain('activeRuns.set(conversationId, run);');
     expect(script).toContain('activeRuns.delete(conversationId);');

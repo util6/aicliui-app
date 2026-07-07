@@ -74,4 +74,57 @@ describe('BridgeRouter', () => {
       },
     ]);
   });
+
+  it('streams detached handler work through a live emit sink without delaying the callback', async () => {
+    const router = new BridgeRouter();
+    const liveMessages: unknown[] = [];
+    let releaseDetachedWork: (() => void) | undefined;
+    const detachedWork = new Promise<void>((resolve) => {
+      releaseDetachedWork = resolve;
+    });
+
+    router.register('chat.send.message', async (_data, context) => {
+      context.emit('chat.response.stream', { type: 'start', conversation_id: 'conv-1' });
+      context.runDetached(async () => {
+        await detachedWork;
+        context.emit('chat.response.stream', { type: 'finish', conversation_id: 'conv-1' });
+      });
+      return { success: true, turn_id: 'turn-1' };
+    });
+
+    const responses = await router.handleIncoming(
+      {
+        name: 'subscribe-chat.send.message',
+        data: { id: 'm_4', data: { conversation_id: 'conv-1', input: 'hello' } },
+      },
+      { emit: (message) => liveMessages.push(message) },
+    );
+
+    expect(responses).toEqual([
+      {
+        name: 'subscribe.callback-chat.send.messagem_4',
+        data: { success: true, turn_id: 'turn-1' },
+      },
+    ]);
+    expect(liveMessages).toEqual([
+      {
+        name: 'chat.response.stream',
+        data: { type: 'start', conversation_id: 'conv-1' },
+      },
+    ]);
+
+    releaseDetachedWork?.();
+    await new Promise(process.nextTick);
+
+    expect(liveMessages).toEqual([
+      {
+        name: 'chat.response.stream',
+        data: { type: 'start', conversation_id: 'conv-1' },
+      },
+      {
+        name: 'chat.response.stream',
+        data: { type: 'finish', conversation_id: 'conv-1' },
+      },
+    ]);
+  });
 });

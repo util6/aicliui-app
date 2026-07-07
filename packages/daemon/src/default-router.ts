@@ -150,20 +150,25 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     const input = stringParam(params.input);
     const userMsgId = typeof params.msg_id === 'string' ? params.msg_id : undefined;
     const assistantMsgId = `assistant_${userMsgId || Date.now().toString(36)}`;
-    const conversation = store.getConversation(conversationId);
-    const files = mergeFiles(conversation?.extra.defaultFiles, params.files);
-    const backend = conversation?.extra.backend || 'opencode';
+    const conversation = requireConversation(store, conversationId);
+    const files = mergeFiles(conversation.extra.defaultFiles, params.files);
+    const backend = conversation.extra.backend || 'opencode';
     const adapter = adapters.get(backend);
     if (!adapter) {
       throw new Error(`Agent adapter '${backend}' was not found`);
     }
     stopActiveRun(activeRuns, conversationId);
     const runController = new AbortController();
+    const acceptedRuntime = runningRuntimeSummary(
+      'running',
+      assistantMsgId,
+      pendingConfirmationCount(pendingConfirmations, conversationId),
+    );
     activeRuns.set(conversationId, runController);
     activeTurnIds.set(conversationId, assistantMsgId);
     store.updateConversation(conversationId, {
       status: 'running',
-      runtime: runningRuntimeSummary('running', assistantMsgId, pendingConfirmationCount(pendingConfirmations, conversationId)),
+      runtime: acceptedRuntime,
     });
 
     const userMessage = store.addTextMessage({
@@ -181,160 +186,171 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       data: null,
     });
 
-    let assistantContent = '';
-    try {
-      for await (const event of adapter.sendMessage({
-        conversationId,
-        input,
-        msgId: userMsgId,
-        workspace: conversation?.extra.workspace,
-        model: typeof conversation?.extra.currentModelId === 'string' ? conversation.extra.currentModelId : undefined,
-        sessionMode: typeof conversation?.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined,
-        signal: runController.signal,
-        ...(files.length ? { files } : {}),
-      })) {
-        switch (event.type) {
-          case 'thought':
-            emitChatStream(context, conversationId, assistantMsgId, 'thought', {
-              subject: event.subject,
-              description: event.description,
-            });
-            break;
-          case 'thinking':
-            emitChatStream(context, conversationId, assistantMsgId, 'thinking', {
-              content: event.content,
-              ...(event.subject ? { subject: event.subject } : {}),
-              ...(event.duration !== undefined ? { duration: event.duration } : {}),
-              status: event.status ?? 'thinking',
-            });
-            break;
-          case 'tool_call':
-            emitChatStream(context, conversationId, assistantMsgId, 'tool_call', event.data);
-            break;
-          case 'tool_group':
-            emitChatStream(context, conversationId, assistantMsgId, 'tool_group', event.tools);
-            break;
-          case 'acp_tool_call':
-            emitChatStream(context, conversationId, assistantMsgId, 'acp_tool_call', event.data);
-            break;
-          case 'codex_tool_call':
-            emitChatStream(context, conversationId, assistantMsgId, 'codex_tool_call', event.data);
-            break;
-          case 'plan':
-            emitChatStream(context, conversationId, assistantMsgId, 'plan', event.data);
-            break;
-          case 'context_usage':
-            store.updateConversation(conversationId, {
-              extra: {
-                lastContextUsage: {
-                  used: event.used,
-                  size: event.size,
+    context.runDetached(async () => {
+      let assistantContent = '';
+      try {
+        for await (const event of adapter.sendMessage({
+          conversationId,
+          input,
+          msgId: userMessage.msg_id,
+          workspace: conversation.extra.workspace,
+          model:
+            typeof conversation.extra.currentModelId === 'string'
+              ? conversation.extra.currentModelId
+              : undefined,
+          sessionMode:
+            typeof conversation.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined,
+          signal: runController.signal,
+          ...(files.length ? { files } : {}),
+        })) {
+          switch (event.type) {
+            case 'thought':
+              emitChatStream(context, conversationId, assistantMsgId, 'thought', {
+                subject: event.subject,
+                description: event.description,
+              });
+              break;
+            case 'thinking':
+              emitChatStream(context, conversationId, assistantMsgId, 'thinking', {
+                content: event.content,
+                ...(event.subject ? { subject: event.subject } : {}),
+                ...(event.duration !== undefined ? { duration: event.duration } : {}),
+                status: event.status ?? 'thinking',
+              });
+              break;
+            case 'tool_call':
+              emitChatStream(context, conversationId, assistantMsgId, 'tool_call', event.data);
+              break;
+            case 'tool_group':
+              emitChatStream(context, conversationId, assistantMsgId, 'tool_group', event.tools);
+              break;
+            case 'acp_tool_call':
+              emitChatStream(context, conversationId, assistantMsgId, 'acp_tool_call', event.data);
+              break;
+            case 'codex_tool_call':
+              emitChatStream(context, conversationId, assistantMsgId, 'codex_tool_call', event.data);
+              break;
+            case 'plan':
+              emitChatStream(context, conversationId, assistantMsgId, 'plan', event.data);
+              break;
+            case 'context_usage':
+              store.updateConversation(conversationId, {
+                extra: {
+                  lastContextUsage: {
+                    used: event.used,
+                    size: event.size,
+                  },
                 },
-              },
-            });
-            emitChatStream(context, conversationId, assistantMsgId, 'acp_context_usage', {
-              used: event.used,
-              size: event.size,
-            });
-            break;
-          case 'agent_status':
-            emitChatStream(context, conversationId, assistantMsgId, 'agent_status', event.data);
-            break;
-          case 'available_commands':
-            emitChatStream(context, conversationId, assistantMsgId, 'available_commands', {
-              commands: event.commands,
-            });
-            break;
-          case 'permission': {
-            const confirmation = normalizeConfirmation(event.confirmation, conversationId, assistantMsgId);
-            pendingConfirmations.set(confirmation.id, { backend, confirmation });
-            store.updateConversation(conversationId, {
-              status: 'waiting_confirmation',
-              runtime: runningRuntimeSummary(
-                'waiting_confirmation',
-                assistantMsgId,
-                pendingConfirmationCount(pendingConfirmations, conversationId),
-              ),
-            });
-            context.emit('confirmation.add', confirmation);
-            break;
-          }
-          case 'permission_resolved':
-            if (pendingConfirmations.delete(event.confirmationId)) {
-              if (activeRuns.get(conversationId) === runController) {
-                store.updateConversation(conversationId, {
-                  status: 'running',
-                  runtime: runningRuntimeSummary(
-                    'running',
-                    assistantMsgId,
-                    pendingConfirmationCount(pendingConfirmations, conversationId),
-                  ),
-                });
-              }
-              context.emit('confirmation.remove', { conversation_id: conversationId, id: event.confirmationId });
+              });
+              emitChatStream(context, conversationId, assistantMsgId, 'acp_context_usage', {
+                used: event.used,
+                size: event.size,
+              });
+              break;
+            case 'agent_status':
+              emitChatStream(context, conversationId, assistantMsgId, 'agent_status', event.data);
+              break;
+            case 'available_commands':
+              emitChatStream(context, conversationId, assistantMsgId, 'available_commands', {
+                commands: event.commands,
+              });
+              break;
+            case 'permission': {
+              const confirmation = normalizeConfirmation(event.confirmation, conversationId, assistantMsgId);
+              pendingConfirmations.set(confirmation.id, { backend, confirmation });
+              store.updateConversation(conversationId, {
+                status: 'waiting_confirmation',
+                runtime: runningRuntimeSummary(
+                  'waiting_confirmation',
+                  assistantMsgId,
+                  pendingConfirmationCount(pendingConfirmations, conversationId),
+                ),
+              });
+              context.emit('confirmation.add', confirmation);
+              break;
             }
-            break;
-          case 'content':
-            assistantContent += event.content;
-            emitChatStream(context, conversationId, assistantMsgId, 'content', { content: event.content });
-            break;
+            case 'permission_resolved':
+              if (pendingConfirmations.delete(event.confirmationId)) {
+                if (activeRuns.get(conversationId) === runController) {
+                  store.updateConversation(conversationId, {
+                    status: 'running',
+                    runtime: runningRuntimeSummary(
+                      'running',
+                      assistantMsgId,
+                      pendingConfirmationCount(pendingConfirmations, conversationId),
+                    ),
+                  });
+                }
+                context.emit('confirmation.remove', { conversation_id: conversationId, id: event.confirmationId });
+              }
+              break;
+            case 'content':
+              assistantContent += event.content;
+              emitChatStream(context, conversationId, assistantMsgId, 'content', { content: event.content });
+              break;
+          }
         }
-      }
-      if (runController.signal.aborted && !assistantContent) {
-        assistantContent = 'Generation stopped.';
-        emitChatStream(context, conversationId, assistantMsgId, 'content', { content: assistantContent });
-      }
-    } catch (error) {
-      if (runController.signal.aborted || isAbortError(error)) {
-        if (!assistantContent) {
+        if (runController.signal.aborted && !assistantContent) {
           assistantContent = 'Generation stopped.';
           emitChatStream(context, conversationId, assistantMsgId, 'content', { content: assistantContent });
         }
-      } else {
-        const failureContent = formatRuntimeFailureContent(backend, error);
-        const contentChunk = assistantContent ? `\n\n${failureContent}` : failureContent;
-        assistantContent += contentChunk;
-        emitChatStream(context, conversationId, assistantMsgId, 'content', { content: contentChunk });
+      } catch (error) {
+        if (runController.signal.aborted || isAbortError(error)) {
+          if (!assistantContent) {
+            assistantContent = 'Generation stopped.';
+            emitChatStream(context, conversationId, assistantMsgId, 'content', { content: assistantContent });
+          }
+        } else {
+          const failureContent = formatRuntimeFailureContent(backend, error);
+          const contentChunk = assistantContent ? `\n\n${failureContent}` : failureContent;
+          assistantContent += contentChunk;
+          emitChatStream(context, conversationId, assistantMsgId, 'content', { content: contentChunk });
+        }
+      } finally {
+        const activeRun = activeRuns.get(conversationId);
+        if (activeRun === runController) {
+          activeRuns.delete(conversationId);
+          activeTurnIds.delete(conversationId);
+        }
+        if (activeRun === runController || activeRun === undefined) {
+          store.updateConversation(conversationId, {
+            status: 'finished',
+            runtime: idleRuntimeSummary('finished', pendingConfirmationCount(pendingConfirmations, conversationId)),
+          });
+        }
       }
-    } finally {
-      const activeRun = activeRuns.get(conversationId);
-      if (activeRun === runController) {
-        activeRuns.delete(conversationId);
-        activeTurnIds.delete(conversationId);
-      }
-      if (activeRun === runController || activeRun === undefined) {
-        store.updateConversation(conversationId, {
-          status: 'finished',
-          runtime: idleRuntimeSummary('finished', pendingConfirmationCount(pendingConfirmations, conversationId)),
-        });
-      }
-    }
 
-    const assistantMessage = store.addTextMessage({
-      conversationId,
-      msgId: assistantMsgId,
-      position: 'left',
-      content: assistantContent,
-    });
-    context.emit('chat.response.stream', {
-      type: 'finish',
-      msg_id: assistantMsgId,
-      conversation_id: conversationId,
-      data: null,
-    });
-    const completedConversation = requireConversation(store, conversationId);
-    context.emit(
-      'turn.completed',
-      buildTurnCompletedEvent({
-        conversation: completedConversation,
+      const assistantMessage = store.addTextMessage({
         conversationId,
-        turnId: assistantMsgId,
-        backend,
-        assistantMessage,
-      }),
-    );
+        msgId: assistantMsgId,
+        position: 'left',
+        content: assistantContent,
+      });
+      context.emit('chat.response.stream', {
+        type: 'finish',
+        msg_id: assistantMsgId,
+        conversation_id: conversationId,
+        data: null,
+      });
+      const completedConversation = requireConversation(store, conversationId);
+      context.emit(
+        'turn.completed',
+        buildTurnCompletedEvent({
+          conversation: completedConversation,
+          conversationId,
+          turnId: assistantMsgId,
+          backend,
+          assistantMessage,
+        }),
+      );
+    });
 
-    return { success: true };
+    return {
+      success: true,
+      msg_id: userMessage.msg_id,
+      turn_id: assistantMsgId,
+      runtime: acceptedRuntime,
+    };
   });
   router.register('chat.stop.stream', (data) => {
     const conversationId = stringParam(asRecord(data).conversation_id);

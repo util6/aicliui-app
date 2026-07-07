@@ -28,9 +28,17 @@ server.on('connection', (socket, request) => {
         return;
       }
 
-      const responses = await router.handleIncoming(incoming);
+      const responses = await router.handleIncoming(incoming, {
+        emit(response) {
+          if (socket.readyState === socket.OPEN) {
+            socket.send(JSON.stringify(response));
+          }
+        },
+      });
       for (const response of responses) {
-        socket.send(JSON.stringify(response));
+        if (socket.readyState === socket.OPEN) {
+          socket.send(JSON.stringify(response));
+        }
       }
     })();
   });
