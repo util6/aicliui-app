@@ -71,6 +71,102 @@ describe('agent adapters', () => {
     ]);
   });
 
+  it('forwards OpenCode streaming tool and permission events from the local API client', async () => {
+    const confirmCalls: unknown[] = [];
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async () => ({ sessionId: 'unused', text: 'unused fallback' }),
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+          streamPrompt: async function* () {
+            yield { type: 'session', sessionId: 'ses_stream' };
+            yield {
+              type: 'tool',
+              tool: {
+                callId: 'tool_1',
+                call_id: 'tool_1',
+                name: 'read',
+                description: 'Read README.md',
+                status: 'Success',
+                resultDisplay: 'done',
+                result_display: 'done',
+              },
+            };
+            yield {
+              type: 'permission',
+              request: {
+                id: 'perm_1',
+                sessionID: 'ses_stream',
+                action: 'execute',
+                resources: ['npm test'],
+                source: { callID: 'tool_2' },
+              },
+            };
+            yield { type: 'content', content: 'streamed response' };
+          },
+          confirmPermission: async (input) => {
+            confirmCalls.push(input);
+            return { success: true };
+          },
+        },
+      },
+    );
+
+    const events = [];
+    for await (const event of adapter.sendMessage({ conversationId: 'conv-1', input: 'hello' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_stream' },
+      {
+        type: 'tool_group',
+        tools: [
+          {
+            callId: 'tool_1',
+            call_id: 'tool_1',
+            name: 'read',
+            description: 'Read README.md',
+            status: 'Success',
+            resultDisplay: 'done',
+            result_display: 'done',
+          },
+        ],
+      },
+      {
+        type: 'permission',
+        confirmation: {
+          id: 'perm_1',
+          title: 'OpenCode permission',
+          action: 'execute',
+          description: 'Action: execute\nResources:\n- npm test',
+          call_id: 'tool_2',
+          callId: 'tool_2',
+          options: [
+            { label: 'Allow once', value: 'once' },
+            { label: 'Allow always', value: 'always' },
+            { label: 'Reject', value: 'reject' },
+          ],
+        },
+      },
+      { type: 'content', content: 'streamed response' },
+    ]);
+
+    await expect(
+      adapter.confirm?.({
+        conversationId: 'conv-1',
+        confirmationId: 'perm_1',
+        callId: 'tool_2',
+        data: 'approve',
+      }),
+    ).resolves.toEqual({ success: true });
+    expect(confirmCalls).toEqual([{ sessionId: 'ses_stream', requestId: 'perm_1', reply: 'once' }]);
+  });
+
   it('sends OpenCode slash input through the command endpoint and reuses the conversation session', async () => {
     const calls: unknown[] = [];
     const adapter = createOpenCodeAdapter(

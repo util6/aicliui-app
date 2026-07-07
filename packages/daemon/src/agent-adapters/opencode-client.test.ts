@@ -123,6 +123,173 @@ describe('OpenCode local API client', () => {
     });
   });
 
+  it('streams OpenCode SSE text, tool, and permission events while prompting', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init });
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_stream' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.text.delta',
+              data: { sessionID: 'ses_stream', delta: 'hello ' },
+            },
+            {
+              type: 'message.part.updated',
+              data: {
+                sessionID: 'ses_stream',
+                part: {
+                  type: 'tool',
+                  id: 'tool_1',
+                  tool: 'read',
+                  state: { status: 'completed', title: 'Read README.md', output: 'done' },
+                },
+              },
+            },
+            {
+              type: 'permission.v2.asked',
+              data: {
+                sessionID: 'ses_stream',
+                id: 'perm_1',
+                action: 'execute',
+                resources: ['npm test'],
+                source: { callID: 'tool_2' },
+              },
+            },
+            {
+              type: 'permission.v2.replied',
+              data: { sessionID: 'ses_stream', requestID: 'perm_1' },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_stream/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_stream/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_stream/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'hello final' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_stream' },
+      { type: 'content', content: 'hello ' },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'tool_1',
+          call_id: 'tool_1',
+          name: 'read',
+          description: 'Read README.md',
+          status: 'Success',
+          resultDisplay: 'done',
+          result_display: 'done',
+        },
+      },
+      {
+        type: 'permission',
+        request: expect.objectContaining({
+          id: 'perm_1',
+          sessionID: 'ses_stream',
+          action: 'execute',
+        }),
+      },
+      { type: 'permission_resolved', requestId: 'perm_1' },
+    ]);
+    expect(calls.map((call) => [call.url, call.init?.method])).toEqual([
+      ['http://127.0.0.1:4096/api/session', 'POST'],
+      ['http://127.0.0.1:4096/api/event?location%5Bdirectory%5D=%2Ftmp%2Fproject', 'GET'],
+      ['http://127.0.0.1:4096/api/session/ses_stream/prompt', 'POST'],
+      ['http://127.0.0.1:4096/api/session/ses_stream/wait', 'POST'],
+      ['http://127.0.0.1:4096/api/session/ses_stream/context', 'GET'],
+    ]);
+  });
+
+  it('falls back to context text when the OpenCode SSE stream is unavailable', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_fallback' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return new Response('events unavailable', { status: 503 });
+        }
+        if (String(url).endsWith('/api/session/ses_fallback/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_fallback/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_fallback/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'from context' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_fallback' },
+      { type: 'content', content: 'from context' },
+    ]);
+  });
+
+  it('replies to OpenCode permission requests with legacy fallback', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init });
+        if (String(url).endsWith('/api/session/ses_1/permission/perm_1/reply')) {
+          return new Response('missing', { status: 404 });
+        }
+        if (String(url).endsWith('/api/session/ses_1/permissions/perm_1')) {
+          return emptyResponse();
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    await expect(
+      client.confirmPermission!({ sessionId: 'ses_1', requestId: 'perm_1', reply: 'once' }),
+    ).resolves.toEqual({ success: true });
+
+    expect(calls.map((call) => [call.url, call.init?.method, JSON.parse(String(call.init?.body))])).toEqual([
+      [
+        'http://127.0.0.1:4096/api/session/ses_1/permission/perm_1/reply',
+        'POST',
+        { reply: 'once' },
+      ],
+      [
+        'http://127.0.0.1:4096/api/session/ses_1/permissions/perm_1',
+        'POST',
+        { response: 'once' },
+      ],
+    ]);
+  });
+
   it('extracts assistant text from common context message shapes', () => {
     expect(
       extractOpenCodeAssistantText([
@@ -204,4 +371,22 @@ function jsonResponse(body: unknown): Response {
 
 function emptyResponse(): Response {
   return new Response(null, { status: 204 });
+}
+
+function sseResponse(events: unknown[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        }
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    },
+  );
 }

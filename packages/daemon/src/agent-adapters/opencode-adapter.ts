@@ -2,8 +2,22 @@ import { stat } from 'node:fs/promises';
 import { basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { AgentHealth } from '@aicliui/shared';
-import type { CliAgentAdapter, CommandRunner, CommandSpec, SendMessageInput } from './types.js';
-import type { OpenCodeCommandPart, OpenCodeSessionClient } from './opencode-client.js';
+import type {
+  CliAgentAdapter,
+  CliAgentEvent,
+  CliConfirmation,
+  CommandRunner,
+  CommandSpec,
+  SendMessageInput,
+} from './types.js';
+import type {
+  OpenCodeCommandInput,
+  OpenCodeCommandPart,
+  OpenCodePermissionRequest,
+  OpenCodePermissionReply,
+  OpenCodeSessionClient,
+  OpenCodeStreamEvent,
+} from './opencode-client.js';
 import type { OpenCodeServerManager } from './opencode-server.js';
 
 export type OpenCodeServeCommandOptions = {
@@ -26,6 +40,12 @@ export function createOpenCodeAdapter(
   const client = options?.client;
   const serverManager = options?.serverManager;
   const sessionByConversationId = new Map<string, string>();
+  const pendingPermissions = new Map<string, { sessionId: string; requestId: string }>();
+
+  async function getActiveClient(): Promise<OpenCodeSessionClient | null> {
+    return client ?? (serverManager ? await serverManager.ensureClient() : null);
+  }
+
   return {
     backend: 'opencode',
     name: 'opencode',
@@ -40,14 +60,13 @@ export function createOpenCodeAdapter(
       };
     },
     async *sendMessage(input: SendMessageInput) {
-      const activeClient = client ?? (serverManager ? await serverManager.ensureClient() : null);
+      const activeClient = await getActiveClient();
       if (activeClient) {
         const cachedSessionId = sessionByConversationId.get(input.conversationId);
         const slashCommand = parseOpenCodeSlashCommand(input.input);
-        let result;
         if (slashCommand && (await isKnownOpenCodeCommand(activeClient, slashCommand.command, input.workspace))) {
           const parts = await buildOpenCodeCommandParts(input.files);
-          result = await activeClient.sendCommand({
+          const commandInput: OpenCodeCommandInput = {
             command: slashCommand.command,
             arguments: slashCommand.arguments,
             sessionId: cachedSessionId,
@@ -55,14 +74,43 @@ export function createOpenCodeAdapter(
             model: input.model,
             agent: input.sessionMode,
             ...(parts.length ? { parts } : {}),
-          });
-        } else {
-          result = await activeClient.sendPrompt({
-            prompt: input.input,
-            sessionId: cachedSessionId,
-            directory: input.workspace,
-          });
+          };
+          if (activeClient.streamCommand) {
+            yield* streamOpenCodeEvents(activeClient.streamCommand(commandInput), input.conversationId);
+            return;
+          }
+
+          const result = await activeClient.sendCommand(commandInput);
+          sessionByConversationId.set(input.conversationId, result.sessionId);
+          yield {
+            type: 'thought',
+            subject: 'OpenCode',
+            description: `session ${result.sessionId}`,
+          };
+          yield {
+            type: 'content',
+            content: result.text,
+          };
+          return;
         }
+
+        if (activeClient.streamPrompt) {
+          yield* streamOpenCodeEvents(
+            activeClient.streamPrompt({
+              prompt: input.input,
+              sessionId: cachedSessionId,
+              directory: input.workspace,
+            }),
+            input.conversationId,
+          );
+          return;
+        }
+
+        const result = await activeClient.sendPrompt({
+          prompt: input.input,
+          sessionId: cachedSessionId,
+          directory: input.workspace,
+        });
         sessionByConversationId.set(input.conversationId, result.sessionId);
         yield {
           type: 'thought',
@@ -88,11 +136,97 @@ export function createOpenCodeAdapter(
       };
     },
     async getSlashCommands(input) {
-      const activeClient = client ?? (serverManager ? await serverManager.ensureClient() : null);
+      const activeClient = await getActiveClient();
       if (!activeClient) return [];
       return activeClient.listCommands({ directory: input.workspace });
     },
+    async confirm(input) {
+      const record = pendingPermissions.get(input.confirmationId);
+      if (!record) {
+        return {
+          success: false,
+          error: {
+            code: 'CONFIRMATION_NOT_FOUND',
+            message: `OpenCode confirmation not found: ${input.confirmationId}`,
+          },
+        };
+      }
+
+      const reply = normalizeOpenCodePermissionReply(input.data);
+      if (!reply) {
+        return {
+          success: false,
+          error: { code: 'INVALID_CONFIRMATION_REPLY', message: 'Unsupported OpenCode confirmation reply' },
+        };
+      }
+
+      const activeClient = await getActiveClient();
+      if (!activeClient?.confirmPermission) {
+        return {
+          success: false,
+          error: { code: 'CONFIRMATION_NOT_SUPPORTED', message: 'OpenCode client cannot confirm permissions' },
+        };
+      }
+
+      const result = await activeClient.confirmPermission({
+        sessionId: record.sessionId,
+        requestId: record.requestId,
+        reply,
+      });
+      pendingPermissions.delete(input.confirmationId);
+      return result;
+    },
   };
+
+  async function* streamOpenCodeEvents(
+    stream: AsyncIterable<OpenCodeStreamEvent>,
+    conversationId: string,
+  ): AsyncIterable<CliAgentEvent> {
+    for await (const event of stream) {
+      switch (event.type) {
+        case 'session':
+          sessionByConversationId.set(conversationId, event.sessionId);
+          yield {
+            type: 'thought',
+            subject: 'OpenCode',
+            description: `session ${event.sessionId}`,
+          };
+          break;
+        case 'content':
+          yield {
+            type: 'content',
+            content: event.content,
+          };
+          break;
+        case 'tool':
+          yield {
+            type: 'tool_group',
+            tools: [event.tool],
+          };
+          break;
+        case 'permission': {
+          const confirmation = toOpenCodeConfirmation(event.request);
+          if (!confirmation) break;
+          pendingPermissions.set(confirmation.id, {
+            sessionId: event.request.sessionID,
+            requestId: event.request.id,
+          });
+          yield {
+            type: 'permission',
+            confirmation,
+          };
+          break;
+        }
+        case 'permission_resolved':
+          pendingPermissions.delete(event.requestId);
+          yield {
+            type: 'permission_resolved',
+            confirmationId: event.requestId,
+          };
+          break;
+      }
+    }
+  }
 }
 
 async function isKnownOpenCodeCommand(
@@ -151,4 +285,60 @@ export function parseOpenCodeSlashCommand(input: string): { command: string; arg
     command: match[1],
     arguments: match[2] ?? '',
   };
+}
+
+function toOpenCodeConfirmation(request: OpenCodePermissionRequest): CliConfirmation | null {
+  const requestId = request.id;
+  const sessionId = request.sessionID;
+  if (!requestId || !sessionId) return null;
+
+  const action =
+    typeof request.action === 'string' && request.action ? request.action : stringValue(request.permission) || 'tool';
+  const resources = Array.isArray(request.resources)
+    ? request.resources.filter((item): item is string => typeof item === 'string' && item.length > 0)
+    : Array.isArray(request.patterns)
+      ? request.patterns.filter((item): item is string => typeof item === 'string' && item.length > 0)
+      : [];
+  const source = isRecord(request.source) ? request.source : isRecord(request.tool) ? request.tool : {};
+  const callId = stringValue(source.callID) || requestId;
+  return {
+    id: requestId,
+    title: 'OpenCode permission',
+    action,
+    description: openCodePermissionDescription(action, resources, request.metadata),
+    call_id: callId,
+    callId,
+    options: [
+      { label: 'Allow once', value: 'once' },
+      { label: 'Allow always', value: 'always' },
+      { label: 'Reject', value: 'reject' },
+    ],
+  };
+}
+
+function openCodePermissionDescription(action: string, resources: string[], metadata: unknown): string {
+  const lines = [`Action: ${action}`];
+  if (resources.length) lines.push('Resources:', ...resources.map((item) => `- ${item}`));
+  if (isRecord(metadata) && Object.keys(metadata).length) {
+    lines.push(`Metadata: ${JSON.stringify(metadata)}`);
+  }
+  return lines.join('\n');
+}
+
+function normalizeOpenCodePermissionReply(value: unknown): OpenCodePermissionReply | null {
+  if (value === 'once' || value === 'always' || value === 'reject') return value;
+  if (value === 'proceed_once' || value === 'allow' || value === 'approve' || value === 'yes') return 'once';
+  if (value === 'proceed_always' || value === 'proceed_always_tool' || value === 'proceed_always_server') {
+    return 'always';
+  }
+  if (value === 'cancel' || value === 'deny' || value === 'no') return 'reject';
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }

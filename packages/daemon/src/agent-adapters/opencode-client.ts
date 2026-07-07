@@ -7,6 +7,8 @@ export type OpenCodePromptInput = {
   prompt: string;
   sessionId?: string;
   directory?: string;
+  workspace?: string;
+  signal?: AbortSignal;
 };
 
 export type OpenCodeCommandInput = {
@@ -19,6 +21,7 @@ export type OpenCodeCommandInput = {
   agent?: string;
   messageId?: string;
   parts?: OpenCodeCommandPart[];
+  signal?: AbortSignal;
 };
 
 export type OpenCodeCommandPart = {
@@ -38,9 +41,57 @@ export type OpenCodePromptResult = {
   text: string;
 };
 
+export type OpenCodeToolUpdate = {
+  callId: string;
+  call_id: string;
+  name: string;
+  description: string;
+  status: 'Executing' | 'Success' | 'Error' | 'Canceled' | 'Pending' | 'Confirming';
+  resultDisplay: string;
+  result_display: string;
+};
+
+export type OpenCodePermissionRequest = Record<string, unknown> & {
+  id: string;
+  sessionID: string;
+};
+
+export type OpenCodePermissionReply = 'once' | 'always' | 'reject';
+
+export type OpenCodeStreamEvent =
+  | {
+      type: 'session';
+      sessionId: string;
+    }
+  | {
+      type: 'content';
+      content: string;
+    }
+  | {
+      type: 'tool';
+      tool: OpenCodeToolUpdate;
+    }
+  | {
+      type: 'permission';
+      request: OpenCodePermissionRequest;
+    }
+  | {
+      type: 'permission_resolved';
+      requestId: string;
+    };
+
+export type OpenCodeConfirmPermissionInput = {
+  sessionId: string;
+  requestId: string;
+  reply: OpenCodePermissionReply;
+};
+
 export type OpenCodeSessionClient = {
   sendPrompt(input: OpenCodePromptInput): Promise<OpenCodePromptResult>;
   sendCommand(input: OpenCodeCommandInput): Promise<OpenCodePromptResult>;
+  streamPrompt?(input: OpenCodePromptInput): AsyncIterable<OpenCodeStreamEvent>;
+  streamCommand?(input: OpenCodeCommandInput): AsyncIterable<OpenCodeStreamEvent>;
+  confirmPermission?(input: OpenCodeConfirmPermissionInput): Promise<{ success: true }>;
   listCommands(input?: OpenCodeCommandListInput): Promise<Array<{ command: string; description: string; hint?: string }>>;
 };
 
@@ -87,11 +138,88 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
     return id;
   }
 
+  async function* streamTurn(
+    input: { sessionId?: string; directory?: string; workspace?: string; signal?: AbortSignal },
+    submitTurn: (sessionId: string) => Promise<void>,
+  ): AsyncIterable<OpenCodeStreamEvent> {
+    const sessionId = input.sessionId ?? (await createSession(input));
+    yield { type: 'session', sessionId };
+
+    const queue = createAsyncQueue<OpenCodeStreamEvent>();
+    let streamedContent = false;
+    const eventStream = subscribeOpenCodeSessionEvents({
+      baseUrl,
+      fetchImpl,
+      sessionId,
+      directory: input.directory,
+      workspace: input.workspace,
+      signal: input.signal,
+      handlers: {
+        onContent(content) {
+          streamedContent = true;
+          queue.push({ type: 'content', content });
+        },
+        onTool(tool) {
+          queue.push({ type: 'tool', tool });
+        },
+        onPermission(request) {
+          queue.push({ type: 'permission', request });
+        },
+        onPermissionResolved(requestId) {
+          queue.push({ type: 'permission_resolved', requestId });
+        },
+      },
+    });
+
+    let requestTask: Promise<void> | undefined;
+    try {
+      await eventStream.ready;
+      requestTask = (async () => {
+        await submitTurn(sessionId);
+        await requestJson(`/api/session/${encodeURIComponent(sessionId)}/wait`, {
+          method: 'POST',
+          signal: input.signal,
+        });
+      })();
+
+      requestTask.then(
+        async () => {
+          eventStream.close();
+          await eventStream.done;
+          queue.close();
+        },
+        (error) => {
+          eventStream.close();
+          queue.fail(error);
+        },
+      );
+
+      for await (const event of queue) {
+        yield event;
+      }
+
+      await requestTask;
+    } finally {
+      eventStream.close();
+      await eventStream.done.catch(() => {});
+    }
+
+    const context = await requestJson<{ data?: unknown[] }>(`/api/session/${encodeURIComponent(sessionId)}/context`, {
+      method: 'GET',
+      signal: input.signal,
+    });
+    const text = extractOpenCodeAssistantText(context.data ?? []);
+    if (!streamedContent && text) {
+      yield { type: 'content', content: text };
+    }
+  }
+
   return {
     async sendPrompt(input) {
       const sessionId = input.sessionId ?? (await createSession(input));
       await requestJson(`/api/session/${encodeURIComponent(sessionId)}/prompt`, {
         method: 'POST',
+        signal: input.signal,
         body: JSON.stringify({
           prompt: {
             text: input.prompt,
@@ -100,10 +228,10 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
           },
         }),
       });
-      await requestJson(`/api/session/${encodeURIComponent(sessionId)}/wait`, { method: 'POST' });
+      await requestJson(`/api/session/${encodeURIComponent(sessionId)}/wait`, { method: 'POST', signal: input.signal });
       const context = await requestJson<{ data?: unknown[] }>(
         `/api/session/${encodeURIComponent(sessionId)}/context`,
-        { method: 'GET' },
+        { method: 'GET', signal: input.signal },
       );
       return {
         sessionId,
@@ -114,6 +242,7 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
       const sessionId = input.sessionId ?? (await createSession(input));
       await requestJson(commandSendPath(sessionId, input), {
         method: 'POST',
+        signal: input.signal,
         body: JSON.stringify({
           command: input.command,
           arguments: input.arguments ?? '',
@@ -123,15 +252,60 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
           ...(input.parts?.length ? { parts: input.parts } : {}),
         }),
       });
-      await requestJson(`/api/session/${encodeURIComponent(sessionId)}/wait`, { method: 'POST' });
+      await requestJson(`/api/session/${encodeURIComponent(sessionId)}/wait`, { method: 'POST', signal: input.signal });
       const context = await requestJson<{ data?: unknown[] }>(
         `/api/session/${encodeURIComponent(sessionId)}/context`,
-        { method: 'GET' },
+        { method: 'GET', signal: input.signal },
       );
       return {
         sessionId,
         text: extractOpenCodeAssistantText(context.data ?? []),
       };
+    },
+    streamPrompt(input) {
+      return streamTurn(input, async (sessionId) => {
+        await requestJson(`/api/session/${encodeURIComponent(sessionId)}/prompt`, {
+          method: 'POST',
+          signal: input.signal,
+          body: JSON.stringify({
+            prompt: {
+              text: input.prompt,
+              files: [],
+              agents: [],
+            },
+          }),
+        });
+      });
+    },
+    streamCommand(input) {
+      return streamTurn(input, async (sessionId) => {
+        await requestJson(commandSendPath(sessionId, input), {
+          method: 'POST',
+          signal: input.signal,
+          body: JSON.stringify({
+            command: input.command,
+            arguments: input.arguments ?? '',
+            ...(input.messageId ? { messageID: input.messageId } : {}),
+            ...(input.model ? { model: input.model } : {}),
+            ...(input.agent ? { agent: input.agent } : {}),
+            ...(input.parts?.length ? { parts: input.parts } : {}),
+          }),
+        });
+      });
+    },
+    async confirmPermission(input) {
+      try {
+        await requestJson(`/api/session/${encodeURIComponent(input.sessionId)}/permission/${encodeURIComponent(input.requestId)}/reply`, {
+          method: 'POST',
+          body: JSON.stringify({ reply: input.reply }),
+        });
+      } catch {
+        await requestJson(`/api/session/${encodeURIComponent(input.sessionId)}/permissions/${encodeURIComponent(input.requestId)}`, {
+          method: 'POST',
+          body: JSON.stringify({ response: input.reply }),
+        });
+      }
+      return { success: true };
     },
     async listCommands(input = {}) {
       const v2Path = commandListV2Path(input);
@@ -145,6 +319,282 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
       }
     },
   };
+}
+
+type OpenCodeEventStreamHandlers = {
+  onContent(content: string): void;
+  onTool(tool: OpenCodeToolUpdate): void;
+  onPermission(request: OpenCodePermissionRequest): void;
+  onPermissionResolved(requestId: string): void;
+};
+
+function createAsyncQueue<T>(): {
+  push: (value: T) => void;
+  close: () => void;
+  fail: (error: unknown) => void;
+  [Symbol.asyncIterator]: () => AsyncIterator<T>;
+} {
+  const values: T[] = [];
+  const waiters: Array<{
+    resolve: (result: IteratorResult<T>) => void;
+    reject: (error: unknown) => void;
+  }> = [];
+  let closed = false;
+  let failure: unknown;
+
+  const next = (): Promise<IteratorResult<T>> => {
+    if (values.length > 0) {
+      return Promise.resolve({ value: values.shift() as T, done: false });
+    }
+    if (failure !== undefined) {
+      return Promise.reject(failure);
+    }
+    if (closed) {
+      return Promise.resolve({ value: undefined, done: true });
+    }
+    return new Promise<IteratorResult<T>>((resolve, reject) => {
+      waiters.push({ resolve, reject });
+    });
+  };
+
+  return {
+    push(value) {
+      if (closed || failure !== undefined) return;
+      const waiter = waiters.shift();
+      if (waiter) {
+        waiter.resolve({ value, done: false });
+        return;
+      }
+      values.push(value);
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      for (const waiter of waiters.splice(0)) {
+        waiter.resolve({ value: undefined, done: true });
+      }
+    },
+    fail(error) {
+      if (closed || failure !== undefined) return;
+      failure = error;
+      for (const waiter of waiters.splice(0)) {
+        waiter.reject(error);
+      }
+    },
+    [Symbol.asyncIterator]() {
+      return { next };
+    },
+  };
+}
+
+function subscribeOpenCodeSessionEvents(input: {
+  baseUrl: string;
+  fetchImpl: typeof fetch;
+  sessionId: string;
+  directory?: string;
+  workspace?: string;
+  signal?: AbortSignal;
+  handlers: OpenCodeEventStreamHandlers;
+}): { ready: Promise<void>; done: Promise<void>; close: () => void } {
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(input.signal?.reason ?? new Error('OpenCode event stream aborted'));
+  if (input.signal?.aborted) abortFromParent();
+  else input.signal?.addEventListener('abort', abortFromParent, { once: true });
+
+  let resolveReady: () => void = () => {};
+  const ready = new Promise<void>((resolve) => {
+    resolveReady = resolve;
+  });
+  const done = (async () => {
+    try {
+      const response = await input.fetchImpl(`${input.baseUrl}${eventStreamPath(input)}`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+      resolveReady();
+      if (!response.ok || !response.body) return;
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      const extractTextDelta = createOpenCodeTextDeltaExtractor(input.sessionId);
+      const extractPermissionEvent = createOpenCodePermissionEventExtractor(input.sessionId);
+      const parse = createSseParser((event) => {
+        const text = extractTextDelta(event);
+        if (text) input.handlers.onContent(text);
+
+        const tool = extractOpenCodeToolUpdate(event, input.sessionId);
+        if (tool) input.handlers.onTool(tool);
+
+        const permissionEvent = extractPermissionEvent(event);
+        if (permissionEvent?.type === 'asked') input.handlers.onPermission(permissionEvent.request);
+        if (permissionEvent?.type === 'resolved') input.handlers.onPermissionResolved(permissionEvent.requestId);
+      });
+
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        parse(decoder.decode(next.value, { stream: true }));
+      }
+      parse(decoder.decode());
+    } catch {
+      resolveReady();
+    } finally {
+      resolveReady();
+      input.signal?.removeEventListener('abort', abortFromParent);
+    }
+  })();
+
+  return {
+    ready,
+    done,
+    close() {
+      controller.abort(new Error('OpenCode event stream closed'));
+    },
+  };
+}
+
+function eventStreamPath(input: { directory?: string; workspace?: string }): string {
+  if (input.directory) return `/api/event?location%5Bdirectory%5D=${encodeURIComponent(input.directory)}`;
+  if (input.workspace) return `/api/event?location%5Bworkspace%5D=${encodeURIComponent(input.workspace)}`;
+  return '/api/event';
+}
+
+function createSseParser(onEvent: (event: unknown) => void): (chunk: string) => void {
+  let buffer = '';
+  return (chunk) => {
+    buffer += chunk;
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() || '';
+    for (const block of blocks) parseSseEventBlock(block, onEvent);
+  };
+}
+
+function parseSseEventBlock(block: string, onEvent: (event: unknown) => void): void {
+  const data = block
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice('data:'.length).trimStart())
+    .join('\n');
+  if (!data) return;
+  try {
+    onEvent(JSON.parse(data));
+  } catch {
+    // Ignore malformed event frames.
+  }
+}
+
+function createOpenCodeTextDeltaExtractor(sessionId: string): (event: unknown) => string {
+  const textByPartId = new Map<string, string>();
+  return (event) => extractOpenCodeEventTextDelta(event, sessionId, textByPartId);
+}
+
+function extractOpenCodeEventTextDelta(
+  event: unknown,
+  sessionId: string,
+  textByPartId: Map<string, string>,
+): string {
+  if (!isRecord(event)) return '';
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type === 'session.next.text.delta' && data.sessionID === sessionId && typeof data.delta === 'string') {
+    return data.delta;
+  }
+  if (type !== 'message.part.updated') return '';
+  const part = isRecord(data.part) ? data.part : {};
+  const partSessionId = typeof data.sessionID === 'string' ? data.sessionID : part.sessionID;
+  if (partSessionId !== sessionId || part.type !== 'text') return '';
+  if (typeof data.delta === 'string') return data.delta;
+
+  const partId = typeof part.id === 'string' ? part.id : '';
+  if (!partId || typeof part.text !== 'string') return '';
+  const previous = textByPartId.get(partId) || '';
+  textByPartId.set(partId, part.text);
+  return part.text.startsWith(previous) ? part.text.slice(previous.length) : '';
+}
+
+function extractOpenCodeToolUpdate(event: unknown, sessionId: string): OpenCodeToolUpdate | null {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'message.part.updated') return null;
+  const part = isRecord(data.part) ? data.part : {};
+  const partSessionId = typeof data.sessionID === 'string' ? data.sessionID : part.sessionID;
+  if (partSessionId !== sessionId || part.type !== 'tool') return null;
+
+  const state = isRecord(part.state) ? part.state : {};
+  const callId = typeof part.callID === 'string' ? part.callID : typeof part.id === 'string' ? part.id : '';
+  if (!callId) return null;
+
+  const resultDisplay = openCodeToolResultDisplay(state);
+  return {
+    callId,
+    call_id: callId,
+    name: typeof part.tool === 'string' && part.tool ? part.tool : 'tool',
+    description: openCodeToolTitle(part, state),
+    status: openCodeToolStatus(state.status),
+    resultDisplay,
+    result_display: resultDisplay,
+  };
+}
+
+function createOpenCodePermissionEventExtractor(
+  sessionId: string,
+): (event: unknown) => { type: 'asked'; request: OpenCodePermissionRequest } | { type: 'resolved'; requestId: string } | null {
+  return (event) => {
+    const request = extractOpenCodePermissionAsked(event, sessionId);
+    if (request) return { type: 'asked', request };
+    const requestId = extractOpenCodePermissionResolved(event, sessionId);
+    if (requestId) return { type: 'resolved', requestId };
+    return null;
+  };
+}
+
+function extractOpenCodePermissionAsked(event: unknown, sessionId: string): OpenCodePermissionRequest | null {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'permission.v2.asked' && type !== 'permission.asked') return null;
+  return data.sessionID === sessionId && typeof data.id === 'string' ? (data as OpenCodePermissionRequest) : null;
+}
+
+function extractOpenCodePermissionResolved(event: unknown, sessionId: string): string {
+  if (!isRecord(event)) return '';
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'permission.v2.replied' && type !== 'permission.replied') return '';
+  if (data.sessionID !== sessionId) return '';
+  return typeof data.requestID === 'string' ? data.requestID : typeof data.id === 'string' ? data.id : '';
+}
+
+function openCodeToolTitle(part: Record<string, unknown>, state: Record<string, unknown>): string {
+  if (typeof state.title === 'string' && state.title) return state.title;
+  if (isRecord(state.input)) {
+    const values = Object.values(state.input)
+      .filter((value) => typeof value === 'string' && value.trim())
+      .slice(0, 2);
+    if (values.length) return values.join(' ');
+  }
+  return typeof part.tool === 'string' && part.tool ? part.tool : 'tool';
+}
+
+function openCodeToolStatus(status: unknown): OpenCodeToolUpdate['status'] {
+  if (status === 'completed') return 'Success';
+  if (status === 'error') return 'Error';
+  if (status === 'canceled' || status === 'cancelled') return 'Canceled';
+  if (status === 'pending') return 'Pending';
+  if (status === 'confirming') return 'Confirming';
+  return 'Executing';
+}
+
+function openCodeToolResultDisplay(state: Record<string, unknown>): string {
+  if (typeof state.output === 'string' && state.output) return state.output;
+  if (typeof state.error === 'string' && state.error) return state.error;
+  if (Array.isArray(state.content) && state.content.length) return JSON.stringify(state.content);
+  return '';
 }
 
 function commandSendPath(sessionId: string, input: OpenCodeCommandInput): string {
