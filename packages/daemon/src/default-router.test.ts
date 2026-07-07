@@ -13,7 +13,7 @@ describe('default bridge routes', () => {
     const store = new InMemoryConversationStore({ now: () => 1000, id: () => 'conv-1' });
     const router = createDefaultRouter({ store, adapters: createFallbackAgentAdapterRegistry() });
 
-    const [created] = await router.handleIncoming({
+    const createMessages = await router.handleIncoming({
       name: 'subscribe-create-conversation',
       data: {
         id: 'm_create',
@@ -25,6 +25,7 @@ describe('default bridge routes', () => {
         },
       },
     });
+    const [created] = createMessages;
     const [listed] = await router.handleIncoming({
       name: 'subscribe-database.get-user-conversations',
       data: { id: 'm_list', data: { page: 0, pageSize: 100 } },
@@ -36,7 +37,60 @@ describe('default bridge routes', () => {
       type: 'acp',
       extra: { backend: 'opencode' },
     });
+    expect(createMessages[1]).toMatchObject({
+      name: 'conversation.listChanged',
+      data: { conversation_id: 'conv-1', action: 'created' },
+    });
     expect(listed.data).toEqual([created.data]);
+  });
+
+  it('emits AionUi-style conversation.listChanged events for list mutations', async () => {
+    let nextId = 0;
+    const store = new InMemoryConversationStore({
+      now: () => 1050 + nextId,
+      id: () => `list-id-${++nextId}`,
+    });
+    const router = createDefaultRouter({ store, adapters: createFallbackAgentAdapterRegistry() });
+
+    const createMessages = await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_list',
+        data: {
+          type: 'acp',
+          name: 'list sync',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'opencode' },
+        },
+      },
+    });
+    const updateMessages = await router.handleIncoming({
+      name: 'subscribe-update-conversation',
+      data: { id: 'm_update_list', data: { id: 'list-id-1', updates: { name: 'renamed' } } },
+    });
+    const removeMessages = await router.handleIncoming({
+      name: 'subscribe-remove-conversation',
+      data: { id: 'm_remove_list', data: { id: 'list-id-1' } },
+    });
+
+    expect(createMessages).toContainEqual(
+      expect.objectContaining({
+        name: 'conversation.listChanged',
+        data: { conversation_id: 'list-id-1', action: 'created', source: 'local' },
+      }),
+    );
+    expect(updateMessages).toContainEqual(
+      expect.objectContaining({
+        name: 'conversation.listChanged',
+        data: { conversation_id: 'list-id-1', action: 'updated', source: 'local' },
+      }),
+    );
+    expect(removeMessages).toContainEqual(
+      expect.objectContaining({
+        name: 'conversation.listChanged',
+        data: { conversation_id: 'list-id-1', action: 'deleted', source: 'local' },
+      }),
+    );
   });
 
   it('normalizes selected mobile model context into the conversation model shape', async () => {
@@ -250,7 +304,7 @@ describe('default bridge routes', () => {
       },
     });
 
-    const [modelUpdate] = await router.handleIncoming({
+    const modelUpdateMessages = await router.handleIncoming({
       name: 'subscribe-conversation.set-config-option',
       data: {
         id: 'm_set_model',
@@ -261,7 +315,8 @@ describe('default bridge routes', () => {
         },
       },
     });
-    const [modeUpdate] = await router.handleIncoming({
+    const [modelUpdate] = modelUpdateMessages;
+    const modeUpdateMessages = await router.handleIncoming({
       name: 'subscribe-conversation.set-config-option',
       data: {
         id: 'm_set_mode',
@@ -272,6 +327,7 @@ describe('default bridge routes', () => {
         },
       },
     });
+    const [modeUpdate] = modeUpdateMessages;
     const [conversation] = await router.handleIncoming({
       name: 'subscribe-conversation.get',
       data: { id: 'm_get_config', data: { conversation_id: 'config-conv-1' } },
@@ -286,6 +342,12 @@ describe('default bridge routes', () => {
         }),
       ]),
     });
+    expect(modelUpdateMessages).toContainEqual(
+      expect.objectContaining({
+        name: 'conversation.listChanged',
+        data: { conversation_id: 'config-conv-1', action: 'updated', source: 'local' },
+      }),
+    );
     expect(modeUpdate.data).toMatchObject({
       confirmation: 'observed',
       config_options: expect.arrayContaining([
@@ -295,6 +357,12 @@ describe('default bridge routes', () => {
         }),
       ]),
     });
+    expect(modeUpdateMessages).toContainEqual(
+      expect.objectContaining({
+        name: 'conversation.listChanged',
+        data: { conversation_id: 'config-conv-1', action: 'updated', source: 'local' },
+      }),
+    );
     expect(conversation.data).toMatchObject({
       model: { id: 'gpt-5-codex', useModel: 'GPT-5 Codex' },
       extra: {

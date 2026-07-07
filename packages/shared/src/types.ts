@@ -172,6 +172,12 @@ export type ConversationUserCreatedEvent = {
   created_at: number;
 };
 
+export type ConversationListChangedEvent = {
+  conversation_id: string;
+  action: 'created' | 'updated' | 'deleted';
+  source?: string;
+};
+
 export type IResponseMessage = {
   type: string;
   data: unknown;

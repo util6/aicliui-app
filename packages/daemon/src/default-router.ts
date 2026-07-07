@@ -3,6 +3,7 @@ import type {
   AgentInfo,
   AgentModelInfo,
   Conversation,
+  ConversationListChangedEvent,
   ConversationRuntimeSummary,
   ConversationStatus,
   ConversationTurnCompletedEvent,
@@ -58,7 +59,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       modelInfo: modelInfoFromConfigOptions(configOptions),
     };
   });
-  router.register('conversation.set-config-option', async (data): Promise<SetConfigOptionResponse> => {
+  router.register('conversation.set-config-option', async (data, context): Promise<SetConfigOptionResponse> => {
     const params = asRecord(data);
     const conversationId = stringParam(params.conversation_id);
     const optionId = stringParam(params.option_id);
@@ -77,6 +78,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
 
     const updates = getConfigOptionConversationUpdates(option, value, selected);
     store.updateConversation(conversationId, updates);
+    emitConversationListChanged(context, conversationId, 'updated');
     const updatedConversation = requireConversation(store, conversationId);
     const configOptions = await buildConversationConfigOptions(adapters, updatedConversation);
     return {
@@ -112,23 +114,35 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       workspace: conversation.extra.workspace,
     });
   });
-  router.register('create-conversation', (data) => {
+  router.register('create-conversation', (data, context) => {
     const params = asRecord(data);
     const extra = isRecord(params.extra) ? (params.extra as Conversation['extra']) : {};
-    return store.createConversation({
+    const conversation = store.createConversation({
       type: stringParam(params.type, 'acp'),
       name: stringParam(params.name, 'New conversation'),
       model: normalizeConversationModel(params.model, extra),
       extra,
     } satisfies CreateConversationInput);
+    emitConversationListChanged(context, conversation.id, 'created');
+    return conversation;
   });
-  router.register('remove-conversation', (data) => {
+  router.register('remove-conversation', (data, context) => {
     const params = asRecord(data);
-    return store.removeConversation(stringParam(params.id));
+    const conversationId = stringParam(params.id);
+    const removed = store.removeConversation(conversationId);
+    if (removed) {
+      emitConversationListChanged(context, conversationId, 'deleted');
+    }
+    return removed;
   });
-  router.register('update-conversation', (data) => {
+  router.register('update-conversation', (data, context) => {
     const params = asRecord(data);
-    return store.updateConversation(stringParam(params.id), asRecord(params.updates) as Partial<Conversation>);
+    const conversationId = stringParam(params.id);
+    const updated = store.updateConversation(conversationId, asRecord(params.updates) as Partial<Conversation>);
+    if (updated) {
+      emitConversationListChanged(context, conversationId, 'updated');
+    }
+    return updated;
   });
   router.register('chat.send.message', async (data, context) => {
     const params = asRecord(data);
@@ -547,6 +561,18 @@ function buildUserCreatedEvent(message: StoredMessage): ConversationUserCreatedE
     hidden: false,
     created_at: message.createdAt,
   };
+}
+
+function emitConversationListChanged(
+  context: { emit: (name: string, data?: unknown) => void },
+  conversationId: string,
+  action: ConversationListChangedEvent['action'],
+): void {
+  context.emit('conversation.listChanged', {
+    conversation_id: conversationId,
+    action,
+    source: 'local',
+  } satisfies ConversationListChangedEvent);
 }
 
 function turnStateFromRuntime(runtime: ConversationRuntimeSummary): string {

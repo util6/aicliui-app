@@ -62,4 +62,12 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("status: 'finish'");
     expect(TERMUX_DAEMON_SOURCE).toContain('created_at: message.createdAt');
   });
+
+  it('emits AionUi-style conversation.listChanged events for local conversation mutations', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain("emitListChanged(emit, conversation.id, 'created');");
+    expect(TERMUX_DAEMON_SOURCE).toContain("emitListChanged(emit, conversationId, 'updated');");
+    expect(TERMUX_DAEMON_SOURCE).toContain("emitListChanged(emit, id, 'deleted');");
+    expect(TERMUX_DAEMON_SOURCE).toContain('function emitListChanged(emit, conversationId, action)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("emit('conversation.listChanged', { conversation_id: conversationId, action, source: 'local' });");
+  });
 });

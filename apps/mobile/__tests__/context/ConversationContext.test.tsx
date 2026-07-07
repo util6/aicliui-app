@@ -37,6 +37,16 @@ function RuntimeProbe() {
   );
 }
 
+function ListProbe() {
+  const { conversations, activeConversationId } = useConversations();
+  return (
+    <>
+      <Text testID='conversation-ids'>{conversations.map((conversation) => conversation.id).join(',')}</Text>
+      <Text testID='active-conversation'>{activeConversationId ?? ''}</Text>
+    </>
+  );
+}
+
 function conversationWithStatus(status: Conversation['status']): Conversation {
   return {
     id: 'conv-1',
@@ -257,6 +267,77 @@ describe('ConversationContext stream status sync', () => {
     await waitFor(() =>
       expect(mockRequest.mock.calls.filter(([name]) => name === 'database.get-user-conversations')).toHaveLength(2),
     );
+  });
+
+  it('refreshes the conversation list when AionUi listChanged reports create or update', async () => {
+    let conversations = [conversationWithStatus('finished')];
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-user-conversations') return Promise.resolve(conversations);
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <ListProbe />
+      </ConversationProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('conversation-ids').props.children).toBe('conv-1'));
+
+    conversations = [
+      { ...conversationWithStatus('running'), name: 'Updated task' },
+      {
+        ...conversationWithStatus('finished'),
+        id: 'conv-2',
+        name: 'New task',
+      },
+    ];
+
+    await act(async () => {
+      listeners.get('conversation.listChanged')?.({
+        conversation_id: 'conv-2',
+        action: 'created',
+      });
+    });
+
+    await waitFor(() => expect(screen.getByTestId('conversation-ids').props.children).toBe('conv-1,conv-2'));
+    expect(mockRequest.mock.calls.filter(([name]) => name === 'database.get-user-conversations')).toHaveLength(2);
+  });
+
+  it('removes deleted conversations from local state and reselects the next conversation', async () => {
+    let conversations = [
+      conversationWithStatus('finished'),
+      {
+        ...conversationWithStatus('finished'),
+        id: 'conv-2',
+        name: 'Second task',
+      },
+    ];
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-user-conversations') return Promise.resolve(conversations);
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <ListProbe />
+      </ConversationProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('conversation-ids').props.children).toBe('conv-1,conv-2'));
+    expect(screen.getByTestId('active-conversation').props.children).toBe('conv-1');
+
+    conversations = [conversations[1]];
+    await act(async () => {
+      listeners.get('conversation.listChanged')?.({
+        conversation_id: 'conv-1',
+        action: 'deleted',
+      });
+    });
+
+    expect(screen.getByTestId('conversation-ids').props.children).toBe('conv-2');
+    expect(screen.getByTestId('active-conversation').props.children).toBe('conv-2');
+    await waitFor(() => expect(mockRequest.mock.calls.filter(([name]) => name === 'database.get-user-conversations')).toHaveLength(2));
   });
 
   it('applies turn.completed runtime summaries from the local daemon', async () => {

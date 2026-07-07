@@ -108,10 +108,10 @@ describe('termuxRuntime', () => {
     expect(script).toContain('await rename(tmpPath, storePath);');
     expect(script).toContain("if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: await getModelInfo(params.backend) } };");
     expect(script).toContain("if (key === 'conversation.ensure-runtime') return await ensureConversationRuntime(params);");
-    expect(script).toContain("if (key === 'conversation.set-config-option') return await setConfigOption(params);");
+    expect(script).toContain("if (key === 'conversation.set-config-option') return await setConfigOption(params, emit);");
     expect(script).toContain('const agentModes = {');
     expect(script).toContain('async function ensureConversationRuntime(params)');
-    expect(script).toContain('async function setConfigOption(params)');
+    expect(script).toContain('async function setConfigOption(params, emit)');
     expect(script).toContain('async function buildConversationConfigOptions(conversation)');
     expect(script).toContain("config_options: configOptions");
     expect(script).toContain("confirmation: 'observed'");
@@ -147,6 +147,11 @@ describe('termuxRuntime', () => {
     expect(script).toContain("position: 'right'");
     expect(script).toContain("status: 'finish'");
     expect(script).toContain('created_at: message.createdAt');
+    expect(script).toContain("emitListChanged(emit, conversation.id, 'created');");
+    expect(script).toContain("emitListChanged(emit, conversationId, 'updated');");
+    expect(script).toContain("emitListChanged(emit, id, 'deleted');");
+    expect(script).toContain('function emitListChanged(emit, conversationId, action)');
+    expect(script).toContain("emit('conversation.listChanged', { conversation_id: conversationId, action, source: 'local' });");
     expect(script).toContain('function parseModelOptions(raw, fallback)');
     expect(script).toContain("if (key === 'conversation.get') return conversations.get(requiredString(params.conversation_id)) || null;");
     expect(script).toContain("if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);");

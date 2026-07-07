@@ -114,6 +114,12 @@ type TurnCompletedMessage = {
   runtime?: unknown;
 };
 
+type ListChangedMessage = {
+  conversation_id?: unknown;
+  conversationId?: unknown;
+  action?: unknown;
+};
+
 const ConversationContext = createContext<ConversationContextType>({
   conversations: [],
   isLoading: false,
@@ -252,6 +258,24 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
       }
     });
 
+    const unsubListChanged = bridge.on('conversation.listChanged', (data: unknown) => {
+      const event = normalizeListChanged(data);
+      if (!event) return;
+
+      if (event.action === 'deleted') {
+        completedConversationIdsRef.current.delete(event.conversationId);
+        setConversations((prev) => {
+          const next = prev.filter((conversation) => conversation.id !== event.conversationId);
+          if (activeConversationId === event.conversationId) {
+            setActiveConversationIdRaw(next[0]?.id ?? null);
+          }
+          return next.length === prev.length ? prev : next;
+        });
+      }
+
+      void refresh();
+    });
+
     const unsubConfirmAdd = bridge.on('confirmation.add', (data: unknown) => {
       const conversationId = getConversationId(data);
       if (!conversationId) return;
@@ -269,11 +293,12 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
     return () => {
       unsub();
       unsubTurnCompleted();
+      unsubListChanged();
       unsubConfirmAdd();
       unsubConfirmRemove();
       if (debounceRef.timer) clearTimeout(debounceRef.timer);
     };
-  }, [refresh]);
+  }, [activeConversationId, refresh]);
 
   const fetchAgents = useCallback(async () => {
     if (connectionState !== 'connected') return;
@@ -570,6 +595,21 @@ function normalizeRuntimeSummary(value: unknown): NonNullable<Conversation['runt
     is_processing: isProcessing,
     pending_confirmations: pendingConfirmations,
     turn_id: turnId,
+  };
+}
+
+function normalizeListChanged(value: unknown): {
+  conversationId: string;
+  action: 'created' | 'updated' | 'deleted';
+} | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const event = value as ListChangedMessage;
+  const conversationId = firstNonEmptyString(event.conversation_id, event.conversationId);
+  if (!conversationId) return null;
+  if (event.action !== 'created' && event.action !== 'updated' && event.action !== 'deleted') return null;
+  return {
+    conversationId,
+    action: event.action,
   };
 }
 

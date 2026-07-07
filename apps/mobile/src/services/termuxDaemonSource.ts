@@ -123,14 +123,14 @@ async function route(key, data, emit) {
   if (key === 'acp.get-available-agents') return { success: true, data: agents };
   if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: await getModelInfo(params.backend) } };
   if (key === 'conversation.ensure-runtime') return await ensureConversationRuntime(params);
-  if (key === 'conversation.set-config-option') return await setConfigOption(params);
+  if (key === 'conversation.set-config-option') return await setConfigOption(params, emit);
   if (key === 'database.get-user-conversations') return listConversations(params.page, params.pageSize);
   if (key === 'database.get-conversation-messages') return messages.get(requiredString(params.conversation_id)) || [];
   if (key === 'conversation.get') return conversations.get(requiredString(params.conversation_id)) || null;
   if (key === 'conversation.get-slash-commands') return await getSlashCommands(params);
-  if (key === 'create-conversation') return await createConversation(params);
-  if (key === 'remove-conversation') return await removeConversation(requiredString(params.id));
-  if (key === 'update-conversation') return await updateConversation(requiredString(params.id), isRecord(params.updates) ? params.updates : {});
+  if (key === 'create-conversation') return await createConversation(params, emit);
+  if (key === 'remove-conversation') return await removeConversation(requiredString(params.id), emit);
+  if (key === 'update-conversation') return await updateConversation(requiredString(params.id), isRecord(params.updates) ? params.updates : {}, emit);
   if (key === 'chat.send.message') return await sendMessage(params, emit);
   if (key === 'chat.stop.stream') return stopStream(params);
   if (key === 'confirmation.list') return listConfirmations(requiredString(params.conversation_id));
@@ -374,7 +374,7 @@ function ensurePathInsideRoot(path, root) {
   throw new Error('Path is outside the workspace: ' + path);
 }
 
-async function createConversation(params) {
+async function createConversation(params, emit) {
   const now = Date.now();
   const id = randomId();
   const extra = isRecord(params.extra) ? params.extra : {};
@@ -392,6 +392,7 @@ async function createConversation(params) {
   conversations.set(id, conversation);
   messages.set(id, []);
   await saveStore();
+  emitListChanged(emit, conversation.id, 'created');
   return conversation;
 }
 
@@ -455,7 +456,7 @@ async function ensureConversationRuntime(params) {
   };
 }
 
-async function setConfigOption(params) {
+async function setConfigOption(params, emit) {
   const conversationId = requiredString(params.conversation_id);
   const optionId = requiredString(params.option_id);
   const value = requiredString(params.value);
@@ -473,6 +474,7 @@ async function setConfigOption(params) {
   applyConfigOption(conversation, option, value, selected);
   conversation.modifyTime = Date.now();
   await saveStore();
+  emitListChanged(emit, conversationId, 'updated');
   const nextConfigOptions = await buildConversationConfigOptions(conversation);
   return {
     confirmation: 'observed',
@@ -2145,15 +2147,18 @@ function upsertCodexPlanMessage(conversationId, msgId, plan) {
   void saveStore();
 }
 
-async function removeConversation(id) {
+async function removeConversation(id, emit) {
   const existed = conversations.delete(id);
   messages.delete(id);
   openCodeSessions.delete(id);
-  if (existed) await saveStore();
+  if (existed) {
+    await saveStore();
+    emitListChanged(emit, id, 'deleted');
+  }
   return existed;
 }
 
-async function updateConversation(id, updates) {
+async function updateConversation(id, updates, emit) {
   const conversation = conversations.get(id);
   if (!conversation) return false;
   conversations.set(id, {
@@ -2163,7 +2168,12 @@ async function updateConversation(id, updates) {
     modifyTime: Date.now(),
   });
   await saveStore();
+  emitListChanged(emit, id, 'updated');
   return true;
+}
+
+function emitListChanged(emit, conversationId, action) {
+  emit('conversation.listChanged', { conversation_id: conversationId, action, source: 'local' });
 }
 
 function isRecord(value) {
