@@ -147,6 +147,14 @@ describe('termuxRuntime', () => {
     expect(script).toContain("type === 'item.started' || type === 'item.completed'");
     expect(script).toContain("item.type === 'agent_message'");
     expect(script).toContain("item.type === 'command_execution'");
+    expect(script).toContain("item.type === 'web_search'");
+    expect(script).toContain("item.type === 'file_change'");
+    expect(script).toContain('function codexWebSearchTool(type, item)');
+    expect(script).toContain("subtype: type === 'item.started' ? 'web_search_begin' : 'web_search_end'");
+    expect(script).toContain('data: { query }');
+    expect(script).toContain('function codexFileChangeTool(type, item)');
+    expect(script).toContain("kind: 'file_change'");
+    expect(script).toContain('description: codexFileChangeDescription(item)');
     expect(script).toContain("type: 'codex_tool_call'");
     expect(script).toContain('data: tool');
     expect(script).toContain('upsertCodexToolCallMessage(conversationId, assistantMsgId, tool);');

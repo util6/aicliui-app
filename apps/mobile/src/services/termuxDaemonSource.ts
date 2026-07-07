@@ -1379,6 +1379,8 @@ function extractCodexToolUpdate(value) {
   const item = isRecord(value.item) ? value.item : {};
   if (item.type === 'agent_message') return null;
   if (item.type === 'command_execution') return codexCommandExecutionTool(type, item);
+  if (item.type === 'web_search') return codexWebSearchTool(type, item);
+  if (item.type === 'file_change') return codexFileChangeTool(type, item);
   return codexGenericTool(type, item);
 }
 
@@ -1397,6 +1399,35 @@ function codexCommandExecutionTool(type, item) {
   };
 }
 
+function codexWebSearchTool(type, item) {
+  const toolCallId = stringValue(item.id);
+  if (!toolCallId) return null;
+  const query = stringValue(item.query) || '';
+  return {
+    toolCallId,
+    kind: 'web_search',
+    subtype: type === 'item.started' ? 'web_search_begin' : 'web_search_end',
+    title: query || 'Web search',
+    description: query,
+    status: type === 'item.started' ? 'executing' : 'success',
+    data: { query },
+  };
+}
+
+function codexFileChangeTool(type, item) {
+  const toolCallId = stringValue(item.id);
+  if (!toolCallId) return null;
+  const changes = Array.isArray(item.changes) ? item.changes.filter(isRecord) : [];
+  return {
+    toolCallId,
+    kind: 'file_change',
+    title: codexFileChangeTitle(changes),
+    description: codexFileChangeDescription(item),
+    status: codexToolStatus(type, item),
+    data: { changes },
+  };
+}
+
 function codexGenericTool(type, item) {
   const toolCallId = stringValue(item.id);
   if (!toolCallId) return null;
@@ -1408,6 +1439,22 @@ function codexGenericTool(type, item) {
     description: codexToolDescription(item),
     status: codexToolStatus(type, item),
   };
+}
+
+function codexFileChangeTitle(changes) {
+  if (changes.length === 1) return codexFileChangeLabel(changes[0]);
+  return changes.length ? changes.length + ' file changes' : 'File changes';
+}
+
+function codexFileChangeDescription(item) {
+  const changes = Array.isArray(item.changes) ? item.changes.filter(isRecord) : [];
+  return changes.map(codexFileChangeLabel).filter(Boolean).join('\n');
+}
+
+function codexFileChangeLabel(change) {
+  const path = stringValue(change.path);
+  const kind = stringValue(change.kind);
+  return [kind, path].filter(Boolean).join(' ');
 }
 
 function codexToolStatus(type, item) {
