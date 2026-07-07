@@ -825,6 +825,19 @@ async function sendMessage(params, emit) {
       data: [tool],
     });
   };
+  const emitAssistantThinking = (update) => {
+    if (!update) return;
+    emit('chat.response.stream', {
+      type: 'thinking',
+      msg_id: assistantMsgId,
+      conversation_id: conversationId,
+      data: {
+        content: typeof update.content === 'string' ? update.content : '',
+        subject: 'OpenCode reasoning',
+        status: update.status === 'done' ? 'done' : 'thinking',
+      },
+    });
+  };
   const emitAssistantCodexTool = (tool) => {
     if (!tool) return;
     upsertCodexToolCallMessage(conversationId, assistantMsgId, tool);
@@ -904,6 +917,7 @@ async function sendMessage(params, emit) {
         signal: run.signal,
         onContent: emitAssistantContent,
         onTool: emitAssistantTool,
+        onThinking: emitAssistantThinking,
         onPermission: emitAssistantPermission,
         onPermissionResolved: emitAssistantPermissionResolved,
         onQuestion: emitAssistantQuestion,
@@ -1049,6 +1063,7 @@ async function sendOpenCodePrompt({
   signal,
   onContent,
   onTool,
+  onThinking,
   onPermission,
   onPermissionResolved,
   onQuestion,
@@ -1063,6 +1078,7 @@ async function sendOpenCodePrompt({
   const eventStream = subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, {
     onContent,
     onTool,
+    onThinking,
     onPermission: (request) => {
       const confirmation = toOpenCodeConfirmation(request, conversationId, msgId, baseUrl);
       if (confirmation) onPermission(confirmation);
@@ -1197,12 +1213,15 @@ function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, h
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       const extractTextDelta = createOpenCodeTextDeltaExtractor(sessionId);
+      const extractReasoningEvent = createOpenCodeReasoningEventExtractor(sessionId);
       const extractToolUpdate = createOpenCodeToolUpdateExtractor(sessionId);
       const extractPermissionEvent = createOpenCodePermissionEventExtractor(sessionId);
       const extractQuestionEvent = createOpenCodeQuestionEventExtractor(sessionId);
       const parse = createSseParser((event) => {
         const text = extractTextDelta(event);
         if (text) handlers.onContent(text);
+        const reasoning = extractReasoningEvent(event);
+        if (reasoning) handlers.onThinking(reasoning);
         const tool = extractToolUpdate(event);
         if (tool) handlers.onTool(tool);
         const permissionEvent = extractPermissionEvent(event);
@@ -1285,6 +1304,25 @@ function extractOpenCodeEventTextDelta(event, sessionId, textByPartId) {
   const previous = textByPartId.get(partId) || '';
   textByPartId.set(partId, part.text);
   return part.text.startsWith(previous) ? part.text.slice(previous.length) : '';
+}
+
+function createOpenCodeReasoningEventExtractor(sessionId) {
+  return (event) => extractOpenCodeReasoningEvent(event, sessionId);
+}
+
+function extractOpenCodeReasoningEvent(event, sessionId) {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (data.sessionID !== sessionId) return null;
+  if (type === 'session.next.reasoning.delta' && typeof data.delta === 'string') {
+    return { content: data.delta, status: 'thinking' };
+  }
+  if (type === 'session.next.reasoning.ended') {
+    return { content: '', status: 'done' };
+  }
+  return null;
 }
 
 function createOpenCodeToolUpdateExtractor(sessionId) {

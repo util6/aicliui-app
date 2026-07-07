@@ -276,6 +276,14 @@ export function createOpenCodeAdapter(
             tools: [event.tool],
           };
           break;
+        case 'thinking':
+          yield {
+            type: 'thinking',
+            subject: 'OpenCode reasoning',
+            content: event.content,
+            status: event.status,
+          };
+          break;
         case 'permission': {
           const confirmation = toOpenCodeConfirmation(event.request);
           if (!confirmation) break;

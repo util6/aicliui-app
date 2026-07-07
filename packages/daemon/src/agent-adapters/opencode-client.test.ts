@@ -419,6 +419,58 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode reasoning events as thinking updates', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_reasoning' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.reasoning.delta',
+              data: { sessionID: 'ses_reasoning', reasoningID: 'rsn_1', delta: 'I will inspect ' },
+            },
+            {
+              type: 'session.next.reasoning.delta',
+              data: { sessionID: 'ses_reasoning', reasoningID: 'rsn_1', delta: 'the files.' },
+            },
+            {
+              type: 'session.next.reasoning.ended',
+              data: { sessionID: 'ses_reasoning', reasoningID: 'rsn_1', text: 'I will inspect the files.' },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_reasoning/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_reasoning/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_reasoning/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'done' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_reasoning' },
+      { type: 'thinking', content: 'I will inspect ', status: 'thinking' },
+      { type: 'thinking', content: 'the files.', status: 'thinking' },
+      { type: 'thinking', content: '', status: 'done' },
+      { type: 'content', content: 'done' },
+    ]);
+  });
+
   it('falls back to context text when the OpenCode SSE stream is unavailable', async () => {
     const client = createOpenCodeClient({
       baseUrl: 'http://127.0.0.1:4096',

@@ -108,4 +108,14 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('async function rejectOpenCodeQuestion(record)');
     expect(TERMUX_DAEMON_SOURCE).toContain("'/api/session/' + encodeURIComponent(record.sessionId) + '/question/'");
   });
+
+  it('routes OpenCode reasoning events through the local thinking stream', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain('onThinking: emitAssistantThinking');
+    expect(TERMUX_DAEMON_SOURCE).toContain('createOpenCodeReasoningEventExtractor');
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.reasoning.delta'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.reasoning.ended'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type: 'thinking',");
+    expect(TERMUX_DAEMON_SOURCE).toContain("subject: 'OpenCode reasoning'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("status: 'done'");
+  });
 });

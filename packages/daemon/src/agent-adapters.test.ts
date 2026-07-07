@@ -810,6 +810,41 @@ describe('agent adapters', () => {
     expect(questionRejects).toContainEqual({ sessionId: 'ses_question', requestId: 'que_2' });
   });
 
+  it('forwards OpenCode reasoning events as mobile thinking messages', async () => {
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async () => ({ sessionId: 'unused', text: 'unused fallback' }),
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+          streamPrompt: async function* () {
+            yield { type: 'session', sessionId: 'ses_reasoning' };
+            yield { type: 'thinking', content: 'Inspecting ', status: 'thinking' };
+            yield { type: 'thinking', content: 'workspace.', status: 'thinking' };
+            yield { type: 'thinking', content: '', status: 'done' };
+            yield { type: 'content', content: 'ready' };
+          },
+        },
+      },
+    );
+
+    const events = [];
+    for await (const event of adapter.sendMessage({ conversationId: 'conv-1', input: 'hello' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_reasoning' },
+      { type: 'thinking', subject: 'OpenCode reasoning', content: 'Inspecting ', status: 'thinking' },
+      { type: 'thinking', subject: 'OpenCode reasoning', content: 'workspace.', status: 'thinking' },
+      { type: 'thinking', subject: 'OpenCode reasoning', content: '', status: 'done' },
+      { type: 'content', content: 'ready' },
+    ]);
+  });
+
   it('sends OpenCode slash input through the command endpoint and reuses the conversation session', async () => {
     const calls: unknown[] = [];
     const adapter = createOpenCodeAdapter(

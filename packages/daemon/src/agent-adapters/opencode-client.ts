@@ -79,6 +79,11 @@ export type OpenCodeQuestionRequest = Record<string, unknown> & {
   questions?: unknown[];
 };
 
+export type OpenCodeThinkingUpdate = {
+  content: string;
+  status: 'thinking' | 'done';
+};
+
 export type OpenCodeStreamEvent =
   | {
       type: 'session';
@@ -91,6 +96,11 @@ export type OpenCodeStreamEvent =
   | {
       type: 'tool';
       tool: OpenCodeToolUpdate;
+    }
+  | {
+      type: 'thinking';
+      content: string;
+      status: 'thinking' | 'done';
     }
   | {
       type: 'permission';
@@ -221,6 +231,9 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
         },
         onTool(tool) {
           queue.push({ type: 'tool', tool });
+        },
+        onThinking(update) {
+          queue.push({ type: 'thinking', ...update });
         },
         onPermission(request) {
           queue.push({ type: 'permission', request });
@@ -407,6 +420,7 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
 type OpenCodeEventStreamHandlers = {
   onContent(content: string): void;
   onTool(tool: OpenCodeToolUpdate): void;
+  onThinking(update: OpenCodeThinkingUpdate): void;
   onPermission(request: OpenCodePermissionRequest): void;
   onPermissionResolved(requestId: string): void;
   onQuestion(request: OpenCodeQuestionRequest): void;
@@ -502,11 +516,15 @@ function subscribeOpenCodeSessionEvents(input: {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       const extractTextDelta = createOpenCodeTextDeltaExtractor(input.sessionId);
+      const extractReasoningEvent = createOpenCodeReasoningEventExtractor(input.sessionId);
       const extractPermissionEvent = createOpenCodePermissionEventExtractor(input.sessionId);
       const extractQuestionEvent = createOpenCodeQuestionEventExtractor(input.sessionId);
       const parse = createSseParser((event) => {
         const text = extractTextDelta(event);
         if (text) input.handlers.onContent(text);
+
+        const reasoning = extractReasoningEvent(event);
+        if (reasoning) input.handlers.onThinking(reasoning);
 
         const tool = extractOpenCodeToolUpdate(event, input.sessionId);
         if (tool) input.handlers.onTool(tool);
@@ -601,6 +619,25 @@ function extractOpenCodeEventTextDelta(
   const previous = textByPartId.get(partId) || '';
   textByPartId.set(partId, part.text);
   return part.text.startsWith(previous) ? part.text.slice(previous.length) : '';
+}
+
+function createOpenCodeReasoningEventExtractor(sessionId: string): (event: unknown) => OpenCodeThinkingUpdate | null {
+  return (event) => extractOpenCodeReasoningEvent(event, sessionId);
+}
+
+function extractOpenCodeReasoningEvent(event: unknown, sessionId: string): OpenCodeThinkingUpdate | null {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (data.sessionID !== sessionId) return null;
+  if (type === 'session.next.reasoning.delta' && typeof data.delta === 'string') {
+    return { content: data.delta, status: 'thinking' };
+  }
+  if (type === 'session.next.reasoning.ended') {
+    return { content: '', status: 'done' };
+  }
+  return null;
 }
 
 function extractOpenCodeToolUpdate(event: unknown, sessionId: string): OpenCodeToolUpdate | null {
