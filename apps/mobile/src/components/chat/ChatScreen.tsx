@@ -113,6 +113,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         onStop={stopGeneration}
         isStreaming={isStreaming}
         canSend={canSendMessage}
+        queuedCount={queuedCommands.length}
         queueWarning={queuedCommandWarning}
         slashCommands={slashCommands}
       />
