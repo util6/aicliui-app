@@ -18,6 +18,7 @@ const startedAt = Date.now();
 const conversations = new Map();
 const messages = new Map();
 const activeRuns = new Map();
+const pendingConfirmations = new Map();
 let openCodeServerPromise = null;
 let saveQueue = Promise.resolve();
 const storeReady = loadStore();
@@ -100,8 +101,8 @@ async function route(key, data, emit) {
   if (key === 'update-conversation') return await updateConversation(requiredString(params.id), isRecord(params.updates) ? params.updates : {});
   if (key === 'chat.send.message') return await sendMessage(params, emit);
   if (key === 'chat.stop.stream') return stopStream(params);
-  if (key === 'confirmation.list') return [];
-  if (key === 'confirmation.confirm') return { success: true };
+  if (key === 'confirmation.list') return listConfirmations(requiredString(params.conversation_id));
+  if (key === 'confirmation.confirm') return await confirmPendingPermission(params, emit);
   if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);
   if (key === 'get-file-by-dir') return await getFileTreeByDir(params);
   if (key === 'read-file') return await readTextFile(requiredString(params.path));
@@ -476,6 +477,15 @@ async function sendMessage(params, emit) {
       data: [tool],
     });
   };
+  const emitAssistantPermission = (confirmation) => {
+    if (!confirmation || !confirmation.id) return;
+    emit('confirmation.add', confirmation);
+  };
+  const emitAssistantPermissionResolved = (confirmationId) => {
+    if (!confirmationId) return;
+    pendingConfirmations.delete(confirmationId);
+    emit('confirmation.remove', { conversation_id: conversationId, id: confirmationId });
+  };
   activeRuns.set(conversationId, run);
 
   await addTextMessage(conversationId, userMsgId, 'right', input);
@@ -493,6 +503,8 @@ async function sendMessage(params, emit) {
         data: { subject: 'OpenCode', description: 'starting local server on 127.0.0.1:' + openCodePort },
       });
       const result = await sendOpenCodePrompt({
+        conversationId,
+        msgId: assistantMsgId,
         input,
         workspace,
         model,
@@ -501,6 +513,8 @@ async function sendMessage(params, emit) {
         signal: run.signal,
         onContent: emitAssistantContent,
         onTool: emitAssistantTool,
+        onPermission: emitAssistantPermission,
+        onPermissionResolved: emitAssistantPermissionResolved,
       });
       emit('chat.response.stream', {
         type: 'thought',
@@ -540,6 +554,7 @@ async function sendMessage(params, emit) {
           (error instanceof Error ? error.message : 'Unknown runtime error');
   } finally {
     if (activeRuns.get(conversationId) === run) activeRuns.delete(conversationId);
+    clearConfirmationsForConversation(conversationId, emit);
   }
 
   await addTextMessage(conversationId, assistantMsgId, 'left', assistantContent);
@@ -580,7 +595,20 @@ function stopStream(params) {
   return { success: true, stopped: true };
 }
 
-async function sendOpenCodePrompt({ input, workspace, model, agent, files, signal, onContent, onTool }) {
+async function sendOpenCodePrompt({
+  conversationId,
+  msgId,
+  input,
+  workspace,
+  model,
+  agent,
+  files,
+  signal,
+  onContent,
+  onTool,
+  onPermission,
+  onPermissionResolved,
+}) {
   const baseUrl = await ensureOpenCodeServer();
   const attachments = await buildOpenCodeFileAttachments(files, workspace);
   const modelRef = parseOpenCodeModelRef(model);
@@ -596,7 +624,15 @@ async function sendOpenCodePrompt({ input, workspace, model, agent, files, signa
   });
   const sessionId = session && session.data && typeof session.data.id === 'string' ? session.data.id : '';
   if (!sessionId) throw new Error('OpenCode session.create returned no session id');
-  const eventStream = subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, { onContent, onTool });
+  const eventStream = subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, {
+    onContent,
+    onTool,
+    onPermission: (request) => {
+      const confirmation = toOpenCodeConfirmation(request, conversationId, msgId, baseUrl);
+      if (confirmation) onPermission(confirmation);
+    },
+    onPermissionResolved,
+  });
 
   try {
     await eventStream.ready;
@@ -661,11 +697,15 @@ function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, h
       const decoder = new TextDecoder();
       const extractTextDelta = createOpenCodeTextDeltaExtractor(sessionId);
       const extractToolUpdate = createOpenCodeToolUpdateExtractor(sessionId);
+      const extractPermissionEvent = createOpenCodePermissionEventExtractor(sessionId);
       const parse = createSseParser((event) => {
         const text = extractTextDelta(event);
         if (text) handlers.onContent(text);
         const tool = extractToolUpdate(event);
         if (tool) handlers.onTool(tool);
+        const permissionEvent = extractPermissionEvent(event);
+        if (permissionEvent?.type === 'asked') handlers.onPermission(permissionEvent.request);
+        if (permissionEvent?.type === 'resolved') handlers.onPermissionResolved(permissionEvent.requestId);
       });
       while (true) {
         const next = await reader.read();
@@ -767,6 +807,150 @@ function extractOpenCodeToolUpdate(event, sessionId) {
     status: openCodeToolStatus(state.status),
     resultDisplay: openCodeToolResultDisplay(state),
   };
+}
+
+function createOpenCodePermissionEventExtractor(sessionId) {
+  return (event) => {
+    const request = extractOpenCodePermissionAsked(event, sessionId);
+    if (request) return { type: 'asked', request };
+    const requestId = extractOpenCodePermissionResolved(event, sessionId);
+    if (requestId) return { type: 'resolved', requestId };
+    return null;
+  };
+}
+
+function extractOpenCodePermissionAsked(event, sessionId) {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'permission.v2.asked' && type !== 'permission.asked') return null;
+  return data.sessionID === sessionId && typeof data.id === 'string' ? data : null;
+}
+
+function extractOpenCodePermissionResolved(event, sessionId) {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'permission.v2.replied' && type !== 'permission.replied') return null;
+  if (data.sessionID !== sessionId) return null;
+  return typeof data.requestID === 'string' ? data.requestID : typeof data.id === 'string' ? data.id : '';
+}
+
+function toOpenCodeConfirmation(request, conversationId, msgId, baseUrl) {
+  const requestId = typeof request.id === 'string' ? request.id : '';
+  const sessionId = typeof request.sessionID === 'string' ? request.sessionID : '';
+  if (!requestId || !sessionId) return null;
+
+  const action = typeof request.action === 'string' && request.action ? request.action : stringValue(request.permission) || 'tool';
+  const resources = Array.isArray(request.resources)
+    ? request.resources.filter((item) => typeof item === 'string' && item)
+    : Array.isArray(request.patterns)
+      ? request.patterns.filter((item) => typeof item === 'string' && item)
+      : [];
+  const source = isRecord(request.source) ? request.source : isRecord(request.tool) ? request.tool : {};
+  const callId = stringValue(source.callID) || requestId;
+  const confirmation = {
+    id: requestId,
+    msg_id: msgId,
+    conversation_id: conversationId,
+    title: 'OpenCode permission',
+    action,
+    description: openCodePermissionDescription(action, resources, request.metadata),
+    call_id: callId,
+    callId,
+    options: [
+      { label: 'Allow once', value: 'once' },
+      { label: 'Allow always', value: 'always' },
+      { label: 'Reject', value: 'reject' },
+    ],
+  };
+  pendingConfirmations.set(requestId, {
+    conversationId,
+    sessionId,
+    requestId,
+    callId,
+    baseUrl,
+    confirmation,
+  });
+  return confirmation;
+}
+
+function openCodePermissionDescription(action, resources, metadata) {
+  const lines = ['Action: ' + action];
+  if (resources.length) lines.push('Resources:', ...resources.map((item) => '- ' + item));
+  if (isRecord(metadata) && Object.keys(metadata).length) {
+    lines.push('Metadata: ' + JSON.stringify(metadata));
+  }
+  return lines.join('\n');
+}
+
+function listConfirmations(conversationId) {
+  return Array.from(pendingConfirmations.values())
+    .filter((record) => record.conversationId === conversationId)
+    .map((record) => record.confirmation);
+}
+
+function clearConfirmationsForConversation(conversationId, emit) {
+  for (const [confirmationId, record] of pendingConfirmations) {
+    if (record.conversationId !== conversationId) continue;
+    pendingConfirmations.delete(confirmationId);
+    emit('confirmation.remove', { conversation_id: conversationId, id: confirmationId });
+  }
+}
+
+async function confirmPendingPermission(params, emit) {
+  const confirmationId = requiredString(params.msg_id || params.id);
+  const record = pendingConfirmations.get(confirmationId);
+  if (!record) {
+    return {
+      success: false,
+      error: { code: 'CONFIRMATION_NOT_FOUND', message: 'Confirmation not found: ' + confirmationId },
+    };
+  }
+  const reply = normalizeOpenCodePermissionReply(params.data);
+  if (!reply) {
+    return {
+      success: false,
+      error: { code: 'INVALID_CONFIRMATION_REPLY', message: 'Unsupported confirmation reply' },
+    };
+  }
+
+  await replyOpenCodePermission(record, reply);
+  pendingConfirmations.delete(confirmationId);
+  emit('confirmation.remove', { conversation_id: record.conversationId, id: confirmationId });
+  return { success: true };
+}
+
+async function replyOpenCodePermission(record, reply) {
+  try {
+    await requestOpenCodeJson(
+      record.baseUrl,
+      '/api/session/' + encodeURIComponent(record.sessionId) + '/permission/' + encodeURIComponent(record.requestId) + '/reply',
+      {
+        method: 'POST',
+        body: JSON.stringify({ reply }),
+      },
+    );
+  } catch (error) {
+    await requestOpenCodeJson(
+      record.baseUrl,
+      '/api/session/' + encodeURIComponent(record.sessionId) + '/permissions/' + encodeURIComponent(record.requestId),
+      {
+        method: 'POST',
+        body: JSON.stringify({ response: reply }),
+      },
+    );
+  }
+}
+
+function normalizeOpenCodePermissionReply(value) {
+  if (value === 'once' || value === 'always' || value === 'reject') return value;
+  if (value === 'proceed_once' || value === 'allow' || value === 'approve' || value === 'yes') return 'once';
+  if (value === 'proceed_always' || value === 'proceed_always_tool' || value === 'proceed_always_server') return 'always';
+  if (value === 'cancel' || value === 'deny' || value === 'no') return 'reject';
+  return null;
 }
 
 function openCodeToolTitle(part, state) {
