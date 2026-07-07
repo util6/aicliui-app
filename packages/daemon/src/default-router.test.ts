@@ -39,6 +39,70 @@ describe('default bridge routes', () => {
     expect(listed.data).toEqual([created.data]);
   });
 
+  it('normalizes selected mobile model context into the conversation model shape', async () => {
+    const store = new InMemoryConversationStore({ now: () => 1100, id: () => 'model-conv-1' });
+    const router = createDefaultRouter({ store, adapters: createFallbackAgentAdapterRegistry() });
+
+    const [created] = await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_model',
+        data: {
+          type: 'acp',
+          name: 'hello',
+          model: { id: '', useModel: '' },
+          extra: {
+            backend: 'opencode',
+            currentModelId: 'anthropic/claude-sonnet-4',
+            currentModelLabel: 'Claude Sonnet 4',
+          },
+        },
+      },
+    });
+
+    expect(created.data).toMatchObject({
+      id: 'model-conv-1',
+      model: {
+        id: 'anthropic/claude-sonnet-4',
+        useModel: 'Claude Sonnet 4',
+      },
+      extra: {
+        currentModelId: 'anthropic/claude-sonnet-4',
+        currentModelLabel: 'Claude Sonnet 4',
+      },
+    });
+  });
+
+  it('falls back to the selected model id when the mobile model label is not a string', async () => {
+    const store = new InMemoryConversationStore({ now: () => 1200, id: () => 'model-conv-2' });
+    const router = createDefaultRouter({ store, adapters: createFallbackAgentAdapterRegistry() });
+
+    const [created] = await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_model_invalid_label',
+        data: {
+          type: 'acp',
+          name: 'hello',
+          model: { id: '', useModel: '' },
+          extra: {
+            backend: 'opencode',
+            currentModelId: 'anthropic/claude-sonnet-4',
+            currentModelLabel: 123,
+          },
+        },
+      },
+    });
+
+    expect(created.data).toMatchObject({
+      id: 'model-conv-2',
+      model: {
+        id: 'anthropic/claude-sonnet-4',
+        useModel: 'anthropic/claude-sonnet-4',
+      },
+    });
+  });
+
   it('returns adapter model info through the AionUi mobile bridge contract', async () => {
     const router = createDefaultRouter({
       adapters: createAgentAdapterRegistry([

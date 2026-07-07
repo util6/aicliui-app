@@ -23,6 +23,7 @@ export type Conversation = {
     agentName?: string;
     defaultFiles?: string[];
     currentModelId?: string;
+    currentModelLabel?: string;
     sessionMode?: string;
     lastContextUsage?: {
       used: number;
@@ -50,6 +51,7 @@ type CreateConversationParams = {
   defaultFiles?: string[];
   sessionMode?: string;
   currentModelId?: string;
+  currentModelLabel?: string;
 };
 
 export type CommitNewChatOptions = {
@@ -58,6 +60,7 @@ export type CommitNewChatOptions = {
   defaultFiles?: string[];
   sessionMode?: string;
   currentModelId?: string;
+  currentModelLabel?: string;
 };
 
 type ConversationContextType = {
@@ -260,6 +263,7 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
             ...(params.defaultFiles?.length ? { defaultFiles: params.defaultFiles } : {}),
             ...(params.sessionMode ? { sessionMode: params.sessionMode } : {}),
             ...(params.currentModelId ? { currentModelId: params.currentModelId } : {}),
+            ...(params.currentModelLabel ? { currentModelLabel: params.currentModelLabel } : {}),
           },
         };
         const result = await bridge.request<Conversation>('create-conversation', fullParams);

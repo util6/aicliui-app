@@ -27,6 +27,7 @@ const conversation: Conversation = {
     workspace: '/tmp/project',
     defaultFiles: ['/tmp/project/README.md', '/tmp/project/src/app.ts'],
     currentModelId: 'gpt-5-codex',
+    currentModelLabel: 'GPT-5 Codex',
     sessionMode: 'autoEdit',
   },
 };
@@ -37,7 +38,7 @@ describe('ChatSessionBar', () => {
 
     expect(screen.getByText('project')).toBeTruthy();
     expect(screen.getByText('2 file(s) selected')).toBeTruthy();
-    expect(screen.getByText('gpt-5-codex')).toBeTruthy();
+    expect(screen.getByText('GPT-5 Codex')).toBeTruthy();
     expect(screen.getByText('Auto Edit')).toBeTruthy();
   });
 

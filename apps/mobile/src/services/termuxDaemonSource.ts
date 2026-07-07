@@ -496,7 +496,8 @@ function normalizeConversationModel(model, extra) {
     };
   }
   const currentModelId = typeof extra.currentModelId === 'string' ? extra.currentModelId : '';
-  return currentModelId ? { id: currentModelId, useModel: modelLabel(currentModelId, extra.backend) } : { id: '', useModel: '' };
+  const currentModelLabel = typeof extra.currentModelLabel === 'string' ? extra.currentModelLabel : '';
+  return currentModelId ? { id: currentModelId, useModel: currentModelLabel || modelLabel(currentModelId, extra.backend) } : { id: '', useModel: '' };
 }
 
 function modelLabel(modelId, backend) {

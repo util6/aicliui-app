@@ -35,6 +35,7 @@ export type Conversation = {
     pinned?: boolean;
     pinnedAt?: number;
     currentModelId?: string;
+    currentModelLabel?: string;
     sessionMode?: string;
     lastContextUsage?: {
       used: number;

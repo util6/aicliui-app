@@ -134,6 +134,7 @@ export function PendingChatScreen({ agent }: PendingChatScreenProps) {
         ...(selectedFiles.length > 0 ? { defaultFiles: selectedFiles } : {}),
         ...(selectedMode && selectedMode !== 'default' ? { sessionMode: selectedMode } : {}),
         ...(selectedModel ? { currentModelId: selectedModel } : {}),
+        ...(selectedModel && currentModelLabel ? { currentModelLabel } : {}),
       });
     } finally {
       setIsSending(false);

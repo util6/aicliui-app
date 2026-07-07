@@ -64,11 +64,12 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
   });
   router.register('create-conversation', (data) => {
     const params = asRecord(data);
+    const extra = isRecord(params.extra) ? (params.extra as Conversation['extra']) : {};
     return store.createConversation({
       type: stringParam(params.type, 'acp'),
       name: stringParam(params.name, 'New conversation'),
-      model: isModel(params.model) ? params.model : { id: '', useModel: '' },
-      extra: isRecord(params.extra) ? (params.extra as Conversation['extra']) : {},
+      model: normalizeConversationModel(params.model, extra),
+      extra,
     } satisfies CreateConversationInput);
   });
   router.register('remove-conversation', (data) => {
@@ -438,4 +439,19 @@ function mergeFiles(fallback: unknown, primary: unknown): string[] {
 
 function isModel(value: unknown): value is { id: string; useModel: string } {
   return isRecord(value) && typeof value.id === 'string' && typeof value.useModel === 'string';
+}
+
+function normalizeConversationModel(model: unknown, extra: Conversation['extra']): { id: string; useModel: string } {
+  if (isModel(model) && (model.id || model.useModel)) {
+    return model;
+  }
+
+  if (typeof extra.currentModelId !== 'string' || extra.currentModelId.length === 0) {
+    return { id: '', useModel: '' };
+  }
+
+  return {
+    id: extra.currentModelId,
+    useModel: typeof extra.currentModelLabel === 'string' && extra.currentModelLabel.length > 0 ? extra.currentModelLabel : extra.currentModelId,
+  };
 }

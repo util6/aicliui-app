@@ -82,7 +82,7 @@ export function buildSessionChips(
     chips.push({
       key: 'model',
       icon: 'hardware-chip-outline',
-      label: extra.currentModelId,
+      label: extra.currentModelLabel || extra.currentModelId,
     });
   }
 

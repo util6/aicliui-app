@@ -1,6 +1,6 @@
 import React from 'react';
 import { Text } from 'react-native';
-import { act, render, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { ConversationProvider, useConversations, type Conversation } from '@/src/context/ConversationContext';
 import { bridge } from '@/src/services/bridge';
 
@@ -36,6 +36,32 @@ function conversationWithStatus(status: Conversation['status']): Conversation {
     model: { id: '', useModel: '' },
     extra: { backend: 'opencode' },
   };
+}
+
+function NewChatProbe() {
+  const { startNewChat, commitNewChat } = useConversations();
+
+  React.useEffect(() => {
+    startNewChat({ backend: 'opencode', name: 'opencode', label: 'OpenCode' });
+  }, [startNewChat]);
+
+  return (
+    <Text
+      testID='commit'
+      onPress={() => {
+        void commitNewChat('Inspect this workspace', {
+          workspace: '/tmp/project',
+          customWorkspace: true,
+          defaultFiles: ['/tmp/project/README.md'],
+          sessionMode: 'plan',
+          currentModelId: 'anthropic/claude-sonnet-4',
+          currentModelLabel: 'Claude Sonnet 4',
+        });
+      }}
+    >
+      commit
+    </Text>
+  );
 }
 
 describe('ConversationContext stream status sync', () => {
@@ -237,5 +263,61 @@ describe('ConversationContext stream status sync', () => {
     });
 
     expect(screen.getByTestId('status').props.children).toBe('running');
+  });
+});
+
+describe('ConversationContext new chat context', () => {
+  beforeEach(() => {
+    mockRequest.mockReset();
+    (bridge.on as jest.Mock).mockImplementation(() => jest.fn());
+  });
+
+  it('persists selected execution context when committing a pending mobile chat', async () => {
+    mockRequest.mockImplementation((name: string, data?: unknown) => {
+      if (name === 'database.get-user-conversations') return Promise.resolve([]);
+      if (name === 'create-conversation') {
+        return Promise.resolve({
+          id: 'new-chat-1',
+          name: 'Inspect this workspace',
+          type: 'acp',
+          status: 'pending',
+          createTime: 1000,
+          modifyTime: 1000,
+          model: { id: '', useModel: '' },
+          extra: (data as { extra?: unknown }).extra,
+        });
+      }
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <NewChatProbe />
+      </ConversationProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('commit'));
+    });
+
+    await waitFor(() =>
+      expect(mockRequest).toHaveBeenCalledWith(
+        'create-conversation',
+        expect.objectContaining({
+          type: 'acp',
+          name: 'Inspect this workspace',
+          extra: expect.objectContaining({
+            backend: 'opencode',
+            agentName: 'opencode',
+            workspace: '/tmp/project',
+            customWorkspace: true,
+            defaultFiles: ['/tmp/project/README.md'],
+            sessionMode: 'plan',
+            currentModelId: 'anthropic/claude-sonnet-4',
+            currentModelLabel: 'Claude Sonnet 4',
+          }),
+        }),
+      ),
+    );
   });
 });
