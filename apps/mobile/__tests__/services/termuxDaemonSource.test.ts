@@ -129,6 +129,14 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeNextToolDisplay(data)');
   });
 
+  it('routes OpenCode v2 shell lifecycle events through the local tool stream', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain('function extractOpenCodeShellToolUpdate(event, sessionId, toolByCallId)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.shell.started'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.shell.ended'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("openCodeToolUpdate(callId, 'shell', command, 'Executing', '')");
+    expect(TERMUX_DAEMON_SOURCE).toContain("openCodeToolUpdate(callId, cached.name, cached.description, 'Success', output)");
+  });
+
   it('routes OpenCode v2 step usage events through the local context usage stream', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('createOpenCodeContextUsageExtractor');
     expect(TERMUX_DAEMON_SOURCE).toContain('function extractOpenCodeContextUsage(event, sessionId)');

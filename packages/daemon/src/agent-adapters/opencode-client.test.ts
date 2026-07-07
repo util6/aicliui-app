@@ -466,6 +466,84 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode v2 shell lifecycle events while prompting', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_shell' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.shell.started',
+              data: {
+                sessionID: 'ses_shell',
+                messageID: 'msg_shell',
+                callID: 'shell_1',
+                command: 'npm test',
+              },
+            },
+            {
+              type: 'session.next.shell.ended',
+              data: {
+                sessionID: 'ses_shell',
+                callID: 'shell_1',
+                output: 'ok\n',
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_shell/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_shell/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_shell/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'shell done' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_shell' },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'shell_1',
+          call_id: 'shell_1',
+          name: 'shell',
+          description: 'npm test',
+          status: 'Executing',
+          resultDisplay: '',
+          result_display: '',
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'shell_1',
+          call_id: 'shell_1',
+          name: 'shell',
+          description: 'npm test',
+          status: 'Success',
+          resultDisplay: 'ok\n',
+          result_display: 'ok\n',
+        },
+      },
+      { type: 'content', content: 'shell done' },
+    ]);
+  });
+
   it('streams OpenCode question events and can reply or reject them', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const client = createOpenCodeClient({
