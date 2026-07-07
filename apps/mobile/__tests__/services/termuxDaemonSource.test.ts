@@ -19,4 +19,13 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('url: pathToFileURL(filePath).toString(),');
     expect(TERMUX_DAEMON_SOURCE).toContain('filename: basename(filePath),');
   });
+
+  it('redacts local runtime failure messages before streaming them to chat', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain(
+      "runtimeDisplayName(backend) + ' runtime failed: ' + formatRuntimeErrorMessage(error);",
+    );
+    expect(TERMUX_DAEMON_SOURCE).toContain('function formatRuntimeErrorMessage(error)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('function redactRuntimeErrorText(text)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('[redacted]');
+  });
 });

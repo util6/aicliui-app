@@ -670,11 +670,10 @@ async function sendMessage(params, emit) {
       throw new Error("Agent backend '" + backend + "' is not supported by this Termux daemon.");
     }
   } catch (error) {
-    const runtimeName = backend === 'opencode' ? 'OpenCode' : backend === 'codex' ? 'Codex CLI' : 'CLI';
     assistantContent =
       run.signal.aborted || isAbortError(error)
         ? 'Generation stopped.'
-        : runtimeName + ' runtime failed: ' + (error instanceof Error ? error.message : 'Unknown runtime error');
+        : runtimeDisplayName(backend) + ' runtime failed: ' + formatRuntimeErrorMessage(error);
   } finally {
     if (activeRuns.get(conversationId) === run) activeRuns.delete(conversationId);
     clearConfirmationsForConversation(conversationId, emit);
@@ -1434,6 +1433,37 @@ function isAbortError(error) {
     isRecord(error) &&
     (error.name === 'AbortError' || error.code === 'ABORT_ERR' || error.message === 'Generation stopped by user')
   );
+}
+
+function runtimeDisplayName(backend) {
+  if (backend === 'opencode') return 'OpenCode';
+  if (backend === 'gemini') return 'Gemini CLI';
+  if (backend === 'codex') return 'Codex CLI';
+  return 'Agent';
+}
+
+function formatRuntimeErrorMessage(error) {
+  const rawMessage =
+    isRecord(error) && typeof error.message === 'string'
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : 'Unknown runtime error';
+  const message = redactRuntimeErrorText(rawMessage).trim();
+  return message.length ? truncateRuntimeErrorText(message) : 'Unknown runtime error';
+}
+
+function redactRuntimeErrorText(text) {
+  return text
+    .replace(/\b(authorization\s*:\s*bearer\s+)[^\s,;]+/gi, '$1[redacted]')
+    .replace(/\b([A-Z0-9_]*(?:api[_-]?key|token|secret|password)[A-Z0-9_]*\s*[=:]\s*)[^\s,;]+/gi, '$1[redacted]')
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, '[redacted]');
+}
+
+function truncateRuntimeErrorText(text) {
+  const maxLength = 600;
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength) + '...';
 }
 
 function extractGeminiStreamText(output) {
