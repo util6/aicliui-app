@@ -389,6 +389,7 @@ async function sendMessage(params, emit) {
   };
   const emitAssistantTool = (tool) => {
     if (!tool) return;
+    upsertToolGroupMessage(conversationId, assistantMsgId, tool);
     emit('chat.response.stream', {
       type: 'tool_group',
       msg_id: assistantMsgId,
@@ -1021,6 +1022,35 @@ async function addTextMessage(conversationId, msgId, position, content) {
   messages.get(conversationId).push(message);
   conversations.get(conversationId).modifyTime = now;
   await saveStore();
+}
+
+function upsertToolGroupMessage(conversationId, msgId, tool) {
+  const list = messages.get(conversationId);
+  const conversation = conversations.get(conversationId);
+  if (!list || !conversation || !tool.callId) return;
+  const now = Date.now();
+
+  for (const message of list) {
+    if (message.type !== 'tool_group' || !Array.isArray(message.content)) continue;
+    const index = message.content.findIndex((item) => isRecord(item) && item.callId === tool.callId);
+    if (index === -1) continue;
+    message.content[index] = { ...message.content[index], ...tool };
+    message.createdAt = message.createdAt || now;
+    conversation.modifyTime = now;
+    void saveStore();
+    return;
+  }
+
+  list.push({
+    id: randomId(),
+    msg_id: msgId,
+    conversation_id: conversationId,
+    type: 'tool_group',
+    content: [tool],
+    createdAt: now,
+  });
+  conversation.modifyTime = now;
+  void saveStore();
 }
 
 async function removeConversation(id) {

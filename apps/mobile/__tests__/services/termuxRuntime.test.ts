@@ -122,8 +122,11 @@ describe('termuxRuntime', () => {
     expect(script).toContain("const rawPath = value.startsWith('/') || value.startsWith('~') ? value : join(root, value);");
     expect(script).toContain('const attachments = await buildOpenCodeFileAttachments(files, workspace);');
     expect(script).toContain('const emitAssistantTool = (tool) => {');
+    expect(script).toContain('upsertToolGroupMessage(conversationId, assistantMsgId, tool);');
     expect(script).toContain("type: 'tool_group'");
     expect(script).toContain('data: [tool]');
+    expect(script).toContain('function upsertToolGroupMessage(conversationId, msgId, tool)');
+    expect(script).toContain('message.content.findIndex((item) => isRecord(item) && item.callId === tool.callId)');
     expect(script).toContain('onTool: emitAssistantTool');
     expect(script).toContain('const eventStream = subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, { onContent, onTool });');
     expect(script).toContain('await eventStream.ready;');
