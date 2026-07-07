@@ -19,6 +19,7 @@
     "localRuntimeSubtitle": "通过本机 Termux daemon 运行 OpenCode、Gemini 等 CLI 智能体。",
     "termux": "Termux",
     "daemon": "Daemon",
+    "bootstrap": "初始化",
     "agents": "智能体",
     "runCommandPermission": "RUN_COMMAND 权限",
     "statusReady": "就绪",

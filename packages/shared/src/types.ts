@@ -45,6 +45,11 @@ export type RuntimeStatus = {
     version: string;
     startedAt: number;
   };
+  bootstrap?: {
+    phase: string;
+    detail?: string;
+    updatedAt?: number;
+  };
   termux: {
     runCommandPermission: 'unknown' | 'granted' | 'denied';
     allowExternalApps: 'unknown' | 'enabled' | 'disabled';

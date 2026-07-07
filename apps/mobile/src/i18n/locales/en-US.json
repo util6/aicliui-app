@@ -19,6 +19,7 @@
     "localRuntimeSubtitle": "Run CLI agents through the Termux daemon on this phone.",
     "termux": "Termux",
     "daemon": "Daemon",
+    "bootstrap": "Bootstrap",
     "agents": "Agents",
     "runCommandPermission": "RUN_COMMAND Permission",
     "statusReady": "Ready",

@@ -11,6 +11,7 @@ const port = Number.parseInt(process.env.AICLIUI_DAEMON_PORT || '43117', 10);
 const openCodePort = Number.parseInt(process.env.AICLIUI_OPENCODE_PORT || '4096', 10);
 const dataRoot = process.env.AICLIUI_HOME || (process.env.HOME ? process.env.HOME + '/.aicliui' : '.aicliui');
 const storePath = process.env.AICLIUI_STORE_PATH || dataRoot + '/daemon/store.json';
+const bootstrapStatusPath = process.env.AICLIUI_BOOTSTRAP_STATUS || dataRoot + '/daemon/bootstrap.status';
 const token = process.env.AICLIUI_DAEMON_TOKEN || '';
 const startedAt = Date.now();
 const conversations = new Map();
@@ -96,6 +97,7 @@ async function route(key, data, emit) {
 async function getRuntimeStatus() {
   return {
     daemon: { version: '0.1.0-termux-bootstrap', startedAt },
+    bootstrap: await readBootstrapStatus(),
     termux: { runCommandPermission: 'granted', allowExternalApps: 'unknown' },
     agents: await Promise.all([probeAgent('opencode'), probeAgent('gemini')]),
   };
@@ -162,6 +164,31 @@ async function writeStore() {
 
 function isNodeErrorCode(error, code) {
   return isRecord(error) && error.code === code;
+}
+
+async function readBootstrapStatus() {
+  try {
+    const raw = await readFile(bootstrapStatusPath, 'utf8');
+    const values = Object.fromEntries(
+      raw
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => {
+          const index = line.indexOf('=');
+          return index === -1 ? [line, ''] : [line.slice(0, index), line.slice(index + 1)];
+        }),
+    );
+    return {
+      phase: typeof values.phase === 'string' && values.phase ? values.phase : 'unknown',
+      detail: typeof values.detail === 'string' && values.detail ? values.detail : undefined,
+      updatedAt: Number.isFinite(Number(values.updatedAt)) ? Number(values.updatedAt) : undefined,
+    };
+  } catch (error) {
+    if (!isNodeErrorCode(error, 'ENOENT')) {
+      return { phase: 'error', detail: error instanceof Error ? error.message : 'Failed to read bootstrap status' };
+    }
+    return { phase: 'unknown' };
+  }
 }
 
 async function getWorkspaceTree(params) {

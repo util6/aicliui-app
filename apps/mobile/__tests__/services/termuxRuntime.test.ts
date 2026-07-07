@@ -76,6 +76,11 @@ describe('termuxRuntime', () => {
     });
 
     expect(script).toContain('mkdir -p "$AICLIUI_HOME/bin" "$AICLIUI_HOME/daemon"');
+    expect(script).toContain('export AICLIUI_BOOTSTRAP_LOG="$AICLIUI_HOME/logs/bootstrap.log"');
+    expect(script).toContain('export AICLIUI_BOOTSTRAP_STATUS="$AICLIUI_HOME/daemon/bootstrap.status"');
+    expect(script).toContain('write_bootstrap_status preparing "Preparing AICLIUI Termux runtime"');
+    expect(script).toContain('write_bootstrap_status installing_daemon_deps "Installing daemon npm dependencies"');
+    expect(script).toContain('write_bootstrap_status daemon_start_requested "Starting local daemon"');
     expect(script).toContain("printf %s 'tok'\\''en' > \"$AICLIUI_HOME/daemon/token\"");
     expect(script).toContain('pkg install -y nodejs');
     expect(script).toContain('npm install --omit=dev --prefix "$AICLIUI_HOME/daemon"');
@@ -85,7 +90,9 @@ describe('termuxRuntime', () => {
     expect(script).toContain("import { spawn } from 'node:child_process';");
     expect(script).toContain("import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';");
     expect(script).toContain("const storePath = process.env.AICLIUI_STORE_PATH || dataRoot + '/daemon/store.json';");
+    expect(script).toContain("const bootstrapStatusPath = process.env.AICLIUI_BOOTSTRAP_STATUS || dataRoot + '/daemon/bootstrap.status';");
     expect(script).toContain('const storeReady = loadStore();');
+    expect(script).toContain('bootstrap: await readBootstrapStatus()');
     expect(script).toContain('await storeReady;');
     expect(script).toContain('await rename(tmpPath, storePath);');
     expect(script).toContain("if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);");

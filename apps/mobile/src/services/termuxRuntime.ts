@@ -80,29 +80,62 @@ set -eu
 
 export AICLIUI_HOME="$HOME/.aicliui"
 export AICLIUI_DAEMON_PORT=${port}
+export AICLIUI_BOOTSTRAP_LOG="$AICLIUI_HOME/logs/bootstrap.log"
+export AICLIUI_BOOTSTRAP_STATUS="$AICLIUI_HOME/daemon/bootstrap.status"
 
 mkdir -p "$AICLIUI_HOME/bin" "$AICLIUI_HOME/daemon" "$AICLIUI_HOME/logs" "$AICLIUI_HOME/workspaces/default"
+
+log_bootstrap() {
+  printf '%s %s\\n' "$(date -Iseconds)" "$*" >> "$AICLIUI_BOOTSTRAP_LOG"
+}
+
+write_bootstrap_status() {
+  {
+    printf 'phase=%s\\n' "$1"
+    printf 'detail=%s\\n' "$2"
+    printf 'updatedAt=%s\\n' "$(date +%s000)"
+  } > "$AICLIUI_BOOTSTRAP_STATUS"
+  log_bootstrap "$1: $2"
+}
+
+write_bootstrap_status preparing "Preparing AICLIUI Termux runtime"
 printf %s ${token} > "$AICLIUI_HOME/daemon/token"
 chmod 600 "$AICLIUI_HOME/daemon/token"
 
 if ! command -v node >/dev/null 2>&1; then
+  write_bootstrap_status installing_node "Installing Node.js in Termux"
   pkg update -y
-  pkg install -y nodejs
+  if ! pkg install -y nodejs; then
+    write_bootstrap_status node_install_failed "Failed to install Node.js"
+    exit 1
+  fi
 fi
 
 cat > "$AICLIUI_HOME/daemon/package.json" <<'AICLIUI_DAEMON_PACKAGE'
 {"name":"aicliui-termux-daemon","version":"0.1.0","private":true,"type":"module","dependencies":{"ws":"8.18.3"}}
 AICLIUI_DAEMON_PACKAGE
 
-npm install --omit=dev --prefix "$AICLIUI_HOME/daemon"
+write_bootstrap_status installing_daemon_deps "Installing daemon npm dependencies"
+if ! npm install --omit=dev --prefix "$AICLIUI_HOME/daemon"; then
+  write_bootstrap_status daemon_deps_failed "Failed to install daemon npm dependencies"
+  exit 1
+fi
 
 if ! command -v opencode >/dev/null 2>&1; then
-  npm install -g opencode-ai@latest || true
+  write_bootstrap_status installing_opencode "Installing OpenCode CLI"
+  if ! npm install -g opencode-ai@latest; then
+    write_bootstrap_status opencode_install_failed "Failed to install OpenCode CLI; daemon can still start"
+  fi
 fi
 
 if ! command -v gemini >/dev/null 2>&1; then
-  npm install -g @google/gemini-cli@latest || true
+  write_bootstrap_status installing_gemini "Installing Gemini CLI"
+  if ! npm install -g @google/gemini-cli@latest; then
+    write_bootstrap_status gemini_install_failed "Failed to install Gemini CLI; daemon can still start"
+  fi
 fi
+
+write_bootstrap_status writing_daemon "Writing daemon source files"
 
 cat > "$AICLIUI_HOME/daemon/aicliui-daemon.mjs" <<'AICLIUI_DAEMON_SOURCE'
 ${TERMUX_DAEMON_SOURCE}
@@ -115,6 +148,7 @@ set -eu
 export AICLIUI_HOME="$HOME/.aicliui"
 export AICLIUI_DAEMON_TOKEN="$(cat "$AICLIUI_HOME/daemon/token")"
 export AICLIUI_DAEMON_PORT="\${AICLIUI_DAEMON_PORT:-43117}"
+export AICLIUI_BOOTSTRAP_STATUS="$AICLIUI_HOME/daemon/bootstrap.status"
 
 cd "$AICLIUI_HOME/daemon"
 if [ -f ./aicliui-daemon.mjs ]; then
@@ -126,6 +160,7 @@ exit 64
 AICLIUI_START_DAEMON
 
 chmod 700 "$AICLIUI_HOME/bin/start-daemon.sh"
+write_bootstrap_status daemon_start_requested "Starting local daemon"
 nohup "$AICLIUI_HOME/bin/start-daemon.sh" >/dev/null 2>&1 &
 `;
 }

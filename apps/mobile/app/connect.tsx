@@ -153,6 +153,14 @@ export default function ConnectScreen() {
           value={probeLabel(runtimeProbe.runCommandPermission, t)}
           tone={probeTone(runtimeProbe.runCommandPermission)}
         />
+        {daemonStatus?.bootstrap && (
+          <RuntimeRow
+            icon='pulse-outline'
+            label={t('connect.bootstrap')}
+            value={bootstrapLabel(daemonStatus.bootstrap)}
+            tone={bootstrapTone(daemonStatus.bootstrap.phase)}
+          />
+        )}
         {agentRows(daemonStatus).map((agent) => (
           <RuntimeRow
             key={agent.backend}
@@ -241,6 +249,16 @@ function daemonStateLabel(state: string, t: (key: string) => string): string {
   if (state === 'connecting') return t('connect.statusConnecting');
   if (state === 'auth_failed') return t('connect.statusAuthFailed');
   return `127.0.0.1:${LOCAL_DAEMON_PORT}`;
+}
+
+function bootstrapLabel(bootstrap: NonNullable<RuntimeStatus['bootstrap']>): string {
+  return bootstrap.detail ? `${bootstrap.phase} · ${bootstrap.detail}` : bootstrap.phase;
+}
+
+function bootstrapTone(phase: string): RuntimeRowProps['tone'] {
+  if (phase === 'daemon_start_requested') return 'ready';
+  if (phase.endsWith('_failed') || phase === 'error') return 'missing';
+  return 'pending';
 }
 
 function probeLabel(state: ProbeState, t: (key: string) => string): string {
