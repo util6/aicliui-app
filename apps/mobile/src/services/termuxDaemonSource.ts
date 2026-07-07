@@ -509,6 +509,16 @@ async function sendMessage(params, emit) {
       data: tool,
     });
   };
+  const emitAssistantPlan = (plan) => {
+    if (!plan) return;
+    upsertCodexPlanMessage(conversationId, assistantMsgId, plan);
+    emit('chat.response.stream', {
+      type: 'plan',
+      msg_id: assistantMsgId,
+      conversation_id: conversationId,
+      data: plan,
+    });
+  };
   const emitAssistantPermission = (confirmation) => {
     if (!confirmation || !confirmation.id) return;
     emit('confirmation.add', confirmation);
@@ -594,6 +604,7 @@ async function sendMessage(params, emit) {
         signal: run.signal,
         onContent: emitAssistantContent,
         onTool: emitAssistantCodexTool,
+        onPlan: emitAssistantPlan,
       });
       if (!assistantContent) assistantContent = 'Codex CLI completed, but no assistant text was returned.';
     } else {
@@ -1098,7 +1109,7 @@ async function sendGeminiPrompt({ input, workspace, model, approvalMode, files, 
   return fallback;
 }
 
-async function sendCodexPrompt({ input, workspace, model, approvalMode, files, signal, onContent, onTool }) {
+async function sendCodexPrompt({ input, workspace, model, approvalMode, files, signal, onContent, onTool, onPlan }) {
   const prompt = appendSelectedFilesToPrompt(input, files, workspace);
   const args = buildCodexArgs({ input: prompt, model, approvalMode });
   let lineBuffer = '';
@@ -1116,6 +1127,8 @@ async function sendCodexPrompt({ input, workspace, model, approvalMode, files, s
       emitContent(extractCodexEventText(event));
       const tool = extractCodexToolUpdate(event);
       if (tool) onTool?.(tool);
+      const plan = extractCodexPlanUpdate(event);
+      if (plan) onPlan?.(plan);
     }
   };
   const result = await runProcess('codex', args, {
@@ -1127,6 +1140,8 @@ async function sendCodexPrompt({ input, workspace, model, approvalMode, files, s
   emitContent(extractCodexEventText(trailingEvent));
   const trailingTool = extractCodexToolUpdate(trailingEvent);
   if (trailingTool) onTool?.(trailingTool);
+  const trailingPlan = extractCodexPlanUpdate(trailingEvent);
+  if (trailingPlan) onPlan?.(trailingPlan);
   if (content) return content;
 
   const fallback = extractCodexJsonText(result.stdout) || result.stdout.trim();
@@ -1378,10 +1393,33 @@ function extractCodexToolUpdate(value) {
   if (!(type === 'item.started' || type === 'item.completed')) return null;
   const item = isRecord(value.item) ? value.item : {};
   if (item.type === 'agent_message') return null;
+  if (item.type === 'todo_list') return null;
   if (item.type === 'command_execution') return codexCommandExecutionTool(type, item);
   if (item.type === 'web_search') return codexWebSearchTool(type, item);
   if (item.type === 'file_change') return codexFileChangeTool(type, item);
   return codexGenericTool(type, item);
+}
+
+function extractCodexPlanUpdate(value) {
+  if (!isRecord(value)) return null;
+  const type = typeof value.type === 'string' ? value.type : '';
+  if (!(type === 'item.started' || type === 'item.updated' || type === 'item.completed')) return null;
+  const item = isRecord(value.item) ? value.item : {};
+  if (item.type !== 'todo_list') return null;
+  return codexTodoListPlan(item);
+}
+
+function codexTodoListPlan(item) {
+  const sessionId = stringValue(item.id);
+  const items = Array.isArray(item.items) ? item.items.filter(isRecord) : [];
+  if (!sessionId) return null;
+  return {
+    sessionId,
+    entries: items.map((todo) => ({
+      title: stringValue(todo.text) || '',
+      status: todo.completed ? 'completed' : 'pending',
+    })),
+  };
 }
 
 function codexCommandExecutionTool(type, item) {
@@ -1619,6 +1657,36 @@ function upsertCodexToolCallMessage(conversationId, msgId, tool) {
     type: 'codex_tool_call',
     position: 'left',
     content: tool,
+    createdAt: now,
+  });
+  conversation.modifyTime = now;
+  void saveStore();
+}
+
+function upsertCodexPlanMessage(conversationId, msgId, plan) {
+  const list = messages.get(conversationId);
+  const conversation = conversations.get(conversationId);
+  if (!list || !conversation || !plan.sessionId) return;
+  const now = Date.now();
+
+  for (const message of list) {
+    if (message.type !== 'plan' || !isRecord(message.content)) continue;
+    if (message.content.sessionId === plan.sessionId) {
+      message.content = { ...message.content, ...plan };
+      message.createdAt = message.createdAt || now;
+      conversation.modifyTime = now;
+      void saveStore();
+      return;
+    }
+  }
+
+  list.push({
+    id: randomId(),
+    msg_id: msgId,
+    conversation_id: conversationId,
+    type: 'plan',
+    position: 'left',
+    content: plan,
     createdAt: now,
   });
   conversation.modifyTime = now;
