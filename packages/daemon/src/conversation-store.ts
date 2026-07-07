@@ -1,4 +1,4 @@
-import type { Conversation } from '@aicliui/shared';
+import type { Conversation, ConversationArtifact, ConversationArtifactStatus } from '@aicliui/shared';
 
 type Clock = () => number;
 type IdGenerator = () => string;
@@ -23,6 +23,7 @@ export type CreateConversationInput = {
 export class InMemoryConversationStore {
   private readonly conversations = new Map<string, Conversation>();
   private readonly messages = new Map<string, StoredMessage[]>();
+  private readonly artifacts = new Map<string, ConversationArtifact[]>();
   private readonly now: Clock;
   private readonly id: IdGenerator;
 
@@ -54,6 +55,7 @@ export class InMemoryConversationStore {
     };
     this.conversations.set(conversation.id, conversation);
     this.messages.set(conversation.id, []);
+    this.artifacts.set(conversation.id, []);
     return conversation;
   }
 
@@ -71,6 +73,46 @@ export class InMemoryConversationStore {
 
   getConversation(conversationId: string): Conversation | undefined {
     return this.conversations.get(conversationId);
+  }
+
+  listArtifacts(conversationId: string): ConversationArtifact[] {
+    this.requireConversation(conversationId);
+    return [...(this.artifacts.get(conversationId) ?? [])].sort((a, b) => a.created_at - b.created_at);
+  }
+
+  upsertArtifact(artifact: ConversationArtifact): ConversationArtifact {
+    this.requireConversation(artifact.conversation_id);
+    const current = this.artifacts.get(artifact.conversation_id) ?? [];
+    const index = current.findIndex((candidate) => candidate.id === artifact.id);
+    const next = [...current];
+    if (index === -1) {
+      next.push(artifact);
+    } else {
+      next[index] = artifact;
+    }
+    this.artifacts.set(artifact.conversation_id, next);
+    return artifact;
+  }
+
+  updateArtifactStatus(
+    conversationId: string,
+    artifactId: string,
+    status: ConversationArtifactStatus,
+  ): ConversationArtifact | null {
+    this.requireConversation(conversationId);
+    const current = this.artifacts.get(conversationId) ?? [];
+    const index = current.findIndex((artifact) => artifact.id === artifactId);
+    if (index === -1) return null;
+
+    const updated: ConversationArtifact = {
+      ...current[index],
+      status,
+      updated_at: this.now(),
+    };
+    const next = [...current];
+    next[index] = updated;
+    this.artifacts.set(conversationId, next);
+    return updated;
   }
 
   addTextMessage(input: {
@@ -98,6 +140,7 @@ export class InMemoryConversationStore {
   removeConversation(id: string): boolean {
     const existed = this.conversations.delete(id);
     this.messages.delete(id);
+    this.artifacts.delete(id);
     return existed;
   }
 

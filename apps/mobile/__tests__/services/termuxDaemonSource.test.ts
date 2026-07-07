@@ -83,4 +83,15 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('function emitListChanged(emit, conversationId, action)');
     expect(TERMUX_DAEMON_SOURCE).toContain("emit('conversation.listChanged', { conversation_id: conversationId, action, source: 'local' });");
   });
+
+  it('mirrors the AionUi conversation artifact contract locally', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain('const artifacts = new Map();');
+    expect(TERMUX_DAEMON_SOURCE).toContain("if (key === 'conversation.list-artifacts') return listArtifacts(requiredString(params.conversation_id));");
+    expect(TERMUX_DAEMON_SOURCE).toContain("if (key === 'conversation.update-artifact') return await updateArtifactStatus(params, emit);");
+    expect(TERMUX_DAEMON_SOURCE).toContain('artifacts: Object.fromEntries(artifacts.entries())');
+    expect(TERMUX_DAEMON_SOURCE).toContain('function listArtifacts(conversationId)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('async function updateArtifactStatus(params, emit)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("emit('conversation.artifact', updated);");
+    expect(TERMUX_DAEMON_SOURCE).toContain('function artifactStatusParam(value)');
+  });
 });

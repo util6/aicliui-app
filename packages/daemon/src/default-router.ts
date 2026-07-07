@@ -3,6 +3,7 @@ import type {
   AgentInfo,
   AgentModelInfo,
   Conversation,
+  ConversationArtifactStatus,
   ConversationListChangedEvent,
   ConversationRuntimeSummary,
   ConversationStatus,
@@ -98,6 +99,22 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
   router.register('conversation.get', (data) => {
     const params = asRecord(data);
     return store.getConversation(stringParam(params.conversation_id)) ?? null;
+  });
+  router.register('conversation.list-artifacts', (data) => {
+    const params = asRecord(data);
+    return store.listArtifacts(stringParam(params.conversation_id));
+  });
+  router.register('conversation.update-artifact', (data, context) => {
+    const params = asRecord(data);
+    const conversationId = stringParam(params.conversation_id);
+    const artifactId = stringParam(params.artifact_id);
+    const status = artifactStatusParam(params.status);
+    const artifact = store.updateArtifactStatus(conversationId, artifactId, status);
+    if (!artifact) {
+      throw new Error(`Artifact '${artifactId}' was not found`);
+    }
+    context.emit('conversation.artifact', artifact);
+    return artifact;
   });
   router.register('conversation.get-slash-commands', async (data) => {
     const params = asRecord(data);
@@ -765,6 +782,11 @@ function stringParam(value: unknown, fallback?: string): string {
 
 function numberParam(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function artifactStatusParam(value: unknown): ConversationArtifactStatus {
+  if (value === 'active' || value === 'pending' || value === 'dismissed' || value === 'saved') return value;
+  throw new Error(`Unsupported artifact status '${String(value)}'`);
 }
 
 function stringArrayParam(value: unknown): string[] {

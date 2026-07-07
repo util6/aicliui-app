@@ -17,6 +17,7 @@ const token = process.env.AICLIUI_DAEMON_TOKEN || '';
 const startedAt = Date.now();
 const conversations = new Map();
 const messages = new Map();
+const artifacts = new Map();
 const activeRuns = new Map();
 const pendingConfirmations = new Map();
 const openCodeSessions = new Map();
@@ -127,6 +128,8 @@ async function route(key, data, emit) {
   if (key === 'database.get-user-conversations') return listConversations(params.page, params.pageSize);
   if (key === 'database.get-conversation-messages') return messages.get(requiredString(params.conversation_id)) || [];
   if (key === 'conversation.get') return conversations.get(requiredString(params.conversation_id)) || null;
+  if (key === 'conversation.list-artifacts') return listArtifacts(requiredString(params.conversation_id));
+  if (key === 'conversation.update-artifact') return await updateArtifactStatus(params, emit);
   if (key === 'conversation.get-slash-commands') return await getSlashCommands(params);
   if (key === 'create-conversation') return await createConversation(params, emit);
   if (key === 'remove-conversation') return await removeConversation(requiredString(params.id), emit);
@@ -164,6 +167,7 @@ async function loadStore() {
     if (!isRecord(store)) return;
     conversations.clear();
     messages.clear();
+    artifacts.clear();
 
     if (Array.isArray(store.conversations)) {
       for (const conversation of store.conversations) {
@@ -179,8 +183,17 @@ async function loadStore() {
       }
     }
 
+    if (isRecord(store.artifacts)) {
+      for (const [conversationId, conversationArtifacts] of Object.entries(store.artifacts)) {
+        if (conversations.has(conversationId)) {
+          artifacts.set(conversationId, Array.isArray(conversationArtifacts) ? conversationArtifacts : []);
+        }
+      }
+    }
+
     for (const id of conversations.keys()) {
       if (!messages.has(id)) messages.set(id, []);
+      if (!artifacts.has(id)) artifacts.set(id, []);
     }
   } catch (error) {
     if (!isNodeErrorCode(error, 'ENOENT')) {
@@ -202,6 +215,7 @@ async function writeStore() {
       version: 1,
       conversations: Array.from(conversations.values()),
       messages: Object.fromEntries(messages.entries()),
+      artifacts: Object.fromEntries(artifacts.entries()),
     },
     null,
     2,
@@ -391,6 +405,7 @@ async function createConversation(params, emit) {
   };
   conversations.set(id, conversation);
   messages.set(id, []);
+  artifacts.set(id, []);
   await saveStore();
   emitListChanged(emit, conversation.id, 'created');
   return conversation;
@@ -400,6 +415,32 @@ function listConversations(page = 0, pageSize = 100) {
   const start = Math.max(0, Number(page) || 0) * Math.max(1, Number(pageSize) || 100);
   const end = start + Math.max(1, Number(pageSize) || 100);
   return Array.from(conversations.values()).sort((a, b) => b.modifyTime - a.modifyTime).slice(start, end);
+}
+
+function listArtifacts(conversationId) {
+  if (!conversations.has(conversationId)) throw new Error("Conversation '" + conversationId + "' was not found");
+  return [...(artifacts.get(conversationId) || [])].sort((a, b) => Number(a.created_at || 0) - Number(b.created_at || 0));
+}
+
+async function updateArtifactStatus(params, emit) {
+  const conversationId = requiredString(params.conversation_id);
+  const artifactId = requiredString(params.artifact_id);
+  const status = artifactStatusParam(params.status);
+  const conversation = conversations.get(conversationId);
+  if (!conversation) throw new Error("Conversation '" + conversationId + "' was not found");
+  const list = artifacts.get(conversationId) || [];
+  const index = list.findIndex((artifact) => isRecord(artifact) && artifact.id === artifactId);
+  if (index === -1) throw new Error("Artifact '" + artifactId + "' was not found");
+
+  const now = Date.now();
+  const updated = { ...list[index], status, updated_at: now };
+  const next = [...list];
+  next[index] = updated;
+  artifacts.set(conversationId, next);
+  conversation.modifyTime = now;
+  await saveStore();
+  emit('conversation.artifact', updated);
+  return updated;
 }
 
 async function getModelInfo(backend) {
@@ -2165,6 +2206,7 @@ function upsertCodexPlanMessage(conversationId, msgId, plan) {
 async function removeConversation(id, emit) {
   const existed = conversations.delete(id);
   messages.delete(id);
+  artifacts.delete(id);
   openCodeSessions.delete(id);
   if (existed) {
     await saveStore();
@@ -2205,6 +2247,11 @@ function isAuthorized(protocolHeader, expected) {
 function requiredString(value) {
   if (typeof value !== 'string') throw new Error('Expected string bridge parameter');
   return value;
+}
+
+function artifactStatusParam(value) {
+  if (value === 'active' || value === 'pending' || value === 'dismissed' || value === 'saved') return value;
+  throw new Error("Unsupported artifact status '" + String(value) + "'");
 }
 
 function stringValue(value) {

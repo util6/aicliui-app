@@ -178,6 +178,45 @@ export type ConversationListChangedEvent = {
   source?: string;
 };
 
+export type ConversationArtifactKind = 'cron_trigger' | 'skill_suggest';
+export type ConversationArtifactStatus = 'active' | 'pending' | 'dismissed' | 'saved';
+
+export type ConversationArtifactBase<
+  Kind extends ConversationArtifactKind,
+  Payload extends Record<string, unknown>,
+> = {
+  id: string;
+  conversation_id: string;
+  cron_job_id?: string;
+  kind: Kind;
+  status: ConversationArtifactStatus;
+  payload: Payload;
+  created_at: number;
+  updated_at: number;
+};
+
+export type CronTriggerArtifact = ConversationArtifactBase<
+  'cron_trigger',
+  {
+    cron_job_id: string;
+    cron_job_name: string;
+    triggered_at: number;
+  }
+>;
+
+export type SkillSuggestArtifact = ConversationArtifactBase<
+  'skill_suggest',
+  {
+    cron_job_id: string;
+    name: string;
+    description: string;
+    skillContent?: string;
+    skill_content?: string;
+  }
+>;
+
+export type ConversationArtifact = CronTriggerArtifact | SkillSuggestArtifact;
+
 export type IResponseMessage = {
   type: string;
   data: unknown;

@@ -7,6 +7,7 @@ import { InMemoryConversationStore } from './conversation-store.js';
 import { createFallbackAgentAdapterRegistry } from './agent-adapters/default-registry.js';
 import { createAgentAdapterRegistry } from './agent-adapters/registry.js';
 import type { CliAgentAdapter } from './agent-adapters/types.js';
+import type { ConversationArtifact } from '@aicliui/shared';
 
 describe('default bridge routes', () => {
   it('creates conversations and lists them in AionUi mobile shape', async () => {
@@ -91,6 +92,71 @@ describe('default bridge routes', () => {
         data: { conversation_id: 'list-id-1', action: 'deleted', source: 'local' },
       }),
     );
+  });
+
+  it('lists and updates AionUi-style conversation artifacts', async () => {
+    let now = 1200;
+    const store = new InMemoryConversationStore({
+      now: () => now++,
+      id: () => 'artifact-conv-1',
+    });
+    const router = createDefaultRouter({ store, adapters: createFallbackAgentAdapterRegistry() });
+
+    const conversation = store.createConversation({
+      type: 'acp',
+      name: 'artifact sync',
+      model: { id: '', useModel: '' },
+      extra: { backend: 'opencode' },
+    });
+    const artifact: ConversationArtifact = {
+      id: 'artifact-1',
+      conversation_id: conversation.id,
+      kind: 'skill_suggest',
+      status: 'pending',
+      payload: {
+        cron_job_id: 'cron-1',
+        name: 'Review skill',
+        description: 'Suggest a local review skill',
+        skill_content: '# Review',
+      },
+      created_at: 1200,
+      updated_at: 1200,
+    };
+    store.upsertArtifact(artifact);
+
+    const [listed] = await router.handleIncoming({
+      name: 'subscribe-conversation.list-artifacts',
+      data: { id: 'm_list_artifacts', data: { conversation_id: conversation.id } },
+    });
+    expect(listed.data).toEqual([artifact]);
+
+    const updateMessages = await router.handleIncoming({
+      name: 'subscribe-conversation.update-artifact',
+      data: {
+        id: 'm_update_artifact',
+        data: {
+          conversation_id: conversation.id,
+          artifact_id: 'artifact-1',
+          status: 'dismissed',
+        },
+      },
+    });
+
+    expect(updateMessages).toHaveLength(2);
+    expect(updateMessages[0]).toMatchObject({
+      name: 'subscribe.callback-conversation.update-artifactm_update_artifact',
+      data: {
+        id: 'artifact-1',
+        conversation_id: conversation.id,
+        kind: 'skill_suggest',
+        status: 'dismissed',
+        payload: artifact.payload,
+      },
+    });
+    expect(updateMessages[1]).toEqual({
+      name: 'conversation.artifact',
+      data: updateMessages[0].data,
+    });
   });
 
   it('normalizes selected mobile model context into the conversation model shape', async () => {

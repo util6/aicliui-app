@@ -96,6 +96,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain('const storeReady = loadStore();');
     expect(script).toContain('const activeRuns = new Map();');
     expect(script).toContain('const pendingConfirmations = new Map();');
+    expect(script).toContain('const artifacts = new Map();');
     expect(script).toContain('const geminiModels = parseModelOptions(');
     expect(script).toContain('process.env.AICLIUI_GEMINI_MODELS');
     expect(script).toContain("{ id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' }");
@@ -154,6 +155,8 @@ describe('termuxRuntime', () => {
     expect(script).toContain("emit('conversation.listChanged', { conversation_id: conversationId, action, source: 'local' });");
     expect(script).toContain('function parseModelOptions(raw, fallback)');
     expect(script).toContain("if (key === 'conversation.get') return conversations.get(requiredString(params.conversation_id)) || null;");
+    expect(script).toContain("if (key === 'conversation.list-artifacts') return listArtifacts(requiredString(params.conversation_id));");
+    expect(script).toContain("if (key === 'conversation.update-artifact') return await updateArtifactStatus(params, emit);");
     expect(script).toContain("if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);");
     expect(script).toContain("if (key === 'get-file-by-dir') return await getFileTreeByDir(params);");
     expect(script).toContain("if (key === 'read-file') return await readTextFile(requiredString(params.path));");
@@ -295,6 +298,10 @@ describe('termuxRuntime', () => {
     expect(script).toContain("if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(push));");
     expect(script).toContain("if (key === 'chat.send.message') return await sendMessage(params, emit);");
     expect(script).toContain("if (key === 'chat.stop.stream') return stopStream(params);");
+    expect(script).toContain('function listArtifacts(conversationId)');
+    expect(script).toContain('async function updateArtifactStatus(params, emit)');
+    expect(script).toContain("emit('conversation.artifact', updated);");
+    expect(script).toContain('function artifactStatusParam(value)');
     expect(script).toContain("const acceptedRuntime = runningRuntimeSummary('running', assistantMsgId");
     expect(script).toContain('void (async () => {');
     expect(script).toContain('turn_id: assistantMsgId');
