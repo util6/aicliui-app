@@ -1,6 +1,7 @@
 import type { AgentHealth } from '@aicliui/shared';
 import type { CliAgentAdapter, CommandRunner, CommandSpec, SendMessageInput } from './types.js';
 import type { OpenCodeSessionClient } from './opencode-client.js';
+import type { OpenCodeServerManager } from './opencode-server.js';
 
 export type OpenCodeServeCommandOptions = {
   port: number;
@@ -16,10 +17,11 @@ export function buildOpenCodeServeCommand(options: OpenCodeServeCommandOptions):
 
 export function createOpenCodeAdapter(
   runner: CommandRunner,
-  options?: { port?: number; client?: OpenCodeSessionClient },
+  options?: { port?: number; client?: OpenCodeSessionClient; serverManager?: OpenCodeServerManager },
 ): CliAgentAdapter {
   const port = options?.port ?? 4096;
   const client = options?.client;
+  const serverManager = options?.serverManager;
   return {
     backend: 'opencode',
     name: 'opencode',
@@ -34,8 +36,9 @@ export function createOpenCodeAdapter(
       };
     },
     async *sendMessage(input: SendMessageInput) {
-      if (client) {
-        const result = await client.sendPrompt({
+      const activeClient = client ?? (serverManager ? await serverManager.ensureClient() : null);
+      if (activeClient) {
+        const result = await activeClient.sendPrompt({
           prompt: input.input,
           directory: input.workspace,
         });

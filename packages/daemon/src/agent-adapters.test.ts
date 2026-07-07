@@ -65,6 +65,31 @@ describe('agent adapters', () => {
       { type: 'content', content: 'from opencode' },
     ]);
   });
+
+  it('uses an OpenCode server manager when a direct client was not injected', async () => {
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        serverManager: {
+          ensureClient: async () => ({
+            sendPrompt: async () => ({ sessionId: 'ses_456', text: 'from managed opencode' }),
+          }),
+        },
+      },
+    );
+
+    const events = [];
+    for await (const event of adapter.sendMessage({ conversationId: 'conv-1', input: 'hello' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_456' },
+      { type: 'content', content: 'from managed opencode' },
+    ]);
+  });
 });
 
 function fakeAdapter(health: Awaited<ReturnType<CliAgentAdapter['probe']>>): CliAgentAdapter {
