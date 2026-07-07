@@ -54,6 +54,18 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     messagesRef.current = messages;
   }, [messages]);
 
+  const refreshSlashCommands = useCallback(async (id: string, requestId = loadRequestRef.current) => {
+    try {
+      const data = await bridge.request('conversation.get-slash-commands', {
+        conversation_id: id,
+      });
+      if (requestId !== loadRequestRef.current) return;
+      setSlashCommands(mapAvailableCommandsToSlashCommands(data));
+    } catch (e) {
+      console.warn('[Chat] Failed to load slash commands:', e);
+    }
+  }, []);
+
   // Load message history
   const loadConversation = useCallback(async (id: string) => {
     const requestId = ++loadRequestRef.current;
@@ -77,16 +89,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       console.warn('[Chat] Failed to load messages:', e);
     }
 
-    try {
-      const data = await bridge.request('conversation.get-slash-commands', {
-        conversation_id: id,
-      });
-      if (requestId !== loadRequestRef.current) return;
-      setSlashCommands(mapAvailableCommandsToSlashCommands(data));
-    } catch (e) {
-      console.warn('[Chat] Failed to load slash commands:', e);
-    }
-  }, []);
+    await refreshSlashCommands(id, requestId);
+  }, [refreshSlashCommands]);
 
   // Subscribe to streaming responses
   useEffect(() => {
@@ -130,6 +134,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
+      if (raw.type === 'slash_commands_updated') {
+        void refreshSlashCommands(conversationId);
+        return;
+      }
+
       const msg = transformMessage(raw);
       if (msg) {
         setMessages((prev) => composeMessage(msg, prev));
@@ -170,7 +179,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       unsubConfirmUpdate();
       unsubConfirmRemove();
     };
-  }, [conversationId]);
+  }, [conversationId, refreshSlashCommands]);
 
   // Restore pending confirmations on reconnect (Issue 2)
   useEffect(() => {
