@@ -40,6 +40,7 @@ function RuntimeProbe() {
     clearQueuedCommands,
     isQueuePaused,
     resumeQueuedCommands,
+    moveQueuedCommand,
   } = useChat();
 
   useEffect(() => {
@@ -100,6 +101,24 @@ function RuntimeProbe() {
       </Text>
       <Text testID='resume-queue' onPress={resumeQueuedCommands}>
         resume-queue
+      </Text>
+      <Text
+        testID='move-last-up'
+        onPress={() => {
+          const last = queuedCommands.at(-1);
+          if (last) moveQueuedCommand(last.id, 'up');
+        }}
+      >
+        move-last-up
+      </Text>
+      <Text
+        testID='move-first-down'
+        onPress={() => {
+          const [first] = queuedCommands;
+          if (first) moveQueuedCommand(first.id, 'down');
+        }}
+      >
+        move-first-down
       </Text>
     </>
   );
@@ -447,6 +466,57 @@ describe('ChatContext runtime state', () => {
     });
 
     expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(1);
+  });
+
+  it('reorders queued commands, persists the order, and drains the new first command next', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('can-send').props.children).toBe('can-send'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('send'));
+      fireEvent.press(screen.getByTestId('send-second'));
+      fireEvent.press(screen.getByTestId('send-third'));
+    });
+
+    expect(screen.getByTestId('queued-items').props.children).toBe('second:0|third:0');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('move-last-up'));
+    });
+
+    expect(screen.getByTestId('queued-items').props.children).toBe('third:0|second:0');
+    await waitFor(() => {
+      const lastPersisted = mockAsyncStorage.setItem.mock.calls
+        .filter(([key]) => key === 'chat-command-queue/conv-1')
+        .at(-1)?.[1];
+      expect(lastPersisted).toBeTruthy();
+      const payload = JSON.parse(lastPersisted ?? '{}') as { items?: Array<{ input?: string }> };
+      expect(payload.items?.map((item) => item.input)).toEqual(['third', 'second']);
+    });
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'finish',
+        msg_id: 'assistant-1',
+        conversation_id: 'conv-1',
+        data: null,
+      });
+    });
+
+    expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(2);
+    expect(mockRequest).toHaveBeenLastCalledWith(
+      'chat.send.message',
+      expect.objectContaining({
+        input: 'third',
+        conversation_id: 'conv-1',
+      }),
+    );
+    expect(screen.getByTestId('queued-items').props.children).toBe('second:0');
   });
 
   it('restores queued commands from local storage for the active conversation', async () => {

@@ -37,6 +37,8 @@ export type QueuedCommand = {
   createdAt: number;
 };
 
+export type QueuedCommandMoveDirection = 'up' | 'down';
+
 type QueuedCommandState = {
   items: QueuedCommand[];
   isPaused: boolean;
@@ -56,6 +58,7 @@ type ChatContextType = {
   loadConversation: (id: string) => void;
   sendMessage: (text: string, files?: string[]) => void;
   removeQueuedCommand: (commandId: string) => void;
+  moveQueuedCommand: (commandId: string, direction: QueuedCommandMoveDirection) => void;
   clearQueuedCommands: () => void;
   resumeQueuedCommands: () => void;
   stopGeneration: () => void;
@@ -78,6 +81,7 @@ const ChatContext = createContext<ChatContextType>({
   loadConversation: () => {},
   sendMessage: () => {},
   removeQueuedCommand: () => {},
+  moveQueuedCommand: () => {},
   clearQueuedCommands: () => {},
   resumeQueuedCommands: () => {},
   stopGeneration: () => {},
@@ -551,6 +555,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     [setQueuePaused, setQueuedCommands],
   );
 
+  const moveQueuedCommand = useCallback(
+    (commandId: string, direction: QueuedCommandMoveDirection) => {
+      const nextCommands = moveQueuedCommandInDirection(queuedCommandsRef.current, commandId, direction);
+      if (nextCommands === queuedCommandsRef.current) return;
+      setQueuedCommands(nextCommands);
+    },
+    [setQueuedCommands],
+  );
+
   const clearQueuedCommands = useCallback(() => {
     setQueuedCommands([]);
     setQueuePaused(false);
@@ -616,6 +629,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         loadConversation,
         sendMessage,
         removeQueuedCommand,
+        moveQueuedCommand,
         clearQueuedCommands,
         resumeQueuedCommands,
         stopGeneration,
@@ -733,6 +747,23 @@ function uniqueFiles(files: string[] | undefined): string[] {
 
 function restoreQueuedCommand(commands: QueuedCommand[], failedCommand: QueuedCommand): QueuedCommand[] {
   return [failedCommand, ...commands.filter((command) => command.id !== failedCommand.id)];
+}
+
+function moveQueuedCommandInDirection(
+  commands: QueuedCommand[],
+  commandId: string,
+  direction: QueuedCommandMoveDirection,
+): QueuedCommand[] {
+  const currentIndex = commands.findIndex((command) => command.id === commandId);
+  if (currentIndex === -1) return commands;
+
+  const targetIndex = currentIndex + (direction === 'up' ? -1 : 1);
+  if (targetIndex < 0 || targetIndex >= commands.length) return commands;
+
+  const next = [...commands];
+  const [moved] = next.splice(currentIndex, 1);
+  next.splice(targetIndex, 0, moved);
+  return next;
 }
 
 async function persistQueuedCommandState(conversationId: string, state: QueuedCommandState): Promise<void> {

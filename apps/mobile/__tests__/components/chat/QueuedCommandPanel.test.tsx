@@ -67,6 +67,37 @@ describe('QueuedCommandPanel', () => {
     expect(onResume).toHaveBeenCalledTimes(1);
   });
 
+  it('moves queued commands with mobile reorder controls', () => {
+    const onMove = jest.fn();
+    const screen = render(
+      <QueuedCommandPanel
+        items={[
+          {
+            id: 'queue-1',
+            input: 'first command',
+            files: [],
+            createdAt: 1,
+          },
+          {
+            id: 'queue-2',
+            input: 'second command',
+            files: [],
+            createdAt: 2,
+          },
+        ]}
+        onRemove={jest.fn()}
+        onClear={jest.fn()}
+        onMove={onMove}
+      />,
+    );
+
+    fireEvent.press(screen.getByLabelText('Move queued command up'));
+    expect(onMove).toHaveBeenCalledWith('queue-2', 'up');
+
+    fireEvent.press(screen.getByLabelText('Move queued command down'));
+    expect(onMove).toHaveBeenCalledWith('queue-1', 'down');
+  });
+
   it('stays hidden when there are no queued commands', () => {
     const screen = render(<QueuedCommandPanel items={[]} onRemove={jest.fn()} onClear={jest.fn()} />);
 

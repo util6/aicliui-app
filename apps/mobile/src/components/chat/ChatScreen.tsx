@@ -31,6 +31,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     loadConversation,
     sendMessage,
     removeQueuedCommand,
+    moveQueuedCommand,
     clearQueuedCommands,
     resumeQueuedCommands,
     stopGeneration,
@@ -102,6 +103,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         items={queuedCommands}
         isPaused={isQueuePaused}
         onRemove={removeQueuedCommand}
+        onMove={moveQueuedCommand}
         onClear={clearQueuedCommands}
         onResume={resumeQueuedCommands}
       />

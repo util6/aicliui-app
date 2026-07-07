@@ -111,6 +111,8 @@
     "queuedCommands": "已排队 {{count}} 条",
     "queuedCommandFiles": "{{count}} 个文件",
     "removeQueuedCommand": "移除排队命令",
+    "moveQueuedCommandUp": "上移排队命令",
+    "moveQueuedCommandDown": "下移排队命令",
     "clearQueuedCommands": "清空",
     "queuePaused": "已暂停",
     "resumeQueuedCommands": "继续",
