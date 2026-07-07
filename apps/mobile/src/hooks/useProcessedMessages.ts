@@ -102,6 +102,7 @@ export function useProcessedMessages(messages: TMessage[]): ProcessedItem[] {
     };
 
     for (const msg of messages) {
+      if (msg.hidden) continue;
       if (isToolCallType(msg.type)) {
         toolBatch.push(msg);
       } else {
