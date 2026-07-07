@@ -1,12 +1,14 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
 import { MessageBubble } from './MessageBubble';
 import { ToolCallSummary } from './ToolCallSummary';
 import { ChatInputBar } from './ChatInputBar';
+import { ChatSessionBar } from './ChatSessionBar';
 import { ContextUsageIndicator } from './ContextUsageIndicator';
 import { useChat } from '../../context/ChatContext';
+import { useConversations } from '../../context/ConversationContext';
 import { useThemeColor } from '../../hooks/useThemeColor';
 import { useProcessedMessages, type ProcessedItem } from '../../hooks/useProcessedMessages';
 
@@ -18,10 +20,15 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   const { t } = useTranslation();
   const { messages, isStreaming, thought, contextUsage, slashCommands, loadConversation, sendMessage, stopGeneration } =
     useChat();
+  const { conversations } = useConversations();
   const flatListRef = useRef<FlatList>(null);
   const background = useThemeColor({}, 'background');
   const surface = useThemeColor({}, 'surface');
   const processedMessages = useProcessedMessages(messages);
+  const activeConversation = useMemo(
+    () => conversations.find((conversation) => conversation.id === conversationId),
+    [conversations, conversationId],
+  );
 
   useEffect(() => {
     loadConversation(conversationId);
@@ -55,6 +62,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
+      <ChatSessionBar conversation={activeConversation} />
       <FlatList
         ref={flatListRef}
         data={processedMessages}
