@@ -1,6 +1,12 @@
 import { relative } from 'node:path';
-import type { AgentHealth } from '@aicliui/shared';
+import type { AgentHealth, AgentModelInfo } from '@aicliui/shared';
 import type { CliAgentAdapter, CliAgentEvent, CommandRunner, CommandSpec, SendMessageInput } from './types.js';
+
+const DEFAULT_GEMINI_MODELS = [
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+];
 
 export type GeminiCommandOptions = {
   prompt: string;
@@ -46,6 +52,15 @@ export function createGeminiAdapter(runner: CommandRunner): CliAgentAdapter {
         backend: 'gemini',
         state: 'ready',
         version: await runner.readVersion?.('gemini', ['--version']),
+      };
+    },
+    async getModelInfo(): Promise<AgentModelInfo> {
+      return {
+        currentModelId: null,
+        currentModelLabel: 'Default Gemini model',
+        availableModels: DEFAULT_GEMINI_MODELS,
+        canSwitch: DEFAULT_GEMINI_MODELS.length > 0,
+        source: 'models',
       };
     },
     async *sendMessage(input: SendMessageInput) {

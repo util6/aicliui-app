@@ -36,6 +36,11 @@ export type OpenCodeCommandListInput = {
   workspace?: string;
 };
 
+export type OpenCodeModelInfo = {
+  id: string;
+  label: string;
+};
+
 export type OpenCodePromptResult = {
   sessionId: string;
   text: string;
@@ -93,6 +98,7 @@ export type OpenCodeSessionClient = {
   streamCommand?(input: OpenCodeCommandInput): AsyncIterable<OpenCodeStreamEvent>;
   confirmPermission?(input: OpenCodeConfirmPermissionInput): Promise<{ success: true }>;
   listCommands(input?: OpenCodeCommandListInput): Promise<Array<{ command: string; description: string; hint?: string }>>;
+  listModels?(): Promise<OpenCodeModelInfo[]>;
 };
 
 export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSessionClient {
@@ -317,6 +323,10 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
         const response = await requestJson<unknown>(legacyPath, { method: 'GET' });
         return extractOpenCodeCommands(response);
       }
+    },
+    async listModels() {
+      const response = await requestJson<unknown>('/api/model', { method: 'GET' });
+      return extractOpenCodeModels(response);
     },
   };
 }
@@ -648,6 +658,26 @@ export function extractOpenCodeCommands(value: unknown): Array<{ command: string
       };
     })
     .filter((command): command is { command: string; description: string; hint?: string } => command !== null);
+}
+
+export function extractOpenCodeModels(value: unknown): OpenCodeModelInfo[] {
+  const rawModels = Array.isArray(value) ? value : isRecord(value) && Array.isArray(value.data) ? value.data : [];
+
+  return rawModels
+    .filter(isRecord)
+    .map((model) => {
+      if (model.enabled === false) return null;
+      const id = stringValue(model.id);
+      const providerId = stringValue(model.providerID) ?? stringValue(model.providerId) ?? stringValue(model.provider);
+      if (!id || !providerId) return null;
+
+      const name = stringValue(model.name) ?? id;
+      return {
+        id: `${providerId}/${id}`,
+        label: `${name} (${providerId})`,
+      };
+    })
+    .filter((model): model is OpenCodeModelInfo => model !== null);
 }
 
 function isAssistantMessage(value: unknown): value is Record<string, unknown> {

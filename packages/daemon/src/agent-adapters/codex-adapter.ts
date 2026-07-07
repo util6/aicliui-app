@@ -1,6 +1,12 @@
 import { relative } from 'node:path';
-import type { AgentHealth } from '@aicliui/shared';
+import type { AgentHealth, AgentModelInfo } from '@aicliui/shared';
 import type { CliAgentAdapter, CliAgentEvent, CommandRunner, CommandSpec, SendMessageInput } from './types.js';
+
+const DEFAULT_CODEX_MODELS = [
+  { id: 'gpt-5-codex', label: 'GPT-5 Codex' },
+  { id: 'gpt-5', label: 'GPT-5' },
+  { id: 'gpt-5-mini', label: 'GPT-5 Mini' },
+];
 
 export type CodexCommandOptions = {
   prompt: string;
@@ -32,6 +38,15 @@ export function createCodexAdapter(runner: CommandRunner): CliAgentAdapter {
         backend: 'codex',
         state: 'ready',
         version: await runner.readVersion?.('codex', ['--version']),
+      };
+    },
+    async getModelInfo(): Promise<AgentModelInfo> {
+      return {
+        currentModelId: null,
+        currentModelLabel: 'Default Codex model',
+        availableModels: DEFAULT_CODEX_MODELS,
+        canSwitch: DEFAULT_CODEX_MODELS.length > 0,
+        source: 'models',
       };
     },
     async *sendMessage(input: SendMessageInput) {

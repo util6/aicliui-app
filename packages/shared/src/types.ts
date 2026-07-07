@@ -4,6 +4,20 @@ export type AgentInfo = {
   label?: string;
 };
 
+export type AgentModelOption = {
+  id: string;
+  label: string;
+};
+
+export type AgentModelInfo = {
+  currentModelId: string | null;
+  currentModelLabel: string | null;
+  availableModels: AgentModelOption[];
+  canSwitch: boolean;
+  source: 'configOption' | 'models';
+  configOptionId?: string;
+};
+
 export type Conversation = {
   id: string;
   name: string;

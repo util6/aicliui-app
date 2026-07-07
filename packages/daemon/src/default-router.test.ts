@@ -39,6 +39,47 @@ describe('default bridge routes', () => {
     expect(listed.data).toEqual([created.data]);
   });
 
+  it('returns adapter model info through the AionUi mobile bridge contract', async () => {
+    const router = createDefaultRouter({
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'codex',
+          name: 'codex',
+          label: 'Codex CLI',
+          probe: async () => ({ backend: 'codex', state: 'ready' }),
+          getModelInfo: async () => ({
+            currentModelId: null,
+            currentModelLabel: 'Default Codex model',
+            availableModels: [{ id: 'gpt-5-codex', label: 'GPT-5 Codex' }],
+            canSwitch: true,
+            source: 'models',
+          }),
+          sendMessage: async function* () {
+            yield { type: 'content', content: 'ok' };
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    const [modelInfo] = await router.handleIncoming({
+      name: 'subscribe-acp.probe-model-info',
+      data: { id: 'm_model_info', data: { backend: 'codex' } },
+    });
+
+    expect(modelInfo.data).toEqual({
+      success: true,
+      data: {
+        modelInfo: {
+          currentModelId: null,
+          currentModelLabel: 'Default Codex model',
+          availableModels: [{ id: 'gpt-5-codex', label: 'GPT-5 Codex' }],
+          canSwitch: true,
+          source: 'models',
+        },
+      },
+    });
+  });
+
   it('serves workspace trees and file contents for the mobile file UI', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'aicliui-workspace-'));
     try {

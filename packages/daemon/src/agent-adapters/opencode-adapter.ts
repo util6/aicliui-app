@@ -59,6 +59,22 @@ export function createOpenCodeAdapter(
         version: await runner.readVersion?.('opencode', ['--version']),
       };
     },
+    async getModelInfo() {
+      const activeClient = await getActiveClient();
+      if (!activeClient?.listModels) return null;
+      try {
+        const availableModels = await activeClient.listModels();
+        return {
+          currentModelId: null,
+          currentModelLabel: 'Default OpenCode model',
+          availableModels,
+          canSwitch: availableModels.length > 0,
+          source: 'models' as const,
+        };
+      } catch {
+        return null;
+      }
+    },
     async *sendMessage(input: SendMessageInput) {
       const activeClient = await getActiveClient();
       if (activeClient) {

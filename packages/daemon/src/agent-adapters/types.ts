@@ -1,4 +1,4 @@
-import type { AgentHealth } from '@aicliui/shared';
+import type { AgentHealth, AgentModelInfo } from '@aicliui/shared';
 
 export type CliAgentEvent =
   | {
@@ -133,6 +133,7 @@ export type CliAgentAdapter = {
   name: string;
   label?: string;
   probe(): Promise<AgentHealth>;
+  getModelInfo?(): Promise<AgentModelInfo | null> | AgentModelInfo | null;
   sendMessage(input: SendMessageInput): AsyncIterable<CliAgentEvent>;
   getSlashCommands?(input: GetSlashCommandsInput): Promise<SlashCommandInfo[]>;
   confirm?(input: ConfirmActionInput): Promise<unknown> | unknown;

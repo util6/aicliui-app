@@ -30,9 +30,9 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     success: true,
     data: adapters.listAgents(),
   }));
-  router.register('acp.probe-model-info', () => ({
+  router.register('acp.probe-model-info', async (data) => ({
     success: true,
-    data: { modelInfo: null },
+    data: { modelInfo: await getAdapterModelInfo(adapters, stringParam(asRecord(data).backend, '')) },
   }));
   router.register('database.get-user-conversations', (data) => {
     const params = asRecord(data);
@@ -268,6 +268,16 @@ function normalizeConfirmation(
 
 export function getAvailableAgents(): AgentInfo[] {
   return createDefaultAgentAdapterRegistry().listAgents();
+}
+
+async function getAdapterModelInfo(adapters: AgentAdapterRegistry, backend: string) {
+  const adapter = adapters.get(backend);
+  if (!adapter?.getModelInfo) return null;
+  try {
+    return await adapter.getModelInfo();
+  } catch {
+    return null;
+  }
 }
 
 export async function getRuntimeStatus(adapters = createDefaultAgentAdapterRegistry()): Promise<RuntimeStatus> {

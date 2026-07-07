@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createOpenCodeClient, extractOpenCodeAssistantText, extractOpenCodeCommands } from './opencode-client.js';
+import {
+  createOpenCodeClient,
+  extractOpenCodeAssistantText,
+  extractOpenCodeCommands,
+  extractOpenCodeModels,
+} from './opencode-client.js';
 
 describe('OpenCode local API client', () => {
   it('creates a session, prompts it, waits, and returns assistant text from context', async () => {
@@ -335,6 +340,33 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('lists enabled OpenCode models from the local API', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init });
+        return jsonResponse({
+          data: [
+            { id: 'claude-sonnet-4', providerID: 'anthropic', name: 'Claude Sonnet 4' },
+            { id: 'disabled-model', providerID: 'test', enabled: false },
+          ],
+        });
+      },
+    });
+
+    await expect(client.listModels!()).resolves.toEqual([
+      {
+        id: 'anthropic/claude-sonnet-4',
+        label: 'Claude Sonnet 4 (anthropic)',
+      },
+    ]);
+
+    expect(calls.map((call) => [call.url, call.init?.method])).toEqual([
+      ['http://127.0.0.1:4096/api/model', 'GET'],
+    ]);
+  });
+
   it('extracts commands from legacy and v2 OpenCode response shapes', () => {
     expect(
       extractOpenCodeCommands([
@@ -357,6 +389,23 @@ describe('OpenCode local API client', () => {
         command: 'plan',
         description: 'Make a plan',
         hint: 'Make a plan',
+      },
+    ]);
+  });
+
+  it('extracts enabled OpenCode models from API response shapes', () => {
+    expect(
+      extractOpenCodeModels({
+        data: [
+          { id: 'gpt-5', providerID: 'openai', name: 'GPT-5' },
+          { id: 'disabled', providerID: 'openai', enabled: false },
+          { id: 'missing-provider' },
+        ],
+      }),
+    ).toEqual([
+      {
+        id: 'openai/gpt-5',
+        label: 'GPT-5 (openai)',
       },
     ]);
   });

@@ -43,6 +43,24 @@ describe('agent adapters', () => {
     });
   });
 
+  it('exposes default Gemini CLI model info for mobile model selection', async () => {
+    const adapter = createGeminiAdapter({
+      commandExists: async () => true,
+    });
+
+    await expect(adapter.getModelInfo?.()).resolves.toEqual({
+      currentModelId: null,
+      currentModelLabel: 'Default Gemini model',
+      availableModels: [
+        { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+        { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+        { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+      ],
+      canSwitch: true,
+      source: 'models',
+    });
+  });
+
   it('extracts text deltas from common Gemini stream-json shapes', () => {
     expect(parseGeminiStreamJsonLine(JSON.stringify({ type: 'content', value: 'hello' }))).toEqual({
       type: 'content',
@@ -152,6 +170,24 @@ describe('agent adapters', () => {
     expect(buildCodexCommand({ prompt: 'ship it', approvalMode: 'yolo' })).toEqual({
       command: 'codex',
       args: ['exec', '--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', 'ship it'],
+    });
+  });
+
+  it('exposes default Codex CLI model info for mobile model selection', async () => {
+    const adapter = createCodexAdapter({
+      commandExists: async () => true,
+    });
+
+    await expect(adapter.getModelInfo?.()).resolves.toEqual({
+      currentModelId: null,
+      currentModelLabel: 'Default Codex model',
+      availableModels: [
+        { id: 'gpt-5-codex', label: 'GPT-5 Codex' },
+        { id: 'gpt-5', label: 'GPT-5' },
+        { id: 'gpt-5-mini', label: 'GPT-5 Mini' },
+      ],
+      canSwitch: true,
+      source: 'models',
     });
   });
 
@@ -357,6 +393,30 @@ describe('agent adapters', () => {
       { type: 'thought', subject: 'OpenCode', description: 'session ses_123' },
       { type: 'content', content: 'from opencode' },
     ]);
+  });
+
+  it('exposes OpenCode model info from the local API client', async () => {
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async () => ({ sessionId: 'unused', text: 'unused' }),
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+          listModels: async () => [{ id: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4 (anthropic)' }],
+        },
+      },
+    );
+
+    await expect(adapter.getModelInfo?.()).resolves.toEqual({
+      currentModelId: null,
+      currentModelLabel: 'Default OpenCode model',
+      availableModels: [{ id: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4 (anthropic)' }],
+      canSwitch: true,
+      source: 'models',
+    });
   });
 
   it('forwards OpenCode streaming tool and permission events from the local API client', async () => {
