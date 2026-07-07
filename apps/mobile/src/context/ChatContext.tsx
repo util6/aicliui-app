@@ -37,6 +37,12 @@ export type QueuedCommand = {
   createdAt: number;
 };
 
+export type ChatInputDraft = {
+  id: string;
+  text: string;
+  files: string[];
+};
+
 export type QueuedCommandMoveDirection = 'up' | 'down';
 export type QueuedCommandWarningReason =
   | 'emptyInput'
@@ -62,6 +68,7 @@ type ChatContextType = {
   queuedCommands: QueuedCommand[];
   isQueuePaused: boolean;
   queuedCommandWarning: QueuedCommandWarningReason | null;
+  queuedCommandDraft: ChatInputDraft | null;
   conversationId: string | null;
   confirmations: any[];
   contextUsage: { used: number; size: number } | null;
@@ -70,6 +77,8 @@ type ChatContextType = {
   loadConversation: (id: string) => void;
   sendMessage: (text: string, files?: string[]) => void;
   removeQueuedCommand: (commandId: string) => void;
+  editQueuedCommand: (commandId: string) => void;
+  clearQueuedCommandDraft: (draftId: string) => void;
   moveQueuedCommand: (commandId: string, direction: QueuedCommandMoveDirection) => void;
   clearQueuedCommands: () => void;
   resumeQueuedCommands: () => void;
@@ -86,6 +95,7 @@ const ChatContext = createContext<ChatContextType>({
   queuedCommands: [],
   isQueuePaused: false,
   queuedCommandWarning: null,
+  queuedCommandDraft: null,
   conversationId: null,
   confirmations: [],
   contextUsage: null,
@@ -94,6 +104,8 @@ const ChatContext = createContext<ChatContextType>({
   loadConversation: () => {},
   sendMessage: () => {},
   removeQueuedCommand: () => {},
+  editQueuedCommand: () => {},
+  clearQueuedCommandDraft: () => {},
   moveQueuedCommand: () => {},
   clearQueuedCommands: () => {},
   resumeQueuedCommands: () => {},
@@ -108,6 +120,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [queuedCommands, setQueuedCommandsState] = useState<QueuedCommand[]>([]);
   const [isQueuePaused, setIsQueuePausedState] = useState(false);
   const [queuedCommandWarning, setQueuedCommandWarning] = useState<QueuedCommandWarningReason | null>(null);
+  const [queuedCommandDraft, setQueuedCommandDraft] = useState<ChatInputDraft | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [confirmations, setConfirmations] = useState<any[]>([]);
   const [contextUsage, setContextUsage] = useState<{ used: number; size: number } | null>(null);
@@ -344,6 +357,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setContextUsage(null);
     setSlashCommands([]);
     setQueuedCommandWarning(null);
+    setQueuedCommandDraft(null);
     setThought(null);
 
     try {
@@ -582,6 +596,27 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     [setQueuePaused, setQueuedCommands],
   );
 
+  const editQueuedCommand = useCallback(
+    (commandId: string) => {
+      const command = queuedCommandsRef.current.find((item) => item.id === commandId);
+      if (!command) return;
+
+      setQueuedCommandDraft({
+        id: command.id,
+        text: command.input,
+        files: [...command.files],
+      });
+      setQueuedCommands((prev) => prev.filter((item) => item.id !== commandId));
+      setQueuePaused(false);
+      setQueuedCommandWarning(null);
+    },
+    [setQueuePaused, setQueuedCommands],
+  );
+
+  const clearQueuedCommandDraft = useCallback((draftId: string) => {
+    setQueuedCommandDraft((current) => (current?.id === draftId ? null : current));
+  }, []);
+
   const moveQueuedCommand = useCallback(
     (commandId: string, direction: QueuedCommandMoveDirection) => {
       const nextCommands = moveQueuedCommandInDirection(queuedCommandsRef.current, commandId, direction);
@@ -651,6 +686,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         queuedCommands,
         isQueuePaused,
         queuedCommandWarning,
+        queuedCommandDraft,
         conversationId,
         confirmations,
         contextUsage,
@@ -659,6 +695,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         loadConversation,
         sendMessage,
         removeQueuedCommand,
+        editQueuedCommand,
+        clearQueuedCommandDraft,
         moveQueuedCommand,
         clearQueuedCommands,
         resumeQueuedCommands,

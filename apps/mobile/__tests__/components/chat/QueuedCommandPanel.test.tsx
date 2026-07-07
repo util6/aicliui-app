@@ -98,6 +98,29 @@ describe('QueuedCommandPanel', () => {
     expect(onMove).toHaveBeenCalledWith('queue-1', 'down');
   });
 
+  it('edits a queued command from the mobile queue item actions', () => {
+    const onEdit = jest.fn();
+    const screen = render(
+      <QueuedCommandPanel
+        items={[
+          {
+            id: 'queue-1',
+            input: 'revise this command',
+            files: ['src/App.tsx'],
+            createdAt: 1,
+          },
+        ]}
+        onRemove={jest.fn()}
+        onClear={jest.fn()}
+        onEdit={onEdit}
+      />,
+    );
+
+    fireEvent.press(screen.getByLabelText('Edit queued command'));
+
+    expect(onEdit).toHaveBeenCalledWith('queue-1');
+  });
+
   it('stays hidden when there are no queued commands', () => {
     const screen = render(<QueuedCommandPanel items={[]} onRemove={jest.fn()} onClear={jest.fn()} />);
 

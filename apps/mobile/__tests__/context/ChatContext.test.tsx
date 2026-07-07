@@ -32,12 +32,15 @@ function RuntimeProbe() {
     canSendMessage,
     queuedCommands,
     queuedCommandWarning,
+    queuedCommandDraft,
     thought,
     messages,
     contextUsage,
     confirmations,
     sendMessage,
     removeQueuedCommand,
+    editQueuedCommand,
+    clearQueuedCommandDraft,
     clearQueuedCommands,
     isQueuePaused,
     resumeQueuedCommands,
@@ -58,6 +61,11 @@ function RuntimeProbe() {
       </Text>
       <Text testID='queue-paused'>{isQueuePaused ? 'paused' : 'active'}</Text>
       <Text testID='queue-warning'>{queuedCommandWarning ?? ''}</Text>
+      <Text testID='queue-draft'>
+        {queuedCommandDraft
+          ? `${queuedCommandDraft.text}:${queuedCommandDraft.files.length}`
+          : ''}
+      </Text>
       <Text testID='thought'>{thought?.subject ?? ''}</Text>
       <Text testID='messages'>{messages.map((message) => message.content?.content ?? '').join('|')}</Text>
       <Text testID='message-types'>{messages.map((message) => message.type).join('|')}</Text>
@@ -106,6 +114,20 @@ function RuntimeProbe() {
         if (first) removeQueuedCommand(first.id);
       }}>
         remove-first-queued
+      </Text>
+      <Text testID='edit-first-queued' onPress={() => {
+        const [first] = queuedCommands;
+        if (first) editQueuedCommand(first.id);
+      }}>
+        edit-first-queued
+      </Text>
+      <Text
+        testID='clear-queue-draft'
+        onPress={() => {
+          if (queuedCommandDraft) clearQueuedCommandDraft(queuedCommandDraft.id);
+        }}
+      >
+        clear-queue-draft
       </Text>
       <Text testID='clear-queue' onPress={clearQueuedCommands}>
         clear-queue
@@ -477,6 +499,41 @@ describe('ChatContext runtime state', () => {
     });
 
     expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(1);
+  });
+
+  it('moves a queued command into an editable input draft and removes it from persisted queue state', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('can-send').props.children).toBe('can-send'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('send'));
+      fireEvent.press(screen.getByTestId('send-files'));
+      fireEvent.press(screen.getByTestId('send-too-many-files'));
+    });
+
+    expect(screen.getByTestId('queued-items').props.children).toBe('with files:1');
+    expect(screen.getByTestId('queue-warning').props.children).toBe('tooManyFiles');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('edit-first-queued'));
+    });
+
+    expect(screen.getByTestId('queued-count').props.children).toBe(0);
+    expect(screen.getByTestId('queue-paused').props.children).toBe('active');
+    expect(screen.getByTestId('queue-warning').props.children).toBe('');
+    expect(screen.getByTestId('queue-draft').props.children).toBe('with files:1');
+    await waitFor(() => expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('chat-command-queue/conv-1'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('clear-queue-draft'));
+    });
+
+    expect(screen.getByTestId('queue-draft').props.children).toBe('');
   });
 
   it('reorders queued commands, persists the order, and drains the new first command next', async () => {

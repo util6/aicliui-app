@@ -94,6 +94,7 @@
     "queuedCommands": "{{count}} in Warteschlange",
     "queuedCommandFiles": "{{count}} Datei(en)",
     "removeQueuedCommand": "Befehl aus Warteschlange entfernen",
+    "editQueuedCommand": "Befehl in Warteschlange bearbeiten",
     "moveQueuedCommandUp": "Befehl nach oben verschieben",
     "moveQueuedCommandDown": "Befehl nach unten verschieben",
     "clearQueuedCommands": "Leeren",

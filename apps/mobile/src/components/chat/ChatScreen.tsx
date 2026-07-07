@@ -26,12 +26,15 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     queuedCommands,
     isQueuePaused,
     queuedCommandWarning,
+    queuedCommandDraft,
     thought,
     contextUsage,
     slashCommands,
     loadConversation,
     sendMessage,
     removeQueuedCommand,
+    editQueuedCommand,
+    clearQueuedCommandDraft,
     moveQueuedCommand,
     clearQueuedCommands,
     resumeQueuedCommands,
@@ -104,6 +107,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         items={queuedCommands}
         isPaused={isQueuePaused}
         onRemove={removeQueuedCommand}
+        onEdit={editQueuedCommand}
         onMove={moveQueuedCommand}
         onClear={clearQueuedCommands}
         onResume={resumeQueuedCommands}
@@ -115,6 +119,8 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         canSend={canSendMessage}
         queuedCount={queuedCommands.length}
         queueWarning={queuedCommandWarning}
+        draft={queuedCommandDraft}
+        onDraftConsumed={clearQueuedCommandDraft}
         slashCommands={slashCommands}
       />
     </KeyboardAvoidingView>

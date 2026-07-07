@@ -111,6 +111,7 @@
     "queuedCommands": "{{count}} queued",
     "queuedCommandFiles": "{{count}} file(s)",
     "removeQueuedCommand": "Remove queued command",
+    "editQueuedCommand": "Edit queued command",
     "moveQueuedCommandUp": "Move queued command up",
     "moveQueuedCommandDown": "Move queued command down",
     "clearQueuedCommands": "Clear",

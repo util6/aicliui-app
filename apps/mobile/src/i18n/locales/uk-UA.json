@@ -94,6 +94,7 @@
     "queuedCommands": "У черзі: {{count}}",
     "queuedCommandFiles": "Файлів: {{count}}",
     "removeQueuedCommand": "Видалити команду з черги",
+    "editQueuedCommand": "Редагувати команду в черзі",
     "moveQueuedCommandUp": "Перемістити команду вгору",
     "moveQueuedCommandDown": "Перемістити команду вниз",
     "clearQueuedCommands": "Очистити",

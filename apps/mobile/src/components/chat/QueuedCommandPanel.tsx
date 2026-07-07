@@ -10,6 +10,7 @@ type QueuedCommandPanelProps = {
   items: QueuedCommand[];
   isPaused?: boolean;
   onRemove: (commandId: string) => void;
+  onEdit?: (commandId: string) => void;
   onMove?: (commandId: string, direction: QueuedCommandMoveDirection) => void;
   onClear: () => void;
   onResume?: () => void;
@@ -19,6 +20,7 @@ export function QueuedCommandPanel({
   items,
   isPaused = false,
   onRemove,
+  onEdit,
   onMove,
   onClear,
   onResume,
@@ -92,6 +94,19 @@ export function QueuedCommandPanel({
                   </ThemedText>
                 )}
               </View>
+              {onEdit && (
+                <TouchableOpacity
+                  accessibilityRole='button'
+                  accessibilityLabel={t('chat.editQueuedCommand', {
+                    defaultValue: 'Edit queued command',
+                  })}
+                  onPress={() => onEdit(item.id)}
+                  activeOpacity={0.7}
+                  style={styles.editButton}
+                >
+                  <Ionicons name='create-outline' size={17} color={textSecondary} />
+                </TouchableOpacity>
+              )}
               {onMove && items.length > 1 && (
                 <View style={styles.moveButtons}>
                   {index > 0 ? (
@@ -245,6 +260,12 @@ const styles = StyleSheet.create({
   moveButton: {
     width: 24,
     height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editButton: {
+    width: 26,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
