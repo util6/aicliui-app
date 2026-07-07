@@ -15,9 +15,20 @@ type PendingConfirmation = {
   [key: string]: unknown;
 };
 
+type RuntimeSummary = {
+  state: 'idle' | 'starting' | 'running' | 'cancelling' | 'waiting_confirmation';
+  can_send_message: boolean;
+  has_task: boolean;
+  task_status?: 'pending' | 'running' | 'waiting_confirmation' | 'finished';
+  is_processing: boolean;
+  pending_confirmations: number;
+  turn_id: string | null;
+};
+
 type ChatContextType = {
   messages: TMessage[];
   isStreaming: boolean;
+  canSendMessage: boolean;
   conversationId: string | null;
   confirmations: any[];
   contextUsage: { used: number; size: number } | null;
@@ -32,6 +43,7 @@ type ChatContextType = {
 const ChatContext = createContext<ChatContextType>({
   messages: [],
   isStreaming: false,
+  canSendMessage: true,
   conversationId: null,
   confirmations: [],
   contextUsage: null,
@@ -46,6 +58,7 @@ const ChatContext = createContext<ChatContextType>({
 export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [messages, setMessages] = useState<TMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [canSendMessage, setCanSendMessageState] = useState(true);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [confirmations, setConfirmations] = useState<any[]>([]);
   const [contextUsage, setContextUsage] = useState<{ used: number; size: number } | null>(null);
@@ -54,6 +67,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const messagesRef = useRef<TMessage[]>([]);
   const loadRequestRef = useRef(0);
   const isStreamingRef = useRef(false);
+  const canSendMessageRef = useRef(true);
   const turnFinishedRef = useRef(false);
   const activeThinkingRef = useRef<{ msgId: string; startedAt: number } | null>(null);
   const { connectionState } = useConnection();
@@ -62,6 +76,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const setStreamingState = useCallback((value: boolean) => {
     isStreamingRef.current = value;
     setIsStreaming(value);
+  }, []);
+
+  const setCanSendMessage = useCallback((value: boolean) => {
+    canSendMessageRef.current = value;
+    setCanSendMessageState(value);
   }, []);
 
   const completeActiveThinking = useCallback(
@@ -118,10 +137,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       if (!Array.isArray(list)) return;
       setConfirmations(list);
       setMessages((prev) => appendConfirmationMessages(prev, id, list));
+      if (list.length > 0) {
+        turnFinishedRef.current = false;
+        setStreamingState(true);
+        setCanSendMessage(false);
+      }
     } catch (e) {
       console.warn('[Chat] Failed to restore confirmations:', e);
     }
-  }, []);
+  }, [setCanSendMessage, setStreamingState]);
 
   // Load message history
   const loadConversation = useCallback(async (id: string) => {
@@ -131,6 +155,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     turnFinishedRef.current = false;
     activeThinkingRef.current = null;
     setStreamingState(false);
+    setCanSendMessage(true);
     setConfirmations([]);
     setContextUsage(null);
     setSlashCommands([]);
@@ -151,14 +176,20 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     try {
       const conversation = await bridge.request<{
         status?: string;
+        runtime?: unknown;
         extra?: { lastContextUsage?: unknown };
       } | null>('conversation.get', {
         conversation_id: id,
       });
       if (requestId !== loadRequestRef.current) return;
-      if (isProcessingConversationStatus(conversation?.status)) {
+      const runtime = normalizeRuntimeSummary(conversation?.runtime);
+      if (runtime) {
+        setStreamingState(isProcessingRuntimeSummary(runtime));
+        setCanSendMessage(runtime.can_send_message);
+      } else if (isProcessingConversationStatus(conversation?.status)) {
         turnFinishedRef.current = false;
         setStreamingState(true);
+        setCanSendMessage(false);
       }
       const restoredUsage = normalizeContextUsage(conversation?.extra?.lastContextUsage);
       if (restoredUsage) {
@@ -170,7 +201,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
     await restorePendingConfirmations(id, requestId);
     await refreshSlashCommands(id, requestId);
-  }, [refreshSlashCommands, restorePendingConfirmations, setStreamingState]);
+  }, [refreshSlashCommands, restorePendingConfirmations, setCanSendMessage, setStreamingState]);
 
   // Subscribe to streaming responses
   useEffect(() => {
@@ -184,12 +215,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       if (raw.type === 'start') {
         turnFinishedRef.current = false;
         setStreamingState(true);
+        setCanSendMessage(false);
         return;
       }
       if (raw.type === 'finish') {
         completeActiveThinking(raw);
         turnFinishedRef.current = true;
         setStreamingState(false);
+        setCanSendMessage(true);
         setThought(null);
         return;
       }
@@ -198,6 +231,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         completeActiveThinking(raw);
         turnFinishedRef.current = true;
         setStreamingState(false);
+        setCanSendMessage(true);
         setThought(null);
         const msg = transformMessage(raw);
         if (msg) {
@@ -213,6 +247,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         } else {
           if (!turnFinishedRef.current && !isStreamingRef.current) {
             setStreamingState(true);
+            setCanSendMessage(false);
           }
           activeThinkingRef.current = {
             msgId: raw.msg_id,
@@ -226,6 +261,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         if (turnFinishedRef.current) return;
         if (!isStreamingRef.current) {
           setStreamingState(true);
+          setCanSendMessage(false);
         }
         const data = raw.data as { subject: string; description: string };
         setThought({ subject: data.subject, description: data.description });
@@ -237,6 +273,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         completeActiveThinking(raw);
         if (!turnFinishedRef.current && !isStreamingRef.current) {
           setStreamingState(true);
+          setCanSendMessage(false);
         }
         setThought(null);
       }
@@ -267,6 +304,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const unsubConfirmAdd = bridge.on('confirmation.add', (data: unknown) => {
       const confirmation = data as PendingConfirmation;
       if (confirmation.conversation_id !== conversationId) return;
+      turnFinishedRef.current = false;
+      setStreamingState(true);
+      setCanSendMessage(false);
       setConfirmations((prev) => upsertConfirmation(prev, confirmation));
       setMessages((prev) => appendConfirmationMessages(prev, conversationId, [confirmation]));
     });
@@ -283,6 +323,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       if (removal.conversation_id && removal.conversation_id !== conversationId) return;
       setConfirmations((prev) => prev.filter((c) => c.id !== removal.id));
       setMessages((prev) => removeConfirmationMessages(prev, removal.id));
+      if (!isStreamingRef.current) {
+        setCanSendMessage(true);
+      }
     });
 
     return () => {
@@ -291,7 +334,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       unsubConfirmUpdate();
       unsubConfirmRemove();
     };
-  }, [completeActiveThinking, conversationId, refreshSlashCommands, setStreamingState]);
+  }, [completeActiveThinking, conversationId, refreshSlashCommands, setCanSendMessage, setStreamingState]);
 
   // Restore pending confirmations on reconnect (Issue 2)
   useEffect(() => {
@@ -321,6 +364,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     };
     setMessages((prev) => [...prev, userMsg]);
     turnFinishedRef.current = false;
+    setStreamingState(true);
+    setCanSendMessage(false);
 
     bridge
       .request('chat.send.message', {
@@ -328,12 +373,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         msg_id: msgId,
         conversation_id: conversationId,
       })
-      .catch((e) => console.warn('[Chat] initial send failed:', e));
-  }, [conversationId]);
+      .catch((e) => {
+        setStreamingState(false);
+        setCanSendMessage(true);
+        console.warn('[Chat] initial send failed:', e);
+      });
+  }, [conversationId, setCanSendMessage, setStreamingState]);
 
   const sendMessage = useCallback(
     (text: string, files?: string[]) => {
-      if (!conversationId || !text.trim()) return;
+      if (!conversationId || !text.trim() || !canSendMessageRef.current) return;
 
       const msgId = uuid();
 
@@ -349,6 +398,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       };
       setMessages((prev) => [...prev, userMsg]);
       turnFinishedRef.current = false;
+      setStreamingState(true);
+      setCanSendMessage(false);
 
       // Send via bridge
       bridge
@@ -358,9 +409,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           conversation_id: conversationId,
           ...(files?.length ? { files } : {}),
         })
-        .catch((e) => console.warn('[Chat] send failed:', e));
+        .catch((e) => {
+          setStreamingState(false);
+          setCanSendMessage(true);
+          console.warn('[Chat] send failed:', e);
+        });
     },
-    [conversationId],
+    [conversationId, setCanSendMessage, setStreamingState],
   );
 
   const stopGeneration = useCallback(() => {
@@ -368,11 +423,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     turnFinishedRef.current = true;
     activeThinkingRef.current = null;
     setStreamingState(false);
+    setCanSendMessage(true);
     setThought(null);
     bridge
       .request('chat.stop.stream', { conversation_id: conversationId })
       .catch((e) => console.warn('[Chat] stop stream failed:', e));
-  }, [conversationId, setStreamingState]);
+  }, [conversationId, setCanSendMessage, setStreamingState]);
 
   const confirmAction = useCallback(
     (confirmationId: string, callId: string, confirmKey: string) => {
@@ -405,6 +461,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       value={{
         messages,
         isStreaming,
+        canSendMessage,
         conversationId,
         confirmations,
         contextUsage,
@@ -519,6 +576,44 @@ function isConfirmationMessage(message: TMessage): boolean {
 
 function isProcessingConversationStatus(status: unknown): boolean {
   return status === 'running' || status === 'waiting_confirmation';
+}
+
+function normalizeRuntimeSummary(value: unknown): RuntimeSummary | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const runtime = value as Partial<RuntimeSummary>;
+  if (!isRuntimeState(runtime.state)) return null;
+  if (typeof runtime.can_send_message !== 'boolean') return null;
+  if (typeof runtime.has_task !== 'boolean') return null;
+  if (typeof runtime.is_processing !== 'boolean') return null;
+  if (typeof runtime.pending_confirmations !== 'number') return null;
+  if (runtime.turn_id !== null && typeof runtime.turn_id !== 'string') return null;
+  return {
+    state: runtime.state,
+    can_send_message: runtime.can_send_message,
+    has_task: runtime.has_task,
+    ...(isConversationStatus(runtime.task_status) ? { task_status: runtime.task_status } : {}),
+    is_processing: runtime.is_processing,
+    pending_confirmations: runtime.pending_confirmations,
+    turn_id: runtime.turn_id,
+  };
+}
+
+function isProcessingRuntimeSummary(runtime: RuntimeSummary): boolean {
+  return runtime.is_processing || runtime.has_task || runtime.pending_confirmations > 0 || runtime.state !== 'idle';
+}
+
+function isRuntimeState(value: unknown): value is RuntimeSummary['state'] {
+  return (
+    value === 'idle' ||
+    value === 'starting' ||
+    value === 'running' ||
+    value === 'cancelling' ||
+    value === 'waiting_confirmation'
+  );
+}
+
+function isConversationStatus(value: unknown): value is NonNullable<RuntimeSummary['task_status']> {
+  return value === 'pending' || value === 'running' || value === 'waiting_confirmation' || value === 'finished';
 }
 
 function getBridgeFailureMessage(response: unknown): string | null {

@@ -18,11 +18,14 @@ export type AgentModelInfo = {
   configOptionId?: string;
 };
 
+export type ConversationStatus = 'pending' | 'running' | 'waiting_confirmation' | 'finished';
+
 export type Conversation = {
   id: string;
   name: string;
   type: string;
-  status?: 'pending' | 'running' | 'waiting_confirmation' | 'finished';
+  status?: ConversationStatus;
+  runtime?: ConversationRuntimeSummary;
   createTime: number;
   modifyTime: number;
   model: { id: string; useModel: string };
@@ -42,6 +45,18 @@ export type Conversation = {
       size: number;
     };
   };
+};
+
+export type ConversationRuntimeState = 'idle' | 'starting' | 'running' | 'cancelling' | 'waiting_confirmation';
+
+export type ConversationRuntimeSummary = {
+  state: ConversationRuntimeState;
+  can_send_message: boolean;
+  has_task: boolean;
+  task_status?: ConversationStatus;
+  is_processing: boolean;
+  pending_confirmations: number;
+  turn_id: string | null;
 };
 
 export type IResponseMessage = {

@@ -1,4 +1,10 @@
-import type { AgentInfo, Conversation, RuntimeStatus } from '@aicliui/shared';
+import type {
+  AgentInfo,
+  Conversation,
+  ConversationRuntimeSummary,
+  ConversationStatus,
+  RuntimeStatus,
+} from '@aicliui/shared';
 import { createDefaultAgentAdapterRegistry } from './agent-adapters/default-registry.js';
 import type { AgentAdapterRegistry } from './agent-adapters/registry.js';
 import { BridgeRouter } from './bridge-router.js';
@@ -13,18 +19,18 @@ type DefaultRouterOptions = {
   adapters?: AgentAdapterRegistry;
 };
 
+type PendingConfirmationRecord = {
+  backend: string;
+  confirmation: CliConfirmation;
+};
+
 export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRouter {
   const router = new BridgeRouter();
   const store = options?.store ?? new InMemoryConversationStore();
   const adapters = options?.adapters ?? createDefaultAgentAdapterRegistry();
-  const pendingConfirmations = new Map<
-    string,
-    {
-      backend: string;
-      confirmation: CliConfirmation;
-    }
-  >();
+  const pendingConfirmations = new Map<string, PendingConfirmationRecord>();
   const activeRuns = new Map<string, AbortController>();
+  const activeTurnIds = new Map<string, string>();
 
   router.register('runtime.get-status', async () => getRuntimeStatus(adapters));
   router.register('acp.get-available-agents', () => ({
@@ -96,7 +102,11 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     stopActiveRun(activeRuns, conversationId);
     const runController = new AbortController();
     activeRuns.set(conversationId, runController);
-    store.updateConversation(conversationId, { status: 'running' });
+    activeTurnIds.set(conversationId, assistantMsgId);
+    store.updateConversation(conversationId, {
+      status: 'running',
+      runtime: runningRuntimeSummary('running', assistantMsgId, pendingConfirmationCount(pendingConfirmations, conversationId)),
+    });
 
     store.addTextMessage({
       conversationId,
@@ -179,14 +189,28 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
           case 'permission': {
             const confirmation = normalizeConfirmation(event.confirmation, conversationId, assistantMsgId);
             pendingConfirmations.set(confirmation.id, { backend, confirmation });
-            store.updateConversation(conversationId, { status: 'waiting_confirmation' });
+            store.updateConversation(conversationId, {
+              status: 'waiting_confirmation',
+              runtime: runningRuntimeSummary(
+                'waiting_confirmation',
+                assistantMsgId,
+                pendingConfirmationCount(pendingConfirmations, conversationId),
+              ),
+            });
             context.emit('confirmation.add', confirmation);
             break;
           }
           case 'permission_resolved':
             if (pendingConfirmations.delete(event.confirmationId)) {
               if (activeRuns.get(conversationId) === runController) {
-                store.updateConversation(conversationId, { status: 'running' });
+                store.updateConversation(conversationId, {
+                  status: 'running',
+                  runtime: runningRuntimeSummary(
+                    'running',
+                    assistantMsgId,
+                    pendingConfirmationCount(pendingConfirmations, conversationId),
+                  ),
+                });
               }
               context.emit('confirmation.remove', { conversation_id: conversationId, id: event.confirmationId });
             }
@@ -217,9 +241,13 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       const activeRun = activeRuns.get(conversationId);
       if (activeRun === runController) {
         activeRuns.delete(conversationId);
+        activeTurnIds.delete(conversationId);
       }
       if (activeRun === runController || activeRun === undefined) {
-        store.updateConversation(conversationId, { status: 'finished' });
+        store.updateConversation(conversationId, {
+          status: 'finished',
+          runtime: idleRuntimeSummary('finished', pendingConfirmationCount(pendingConfirmations, conversationId)),
+        });
       }
     }
 
@@ -241,8 +269,12 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
   router.register('chat.stop.stream', (data) => {
     const conversationId = stringParam(asRecord(data).conversation_id);
     const stopped = stopActiveRun(activeRuns, conversationId);
+    activeTurnIds.delete(conversationId);
     if (stopped) {
-      store.updateConversation(conversationId, { status: 'finished' });
+      store.updateConversation(conversationId, {
+        status: 'finished',
+        runtime: idleRuntimeSummary('finished', pendingConfirmationCount(pendingConfirmations, conversationId)),
+      });
     }
     return { success: true, stopped };
   });
@@ -281,7 +313,14 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
 
     pendingConfirmations.delete(confirmationId);
     if (activeRuns.has(recordConversationId)) {
-      store.updateConversation(recordConversationId, { status: 'running' });
+      store.updateConversation(recordConversationId, {
+        status: 'running',
+        runtime: runningRuntimeSummary(
+          'running',
+          activeTurnIds.get(recordConversationId) ?? null,
+          pendingConfirmationCount(pendingConfirmations, recordConversationId),
+        ),
+      });
     }
     context.emit('confirmation.remove', {
       conversation_id: record.confirmation.conversation_id,
@@ -295,6 +334,48 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
   router.register('get-image-base64', async (data) => await readImageBase64(stringParam(asRecord(data).path)));
 
   return router;
+}
+
+function runningRuntimeSummary(
+  status: Extract<ConversationStatus, 'running' | 'waiting_confirmation'>,
+  turnId: string | null,
+  pendingConfirmations: number,
+): ConversationRuntimeSummary {
+  return {
+    state: status,
+    can_send_message: false,
+    has_task: true,
+    task_status: status,
+    is_processing: true,
+    pending_confirmations: pendingConfirmations,
+    turn_id: turnId,
+  };
+}
+
+function idleRuntimeSummary(
+  status: Extract<ConversationStatus, 'finished'>,
+  pendingConfirmations: number,
+): ConversationRuntimeSummary {
+  return {
+    state: 'idle',
+    can_send_message: true,
+    has_task: false,
+    task_status: status,
+    is_processing: false,
+    pending_confirmations: pendingConfirmations,
+    turn_id: null,
+  };
+}
+
+function pendingConfirmationCount(
+  pendingConfirmations: Map<string, PendingConfirmationRecord>,
+  conversationId: string,
+): number {
+  let count = 0;
+  for (const { confirmation } of pendingConfirmations.values()) {
+    if (confirmation.conversation_id === conversationId) count += 1;
+  }
+  return count;
 }
 
 function stopActiveRun(activeRuns: Map<string, AbortController>, conversationId: string): boolean {

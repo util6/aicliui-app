@@ -24,7 +24,7 @@ function Probe() {
 }
 
 function RuntimeProbe() {
-  const { loadConversation, isStreaming, thought, messages, contextUsage, confirmations, sendMessage } = useChat();
+  const { loadConversation, isStreaming, canSendMessage, thought, messages, contextUsage, confirmations, sendMessage } = useChat();
 
   useEffect(() => {
     loadConversation('conv-1');
@@ -33,6 +33,7 @@ function RuntimeProbe() {
   return (
     <>
       <Text testID='streaming'>{isStreaming ? 'streaming' : 'idle'}</Text>
+      <Text testID='can-send'>{canSendMessage ? 'can-send' : 'blocked'}</Text>
       <Text testID='thought'>{thought?.subject ?? ''}</Text>
       <Text testID='messages'>{messages.map((message) => message.content?.content ?? '').join('|')}</Text>
       <Text testID='message-types'>{messages.map((message) => message.type).join('|')}</Text>
@@ -287,6 +288,75 @@ describe('ChatContext runtime state', () => {
 
     expect(screen.getByTestId('streaming').props.children).toBe('streaming');
     expect(screen.getByTestId('thought').props.children).toBe('planning');
+  });
+
+  it('blocks duplicate local sends until the active turn finishes', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('can-send').props.children).toBe('can-send'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('send'));
+      fireEvent.press(screen.getByTestId('send'));
+    });
+
+    expect(screen.getByTestId('streaming').props.children).toBe('streaming');
+    expect(screen.getByTestId('can-send').props.children).toBe('blocked');
+    expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(1);
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'finish',
+        msg_id: 'assistant-1',
+        conversation_id: 'conv-1',
+        data: null,
+      });
+    });
+
+    expect(screen.getByTestId('can-send').props.children).toBe('can-send');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('send'));
+    });
+
+    expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(2);
+  });
+
+  it('restores runtime summary gate when a conversation is opened', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-conversation-messages') return Promise.resolve([]);
+      if (name === 'conversation.get') {
+        return Promise.resolve({
+          id: 'conv-1',
+          runtime: {
+            state: 'running',
+            can_send_message: false,
+            has_task: true,
+            task_status: 'running',
+            is_processing: true,
+            pending_confirmations: 0,
+            turn_id: 'turn-1',
+          },
+          extra: {},
+        });
+      }
+      if (name === 'confirmation.list') return Promise.resolve([]);
+      if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('streaming').props.children).toBe('streaming'));
+    expect(screen.getByTestId('can-send').props.children).toBe('blocked');
   });
 
   it('marks active thinking done when content arrives', async () => {

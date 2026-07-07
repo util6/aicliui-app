@@ -37,4 +37,12 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('Array.isArray(protocolHeader)');
     expect(TERMUX_DAEMON_SOURCE).toContain('protocolHeader.includes(expected)');
   });
+
+  it('persists AionUi-style runtime summaries on local conversations', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain("runtime: idleRuntimeSummary('finished', 0)");
+    expect(TERMUX_DAEMON_SOURCE).toContain('function runningRuntimeSummary(status, turnId, pendingConfirmationCount)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("conversation.runtime = runningRuntimeSummary('running', assistantMsgId, pendingConfirmationCount(conversationId));");
+    expect(TERMUX_DAEMON_SOURCE).toContain("conversation.runtime = runningRuntimeSummary('waiting_confirmation', assistantMsgId, pendingConfirmationCount(conversationId));");
+    expect(TERMUX_DAEMON_SOURCE).toContain("conversation.runtime = idleRuntimeSummary('finished', pendingConfirmationCount(conversationId));");
+  });
 });

@@ -10,11 +10,12 @@ type ChatInputBarProps = {
   onSend: (text: string, files?: string[]) => void;
   onStop?: () => void;
   isStreaming?: boolean;
+  canSend?: boolean;
   disabled?: boolean;
   slashCommands?: SlashCommandItem[];
 };
 
-export function ChatInputBar({ onSend, onStop, isStreaming, disabled, slashCommands = [] }: ChatInputBarProps) {
+export function ChatInputBar({ onSend, onStop, isStreaming, canSend = true, disabled, slashCommands = [] }: ChatInputBarProps) {
   const { t } = useTranslation();
   const tint = useThemeColor({}, 'tint');
   const background = useThemeColor({}, 'background');
@@ -25,13 +26,14 @@ export function ChatInputBar({ onSend, onStop, isStreaming, disabled, slashComma
   const textSecondary = useThemeColor({}, 'textSecondary');
   const [text, setText] = useState('');
   const isDisabled = disabled === true;
+  const sendBlocked = isDisabled || !canSend;
   const slashQuery = matchSlashQuery(text);
   const matchingSlashCommands =
     slashQuery === null ? [] : filterSlashCommands(slashCommands, slashQuery).slice(0, 6);
-  const showSlashCommands = !isDisabled && matchingSlashCommands.length > 0;
+  const showSlashCommands = !sendBlocked && matchingSlashCommands.length > 0;
 
   const handleSend = () => {
-    if (isDisabled) return;
+    if (sendBlocked) return;
     if (showSlashCommands) {
       handleSelectSlashCommand(matchingSlashCommands[0]);
       return;
@@ -44,11 +46,11 @@ export function ChatInputBar({ onSend, onStop, isStreaming, disabled, slashComma
   };
 
   const handleSelectSlashCommand = (command: SlashCommandItem) => {
-    if (isDisabled) return;
+    if (sendBlocked) return;
     setText(`/${command.name} `);
   };
 
-  const showSend = !isDisabled && text.trim().length > 0;
+  const showSend = !sendBlocked && text.trim().length > 0;
   const showStop = !isDisabled && isStreaming;
 
   return (

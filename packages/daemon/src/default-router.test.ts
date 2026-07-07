@@ -991,7 +991,19 @@ describe('default bridge routes', () => {
       name: 'subscribe-conversation.get',
       data: { id: 'm_get_running', data: { conversation_id: 'status-id-1' } },
     });
-    expect(running.data).toMatchObject({ id: 'status-id-1', status: 'running' });
+    expect(running.data).toMatchObject({
+      id: 'status-id-1',
+      status: 'running',
+      runtime: {
+        state: 'running',
+        can_send_message: false,
+        has_task: true,
+        task_status: 'running',
+        is_processing: true,
+        pending_confirmations: 0,
+        turn_id: 'assistant_user-msg-status',
+      },
+    });
 
     continueResolve();
     await sendPromise;
@@ -1000,7 +1012,19 @@ describe('default bridge routes', () => {
       name: 'subscribe-conversation.get',
       data: { id: 'm_get_finished', data: { conversation_id: 'status-id-1' } },
     });
-    expect(finished.data).toMatchObject({ id: 'status-id-1', status: 'finished' });
+    expect(finished.data).toMatchObject({
+      id: 'status-id-1',
+      status: 'finished',
+      runtime: {
+        state: 'idle',
+        can_send_message: true,
+        has_task: false,
+        task_status: 'finished',
+        is_processing: false,
+        pending_confirmations: 0,
+        turn_id: null,
+      },
+    });
   });
 
   it('marks a conversation waiting while an adapter confirmation is pending', async () => {
@@ -1070,7 +1094,19 @@ describe('default bridge routes', () => {
       name: 'subscribe-conversation.get',
       data: { id: 'm_get_waiting', data: { conversation_id: 'waiting-id-1' } },
     });
-    expect(waiting.data).toMatchObject({ id: 'waiting-id-1', status: 'waiting_confirmation' });
+    expect(waiting.data).toMatchObject({
+      id: 'waiting-id-1',
+      status: 'waiting_confirmation',
+      runtime: {
+        state: 'waiting_confirmation',
+        can_send_message: false,
+        has_task: true,
+        task_status: 'waiting_confirmation',
+        is_processing: true,
+        pending_confirmations: 1,
+        turn_id: 'assistant_user-msg-waiting',
+      },
+    });
 
     await router.handleIncoming({
       name: 'subscribe-confirmation.confirm',
@@ -1088,7 +1124,19 @@ describe('default bridge routes', () => {
       name: 'subscribe-conversation.get',
       data: { id: 'm_get_running_after_confirm', data: { conversation_id: 'waiting-id-1' } },
     });
-    expect(running.data).toMatchObject({ id: 'waiting-id-1', status: 'running' });
+    expect(running.data).toMatchObject({
+      id: 'waiting-id-1',
+      status: 'running',
+      runtime: {
+        state: 'running',
+        can_send_message: false,
+        has_task: true,
+        task_status: 'running',
+        is_processing: true,
+        pending_confirmations: 0,
+        turn_id: 'assistant_user-msg-waiting',
+      },
+    });
 
     continueResolve();
     await sendPromise;
@@ -1097,6 +1145,18 @@ describe('default bridge routes', () => {
       name: 'subscribe-conversation.get',
       data: { id: 'm_get_finished_after_waiting', data: { conversation_id: 'waiting-id-1' } },
     });
-    expect(finished.data).toMatchObject({ id: 'waiting-id-1', status: 'finished' });
+    expect(finished.data).toMatchObject({
+      id: 'waiting-id-1',
+      status: 'finished',
+      runtime: {
+        state: 'idle',
+        can_send_message: true,
+        has_task: false,
+        task_status: 'finished',
+        is_processing: false,
+        pending_confirmations: 0,
+        turn_id: null,
+      },
+    });
   });
 });

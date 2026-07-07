@@ -364,6 +364,7 @@ async function createConversation(params) {
     name: typeof params.name === 'string' && params.name.trim() ? params.name.trim() : 'New conversation',
     type: typeof params.type === 'string' ? params.type : 'acp',
     status: 'finished',
+    runtime: idleRuntimeSummary('finished', 0),
     createTime: now,
     modifyTime: now,
     model: normalizeConversationModel(params.model, extra),
@@ -506,6 +507,38 @@ function modelLabel(modelId, backend) {
   return geminiModels.find((model) => model.id === modelId)?.label || modelId;
 }
 
+function runningRuntimeSummary(status, turnId, pendingConfirmationCount) {
+  return {
+    state: status,
+    can_send_message: false,
+    has_task: true,
+    task_status: status,
+    is_processing: true,
+    pending_confirmations: pendingConfirmationCount,
+    turn_id: turnId,
+  };
+}
+
+function idleRuntimeSummary(status, pendingConfirmationCount) {
+  return {
+    state: 'idle',
+    can_send_message: true,
+    has_task: false,
+    task_status: status,
+    is_processing: false,
+    pending_confirmations: pendingConfirmationCount,
+    turn_id: null,
+  };
+}
+
+function pendingConfirmationCount(conversationId) {
+  let count = 0;
+  for (const record of pendingConfirmations.values()) {
+    if (record.conversationId === conversationId) count += 1;
+  }
+  return count;
+}
+
 function parseModelOptions(raw, fallback) {
   if (typeof raw !== 'string' || !raw.trim()) return fallback;
   const models = raw
@@ -526,9 +559,9 @@ async function sendMessage(params, emit) {
   const conversation = conversations.get(conversationId);
   if (!conversation) throw new Error("Conversation '" + conversationId + "' was not found");
   stopActiveRun(conversationId);
-  const run = createActiveRun(conversationId);
   const userMsgId = typeof params.msg_id === 'string' ? params.msg_id : randomId();
   const assistantMsgId = 'assistant_' + userMsgId;
+  const run = createActiveRun(conversationId, assistantMsgId);
   const backend = typeof conversation.extra.backend === 'string' ? conversation.extra.backend : 'opencode';
   const workspace =
     typeof conversation.extra.workspace === 'string' && conversation.extra.workspace
@@ -583,6 +616,7 @@ async function sendMessage(params, emit) {
   const emitAssistantPermission = (confirmation) => {
     if (!confirmation || !confirmation.id) return;
     conversation.status = 'waiting_confirmation';
+    conversation.runtime = runningRuntimeSummary('waiting_confirmation', assistantMsgId, pendingConfirmationCount(conversationId));
     conversation.modifyTime = Date.now();
     void saveStore();
     emit('confirmation.add', confirmation);
@@ -592,6 +626,7 @@ async function sendMessage(params, emit) {
     pendingConfirmations.delete(confirmationId);
     if (activeRuns.get(conversationId) === run) {
       conversation.status = 'running';
+      conversation.runtime = runningRuntimeSummary('running', assistantMsgId, pendingConfirmationCount(conversationId));
       conversation.modifyTime = Date.now();
       void saveStore();
     }
@@ -599,6 +634,7 @@ async function sendMessage(params, emit) {
   };
   activeRuns.set(conversationId, run);
   conversation.status = 'running';
+  conversation.runtime = runningRuntimeSummary('running', assistantMsgId, pendingConfirmationCount(conversationId));
   conversation.modifyTime = Date.now();
 
   await addTextMessage(conversationId, userMsgId, 'right', input);
@@ -690,11 +726,12 @@ async function sendMessage(params, emit) {
     const activeRun = activeRuns.get(conversationId);
     if (activeRun === run) activeRuns.delete(conversationId);
     if (activeRun === run || activeRun === undefined) {
+      clearConfirmationsForConversation(conversationId, emit);
       conversation.status = 'finished';
+      conversation.runtime = idleRuntimeSummary('finished', pendingConfirmationCount(conversationId));
       conversation.modifyTime = Date.now();
       await saveStore();
     }
-    clearConfirmationsForConversation(conversationId, emit);
   }
 
   await addTextMessage(conversationId, assistantMsgId, 'left', assistantContent);
@@ -710,10 +747,11 @@ async function sendMessage(params, emit) {
   return { success: true };
 }
 
-function createActiveRun(conversationId) {
+function createActiveRun(conversationId, turnId) {
   const controller = new AbortController();
   return {
     conversationId,
+    turnId,
     signal: controller.signal,
     cancel() {
       controller.abort(new Error('Generation stopped by user'));
@@ -735,6 +773,7 @@ function stopStream(params) {
   const conversation = conversations.get(conversationId);
   if (conversation) {
     conversation.status = 'finished';
+    conversation.runtime = idleRuntimeSummary('finished', pendingConfirmationCount(conversationId));
     conversation.modifyTime = Date.now();
     void saveStore();
   }
@@ -1119,6 +1158,11 @@ async function confirmPendingPermission(params, emit) {
   const conversation = conversations.get(record.conversationId);
   if (conversation && activeRuns.has(record.conversationId)) {
     conversation.status = 'running';
+    conversation.runtime = runningRuntimeSummary(
+      'running',
+      activeRuns.get(record.conversationId)?.turnId || null,
+      pendingConfirmationCount(record.conversationId),
+    );
     conversation.modifyTime = Date.now();
     void saveStore();
   }

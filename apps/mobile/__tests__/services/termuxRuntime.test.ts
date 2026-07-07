@@ -116,10 +116,14 @@ describe('termuxRuntime', () => {
     expect(script).toContain("const response = await requestOpenCodeJson(baseUrl, '/api/model', { method: 'GET' });");
     expect(script).toContain('function normalizeOpenCodeModels(models)');
     expect(script).toContain("id: model.providerID + '/' + model.id");
+    expect(script).toContain("runtime: idleRuntimeSummary('finished', 0)");
     expect(script).toContain('function normalizeConversationModel(model, extra)');
     expect(script).toContain('if (isRecord(model) && (model.id || model.useModel))');
     expect(script).toContain("const currentModelLabel = typeof extra.currentModelLabel === 'string' ? extra.currentModelLabel : '';");
     expect(script).toContain('useModel: currentModelLabel || modelLabel(currentModelId, extra.backend)');
+    expect(script).toContain('function runningRuntimeSummary(status, turnId, pendingConfirmationCount)');
+    expect(script).toContain('can_send_message: false');
+    expect(script).toContain('function idleRuntimeSummary(status, pendingConfirmationCount)');
     expect(script).toContain('function parseModelOptions(raw, fallback)');
     expect(script).toContain("if (key === 'conversation.get') return conversations.get(requiredString(params.conversation_id)) || null;");
     expect(script).toContain("if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);");
@@ -129,8 +133,11 @@ describe('termuxRuntime', () => {
     expect(script).toContain("if (key === 'confirmation.list') return listConfirmations(requiredString(params.conversation_id));");
     expect(script).toContain("if (key === 'confirmation.confirm') return await confirmPendingPermission(params, emit);");
     expect(script).toContain("conversation.status = 'running';");
+    expect(script).toContain("conversation.runtime = runningRuntimeSummary('running', assistantMsgId, pendingConfirmationCount(conversationId));");
     expect(script).toContain("conversation.status = 'waiting_confirmation';");
+    expect(script).toContain("conversation.runtime = runningRuntimeSummary('waiting_confirmation', assistantMsgId, pendingConfirmationCount(conversationId));");
     expect(script).toContain("conversation.status = 'finished';");
+    expect(script).toContain("conversation.runtime = idleRuntimeSummary('finished', pendingConfirmationCount(conversationId));");
     expect(script).toContain("throw new Error('Path is outside the workspace: ' + path);");
     expect(script).toContain("return 'data:' + imageMimeType(filePath) + ';base64,' + buffer.toString('base64');");
     expect(script).toContain("opencode', ['serve', '--hostname', '127.0.0.1', '--port'");
@@ -260,7 +267,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain("if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(push));");
     expect(script).toContain("if (key === 'chat.send.message') return await sendMessage(params, emit);");
     expect(script).toContain("if (key === 'chat.stop.stream') return stopStream(params);");
-    expect(script).toContain('const run = createActiveRun(conversationId);');
+    expect(script).toContain('const run = createActiveRun(conversationId, assistantMsgId);');
     expect(script).toContain('activeRuns.set(conversationId, run);');
     expect(script).toContain('activeRuns.delete(conversationId);');
     expect(script).toContain("return { success: true, stopped: true };");

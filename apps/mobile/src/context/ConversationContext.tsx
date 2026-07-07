@@ -13,6 +13,15 @@ export type Conversation = {
   name: string;
   type: string;
   status?: 'pending' | 'running' | 'waiting_confirmation' | 'finished';
+  runtime?: {
+    state: 'idle' | 'starting' | 'running' | 'cancelling' | 'waiting_confirmation';
+    can_send_message: boolean;
+    has_task: boolean;
+    task_status?: 'pending' | 'running' | 'waiting_confirmation' | 'finished';
+    is_processing: boolean;
+    pending_confirmations: number;
+    turn_id: string | null;
+  };
   createTime: number;
   modifyTime: number;
   model: { id: string; useModel: string };

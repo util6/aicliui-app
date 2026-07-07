@@ -97,4 +97,20 @@ describe('ChatInputBar slash commands', () => {
     );
     expect(screen.queryByText('stop-circle')).toBeNull();
   });
+
+  it('blocks sending while busy but keeps the stop action visible', () => {
+    const onSend = jest.fn();
+    const onStop = jest.fn();
+    const screen = render(<ChatInputBar onSend={onSend} onStop={onStop} canSend={false} isStreaming />);
+    const input = screen.getByPlaceholderText('chat.inputPlaceholder');
+
+    fireEvent.changeText(input, 'hello');
+    fireEvent(input, 'submitEditing');
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByText('stop-circle')).toBeTruthy();
+
+    fireEvent.press(screen.getByText('stop-circle'));
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
 });
