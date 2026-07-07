@@ -135,6 +135,10 @@
     "serverAddress": "Serveradresse",
     "reconnect": "Erneut verbinden",
     "changeServer": "Server ändern",
+    "runtime": "Runtime",
+    "refreshRuntime": "Refresh",
+    "runtimeUnavailable": "Runtime status unavailable",
+    "termuxExternalApps": "Allow external apps",
     "about": "Über",
     "version": "Version",
     "language": "Sprache"

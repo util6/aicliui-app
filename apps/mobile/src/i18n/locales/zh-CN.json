@@ -153,6 +153,10 @@
     "serverAddress": "服务器地址",
     "reconnect": "重新连接",
     "changeServer": "更换服务器",
+    "runtime": "运行时",
+    "refreshRuntime": "刷新",
+    "runtimeUnavailable": "无法获取运行状态",
+    "termuxExternalApps": "允许外部应用",
     "about": "关于",
     "version": "版本",
     "language": "语言"

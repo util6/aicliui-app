@@ -3,6 +3,7 @@ import { View, ScrollView, TouchableOpacity, StyleSheet, Alert, ActivityIndicato
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemedText } from '../../../src/components/ui/ThemedText';
+import { RuntimeStatusCard } from '../../../src/components/settings/RuntimeStatusCard';
 import { useConnection } from '../../../src/context/ConnectionContext';
 import { useThemeColor } from '../../../src/hooks/useThemeColor';
 
@@ -77,6 +78,8 @@ export default function SettingsScreen() {
           )}
         </View>
       </View>
+
+      <RuntimeStatusCard />
 
       {/* Actions */}
       <View style={styles.section}>

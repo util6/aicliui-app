@@ -135,6 +135,10 @@
     "serverAddress": "Адреса сервера",
     "reconnect": "Перепідключити",
     "changeServer": "Змінити сервер",
+    "runtime": "Runtime",
+    "refreshRuntime": "Refresh",
+    "runtimeUnavailable": "Runtime status unavailable",
+    "termuxExternalApps": "Allow external apps",
     "about": "Про програму",
     "version": "Версія",
     "language": "Мова"

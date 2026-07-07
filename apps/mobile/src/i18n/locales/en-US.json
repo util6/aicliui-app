@@ -153,6 +153,10 @@
     "serverAddress": "Server Address",
     "reconnect": "Reconnect",
     "changeServer": "Change Server",
+    "runtime": "Runtime",
+    "refreshRuntime": "Refresh",
+    "runtimeUnavailable": "Runtime status unavailable",
+    "termuxExternalApps": "Allow external apps",
     "about": "About",
     "version": "Version",
     "language": "Language"

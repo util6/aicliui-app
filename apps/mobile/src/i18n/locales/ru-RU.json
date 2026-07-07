@@ -138,6 +138,10 @@
     "serverAddress": "Адрес сервера",
     "reconnect": "Переподключиться",
     "changeServer": "Сменить сервер",
+    "runtime": "Runtime",
+    "refreshRuntime": "Refresh",
+    "runtimeUnavailable": "Runtime status unavailable",
+    "termuxExternalApps": "Allow external apps",
     "about": "О приложении",
     "version": "Версия",
     "language": "Язык"
