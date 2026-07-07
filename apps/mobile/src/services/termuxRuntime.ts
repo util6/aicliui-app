@@ -149,9 +149,18 @@ export AICLIUI_HOME="$HOME/.aicliui"
 export AICLIUI_DAEMON_TOKEN="$(cat "$AICLIUI_HOME/daemon/token")"
 export AICLIUI_DAEMON_PORT="\${AICLIUI_DAEMON_PORT:-43117}"
 export AICLIUI_BOOTSTRAP_STATUS="$AICLIUI_HOME/daemon/bootstrap.status"
+export AICLIUI_DAEMON_PID_FILE="$AICLIUI_HOME/daemon/daemon.pid"
 
 cd "$AICLIUI_HOME/daemon"
 if [ -f ./aicliui-daemon.mjs ]; then
+  if [ -s "$AICLIUI_DAEMON_PID_FILE" ]; then
+    OLD_PID="$(cat "$AICLIUI_DAEMON_PID_FILE" || true)"
+    if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" >/dev/null 2>&1; then
+      kill "$OLD_PID" >/dev/null 2>&1 || true
+      sleep 1
+    fi
+  fi
+  printf %s "$$" > "$AICLIUI_DAEMON_PID_FILE"
   exec node ./aicliui-daemon.mjs >> "$AICLIUI_HOME/logs/daemon.log" 2>&1
 fi
 

@@ -113,6 +113,10 @@ describe('termuxRuntime', () => {
     expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/context'");
     expect(script).toContain("if (key === 'chat.send.message') return await sendMessage(params, emit);");
     expect(script).toContain('exec node ./aicliui-daemon.mjs');
+    expect(script).toContain('export AICLIUI_DAEMON_PID_FILE="$AICLIUI_HOME/daemon/daemon.pid"');
+    expect(script).toContain('if [ -s "$AICLIUI_DAEMON_PID_FILE" ]; then');
+    expect(script).toContain('kill "$OLD_PID" >/dev/null 2>&1 || true');
+    expect(script).toContain('printf %s "$$" > "$AICLIUI_DAEMON_PID_FILE"');
     expect(script).toContain('nohup "$AICLIUI_HOME/bin/start-daemon.sh"');
   });
 

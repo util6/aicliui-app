@@ -96,7 +96,7 @@ async function route(key, data, emit) {
 
 async function getRuntimeStatus() {
   return {
-    daemon: { version: '0.1.0-termux-bootstrap', startedAt },
+    daemon: { version: '0.1.0-termux-bootstrap', startedAt, pid: process.pid },
     bootstrap: await readBootstrapStatus(),
     termux: { runCommandPermission: 'granted', allowExternalApps: 'unknown' },
     agents: await Promise.all([probeAgent('opencode'), probeAgent('gemini')]),

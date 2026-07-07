@@ -13,6 +13,7 @@ export type RuntimeStatus = {
   daemon: {
     version: string;
     startedAt: number;
+    pid?: number;
   };
   bootstrap?: {
     phase: string;

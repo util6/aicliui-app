@@ -144,7 +144,7 @@ export default function ConnectScreen() {
         <RuntimeRow
           icon='server-outline'
           label={t('connect.daemon')}
-          value={daemonStatus ? daemonStatus.daemon.version : daemonStateLabel(connectionState, t)}
+          value={daemonStatus ? daemonLabel(daemonStatus) : daemonStateLabel(connectionState, t)}
           tone={connectionState === 'connected' ? 'ready' : connectionState === 'auth_failed' ? 'missing' : 'pending'}
         />
         <RuntimeRow
@@ -249,6 +249,10 @@ function daemonStateLabel(state: string, t: (key: string) => string): string {
   if (state === 'connecting') return t('connect.statusConnecting');
   if (state === 'auth_failed') return t('connect.statusAuthFailed');
   return `127.0.0.1:${LOCAL_DAEMON_PORT}`;
+}
+
+function daemonLabel(status: RuntimeStatus): string {
+  return status.daemon.pid ? `${status.daemon.version} · pid ${status.daemon.pid}` : status.daemon.version;
 }
 
 function bootstrapLabel(bootstrap: NonNullable<RuntimeStatus['bootstrap']>): string {
