@@ -102,6 +102,7 @@
     "done": "完成",
     "contextUsed": "上下文已使用",
     "contextUsageHigh": "高",
+    "slashCommands": "命令",
     "toolSummaryExecuting": "正在执行…",
     "toolSummaryCompleted": "执行了 {{count}} 个步骤",
     "toolSummaryWithErrors": "执行了 {{count}} 个步骤（{{errorCount}} 个失败）"

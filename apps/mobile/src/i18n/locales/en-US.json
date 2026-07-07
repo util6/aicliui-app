@@ -102,6 +102,7 @@
     "done": "Done",
     "contextUsed": "context used",
     "contextUsageHigh": "High",
+    "slashCommands": "Commands",
     "toolSummaryExecuting": "Executing...",
     "toolSummaryCompleted": "Executed {{count}} steps",
     "toolSummaryWithErrors": "Executed {{count}} steps ({{errorCount}} failed)"

@@ -16,7 +16,8 @@ type ChatScreenProps = {
 
 export function ChatScreen({ conversationId }: ChatScreenProps) {
   const { t } = useTranslation();
-  const { messages, isStreaming, thought, contextUsage, loadConversation, sendMessage, stopGeneration } = useChat();
+  const { messages, isStreaming, thought, contextUsage, slashCommands, loadConversation, sendMessage, stopGeneration } =
+    useChat();
   const flatListRef = useRef<FlatList>(null);
   const background = useThemeColor({}, 'background');
   const surface = useThemeColor({}, 'surface');
@@ -74,7 +75,12 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         </View>
       )}
       <ContextUsageIndicator usage={contextUsage} />
-      <ChatInputBar onSend={sendMessage} onStop={stopGeneration} isStreaming={isStreaming} />
+      <ChatInputBar
+        onSend={sendMessage}
+        onStop={stopGeneration}
+        isStreaming={isStreaming}
+        slashCommands={slashCommands}
+      />
     </KeyboardAvoidingView>
   );
 }

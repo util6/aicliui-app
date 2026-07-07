@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { bridge } from '../services/bridge';
 import { consumePendingInitialMessage } from '../services/pendingInitialMessages';
 import { transformMessage, composeMessage, type TMessage, type IResponseMessage } from '../utils/messageAdapter';
+import { mapAvailableCommandsToSlashCommands, type SlashCommandItem } from '../utils/slashCommands';
 import { uuid } from '../utils/uuid';
 import { useConnection } from './ConnectionContext';
 
@@ -13,6 +14,7 @@ type ChatContextType = {
   conversationId: string | null;
   confirmations: any[];
   contextUsage: { used: number; size: number } | null;
+  slashCommands: SlashCommandItem[];
   thought: ThoughtData;
   loadConversation: (id: string) => void;
   sendMessage: (text: string, files?: string[]) => void;
@@ -26,6 +28,7 @@ const ChatContext = createContext<ChatContextType>({
   conversationId: null,
   confirmations: [],
   contextUsage: null,
+  slashCommands: [],
   thought: null,
   loadConversation: () => {},
   sendMessage: () => {},
@@ -39,6 +42,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [confirmations, setConfirmations] = useState<any[]>([]);
   const [contextUsage, setContextUsage] = useState<{ used: number; size: number } | null>(null);
+  const [slashCommands, setSlashCommands] = useState<SlashCommandItem[]>([]);
   const [thought, setThought] = useState<ThoughtData>(null);
   const messagesRef = useRef<TMessage[]>([]);
   const { connectionState } = useConnection();
@@ -56,6 +60,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setIsStreaming(false);
     setConfirmations([]);
     setContextUsage(null);
+    setSlashCommands([]);
     setThought(null);
 
     try {
@@ -104,6 +109,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       // Extract context usage metadata
       if (raw.type === 'acp_context_usage') {
         setContextUsage(raw.data as { used: number; size: number });
+        return;
+      }
+
+      if (raw.type === 'available_commands') {
+        setSlashCommands(mapAvailableCommandsToSlashCommands(raw.data));
         return;
       }
 
@@ -255,6 +265,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         conversationId,
         confirmations,
         contextUsage,
+        slashCommands,
         thought,
         loadConversation,
         sendMessage,
