@@ -129,6 +129,8 @@ async function sendMessage(params, emit) {
     typeof conversation.extra.workspace === 'string' && conversation.extra.workspace
       ? conversation.extra.workspace
       : process.env.AICLIUI_WORKSPACE || process.env.HOME + '/.aicliui/workspaces/default';
+  const model = typeof conversation.extra.currentModelId === 'string' ? conversation.extra.currentModelId : undefined;
+  const approvalMode = typeof conversation.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined;
   let assistantContent = '';
 
   addTextMessage(conversationId, userMsgId, 'right', input);
@@ -154,7 +156,18 @@ async function sendMessage(params, emit) {
       });
       assistantContent = result.text || 'OpenCode completed, but no assistant text was returned from the session context.';
     } else if (backend === 'gemini') {
-      throw new Error('Gemini CLI execution is not wired in the Termux daemon yet.');
+      if (!(await commandExists('gemini'))) {
+        throw new Error('gemini command not found. The bootstrap tried npm install -g @google/gemini-cli@latest; check Termux npm output in ~/.aicliui/logs/daemon.log.');
+      }
+      emit('chat.response.stream', {
+        type: 'thought',
+        msg_id: assistantMsgId,
+        conversation_id: conversationId,
+        data: { subject: 'Gemini CLI', description: buildGeminiCommandDescription({ input, model, approvalMode }) },
+      });
+      assistantContent =
+        (await sendGeminiPrompt({ input, workspace, model, approvalMode })) ||
+        'Gemini CLI completed, but no assistant text was returned.';
     } else {
       throw new Error("Agent backend '" + backend + "' is not supported by this Termux daemon.");
     }
@@ -205,6 +218,30 @@ async function sendOpenCodePrompt({ input, workspace }) {
     sessionId,
     text: extractOpenCodeAssistantText(Array.isArray(context && context.data) ? context.data : []),
   };
+}
+
+function buildGeminiCommandDescription({ input, model, approvalMode }) {
+  return buildGeminiArgs({ input, model, approvalMode })
+    .map((part) => (/\s/.test(part) ? JSON.stringify(part) : part))
+    .join(' ');
+}
+
+function buildGeminiArgs({ input, model, approvalMode }) {
+  return [
+    'gemini',
+    '-p',
+    input,
+    '--output-format',
+    'stream-json',
+    ...(model ? ['--model', model] : []),
+    ...(approvalMode ? ['--approval-mode', approvalMode] : []),
+  ];
+}
+
+async function sendGeminiPrompt({ input, workspace, model, approvalMode }) {
+  const args = buildGeminiArgs({ input, model, approvalMode }).slice(1);
+  const result = await runProcess('gemini', args, { cwd: workspace || process.env.HOME || process.cwd() });
+  return extractGeminiStreamText(result.stdout) || result.stdout.trim();
 }
 
 async function ensureOpenCodeServer() {
@@ -272,6 +309,77 @@ async function requestOpenCodeJson(baseUrl, path, init) {
   }
   if (response.status === 204) return undefined;
   return await response.json();
+}
+
+function runProcess(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd || process.env.HOME || process.cwd(),
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    const appendStdout = (chunk) => {
+      stdout += chunk.toString();
+    };
+    const appendStderr = (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 8000) stderr = stderr.slice(-8000);
+    };
+    child.stdout.on('data', appendStdout);
+    child.stderr.on('data', appendStderr);
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) return resolve({ stdout, stderr });
+      reject(new Error(command + ' exited with code ' + code + ': ' + (stderr || stdout).slice(-1000)));
+    });
+  });
+}
+
+function extractGeminiStreamText(output) {
+  return output
+    .split(/\r?\n/)
+    .map((line) => parseGeminiStreamJsonLine(line))
+    .filter(Boolean)
+    .join('');
+}
+
+function parseGeminiStreamJsonLine(line) {
+  if (!line.trim()) return '';
+  let value;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return '';
+  }
+  return extractGeminiText(value);
+}
+
+function extractGeminiText(value) {
+  if (typeof value === 'string') return value;
+  if (!isRecord(value)) return '';
+
+  const direct =
+    stringValue(value.value) ||
+    stringValue(value.text) ||
+    stringValue(value.content) ||
+    stringValue(value.delta) ||
+    (isRecord(value.message) ? stringValue(value.message.content) : undefined);
+  if (direct) return direct;
+
+  return extractGeminiCandidateText(value.candidates);
+}
+
+function extractGeminiCandidateText(value) {
+  if (!Array.isArray(value)) return '';
+  return value
+    .flatMap((candidate) => {
+      if (!isRecord(candidate) || !isRecord(candidate.content) || !Array.isArray(candidate.content.parts)) return [];
+      return candidate.content.parts.map((part) => (isRecord(part) ? stringValue(part.text) : undefined));
+    })
+    .filter(Boolean)
+    .join('');
 }
 
 function extractOpenCodeAssistantText(items) {
@@ -373,6 +481,10 @@ function isRecord(value) {
 function requiredString(value) {
   if (typeof value !== 'string') throw new Error('Expected string bridge parameter');
   return value;
+}
+
+function stringValue(value) {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function randomId() {

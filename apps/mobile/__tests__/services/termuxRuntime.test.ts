@@ -80,9 +80,14 @@ describe('termuxRuntime', () => {
     expect(script).toContain('pkg install -y nodejs');
     expect(script).toContain('npm install --omit=dev --prefix "$AICLIUI_HOME/daemon"');
     expect(script).toContain('npm install -g opencode-ai@latest');
+    expect(script).toContain('npm install -g @google/gemini-cli@latest');
     expect(script).toContain("import { WebSocketServer } from 'ws';");
     expect(script).toContain("import { spawn } from 'node:child_process';");
     expect(script).toContain("opencode', ['serve', '--hostname', '127.0.0.1', '--port'");
+    expect(script).toContain("buildGeminiArgs({ input, model, approvalMode }).slice(1)");
+    expect(script).toContain("'--output-format'");
+    expect(script).toContain("'stream-json'");
+    expect(script).toContain('parseGeminiStreamJsonLine');
     expect(script).toContain('server listening on');
     expect(script).toContain("'/api/session'");
     expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/prompt'");

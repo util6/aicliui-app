@@ -100,6 +100,10 @@ if ! command -v opencode >/dev/null 2>&1; then
   npm install -g opencode-ai@latest || true
 fi
 
+if ! command -v gemini >/dev/null 2>&1; then
+  npm install -g @google/gemini-cli@latest || true
+fi
+
 cat > "$AICLIUI_HOME/daemon/aicliui-daemon.mjs" <<'AICLIUI_DAEMON_SOURCE'
 ${TERMUX_DAEMON_SOURCE}
 AICLIUI_DAEMON_SOURCE
