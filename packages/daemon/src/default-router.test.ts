@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { createDefaultRouter } from './default-router.js';
 import { InMemoryConversationStore } from './conversation-store.js';
 import { createFallbackAgentAdapterRegistry } from './agent-adapters/default-registry.js';
@@ -34,6 +37,70 @@ describe('default bridge routes', () => {
       extra: { backend: 'opencode' },
     });
     expect(listed.data).toEqual([created.data]);
+  });
+
+  it('serves workspace trees and file contents for the mobile file UI', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'aicliui-workspace-'));
+    try {
+      await mkdir(join(workspace, 'src'));
+      await mkdir(join(workspace, 'node_modules'));
+      await writeFile(join(workspace, 'README.md'), '# hello', 'utf8');
+      await writeFile(join(workspace, 'src', 'app.ts'), 'export const value = 1;', 'utf8');
+      await writeFile(join(workspace, 'node_modules', 'ignored.js'), 'ignored', 'utf8');
+      await writeFile(join(workspace, 'logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      await symlink(join(workspace, 'README.md'), join(workspace, 'readme-link.md'));
+
+      const router = createDefaultRouter({ adapters: createFallbackAgentAdapterRegistry() });
+
+      const [workspaceTree] = await router.handleIncoming({
+        name: 'subscribe-conversation.get-workspace',
+        data: {
+          id: 'm_workspace',
+          data: { conversation_id: 'conv-1', workspace, path: workspace, search: '' },
+        },
+      });
+      const [srcTree] = await router.handleIncoming({
+        name: 'subscribe-get-file-by-dir',
+        data: { id: 'm_dir', data: { root: workspace, dir: join(workspace, 'src') } },
+      });
+      const [text] = await router.handleIncoming({
+        name: 'subscribe-read-file',
+        data: { id: 'm_text', data: { path: join(workspace, 'README.md') } },
+      });
+      const [image] = await router.handleIncoming({
+        name: 'subscribe-get-image-base64',
+        data: { id: 'm_image', data: { path: join(workspace, 'logo.png') } },
+      });
+
+      expect(workspaceTree.data).toMatchObject([
+        {
+          name: basename(workspace),
+          fullPath: workspace,
+          relativePath: '',
+          isDir: true,
+          isFile: false,
+        },
+      ]);
+      expect(workspaceTree.data?.[0]?.children).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'README.md', relativePath: 'README.md', isFile: true }),
+          expect.objectContaining({ name: 'src', relativePath: 'src', isDir: true }),
+        ]),
+      );
+      expect(JSON.stringify(workspaceTree.data)).not.toContain('node_modules');
+      expect(JSON.stringify(workspaceTree.data)).not.toContain('readme-link.md');
+      expect(srcTree.data).toEqual([
+        expect.objectContaining({
+          name: 'src',
+          relativePath: 'src',
+          children: [expect.objectContaining({ name: 'app.ts', relativePath: 'src/app.ts', isFile: true })],
+        }),
+      ]);
+      expect(text.data).toBe('# hello');
+      expect(image.data).toBe('data:image/png;base64,iVBORw==');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it('stores user messages and emits assistant stream events for mobile chat UI', async () => {
