@@ -375,6 +375,18 @@ async function sendMessage(params, emit) {
   const approvalMode = typeof conversation.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined;
   const selectedFiles = normalizeSelectedFiles(params.files, conversation.extra.defaultFiles, workspace);
   let assistantContent = '';
+  let assistantContentStreamed = false;
+  const emitAssistantContent = (content) => {
+    if (!content) return;
+    assistantContent += content;
+    assistantContentStreamed = true;
+    emit('chat.response.stream', {
+      type: 'content',
+      msg_id: assistantMsgId,
+      conversation_id: conversationId,
+      data: { content },
+    });
+  };
   activeRuns.set(conversationId, run);
 
   await addTextMessage(conversationId, userMsgId, 'right', input);
@@ -409,9 +421,16 @@ async function sendMessage(params, emit) {
         conversation_id: conversationId,
         data: { subject: 'Gemini CLI', description: buildGeminiCommandDescription({ input, model, approvalMode }) },
       });
-      assistantContent =
-        (await sendGeminiPrompt({ input, workspace, model, approvalMode, files: selectedFiles, signal: run.signal })) ||
-        'Gemini CLI completed, but no assistant text was returned.';
+      await sendGeminiPrompt({
+        input,
+        workspace,
+        model,
+        approvalMode,
+        files: selectedFiles,
+        signal: run.signal,
+        onContent: emitAssistantContent,
+      });
+      if (!assistantContent) assistantContent = 'Gemini CLI completed, but no assistant text was returned.';
     } else {
       throw new Error("Agent backend '" + backend + "' is not supported by this Termux daemon.");
     }
@@ -426,12 +445,14 @@ async function sendMessage(params, emit) {
   }
 
   await addTextMessage(conversationId, assistantMsgId, 'left', assistantContent);
-  emit('chat.response.stream', {
-    type: 'content',
-    msg_id: assistantMsgId,
-    conversation_id: conversationId,
-    data: { content: assistantContent },
-  });
+  if (!assistantContentStreamed) {
+    emit('chat.response.stream', {
+      type: 'content',
+      msg_id: assistantMsgId,
+      conversation_id: conversationId,
+      data: { content: assistantContent },
+    });
+  }
   emit('chat.response.stream', { type: 'finish', msg_id: assistantMsgId, conversation_id: conversationId, data: null });
   return { success: true };
 }
@@ -515,11 +536,35 @@ function buildGeminiArgs({ input, model, approvalMode }) {
   ];
 }
 
-async function sendGeminiPrompt({ input, workspace, model, approvalMode, files, signal }) {
+async function sendGeminiPrompt({ input, workspace, model, approvalMode, files, signal, onContent }) {
   const prompt = appendSelectedFilesToPrompt(input, files, workspace);
   const args = buildGeminiArgs({ input: prompt, model, approvalMode }).slice(1);
-  const result = await runProcess('gemini', args, { cwd: workspace || process.env.HOME || process.cwd(), signal });
-  return extractGeminiStreamText(result.stdout) || result.stdout.trim();
+  let lineBuffer = '';
+  let content = '';
+  const emitContent = (text) => {
+    if (!text) return;
+    content += text;
+    onContent(text);
+  };
+  const handleStdout = (chunk) => {
+    const lines = (lineBuffer + chunk.toString()).split(/\r?\n/);
+    lineBuffer = lines.pop() || '';
+    for (const line of lines) {
+      const text = parseGeminiStreamJsonLine(line);
+      emitContent(text);
+    }
+  };
+  const result = await runProcess('gemini', args, {
+    cwd: workspace || process.env.HOME || process.cwd(),
+    signal,
+    onStdout: handleStdout,
+  });
+  emitContent(parseGeminiStreamJsonLine(lineBuffer));
+  if (content) return content;
+
+  const fallback = extractGeminiStreamText(result.stdout) || result.stdout.trim();
+  emitContent(fallback);
+  return fallback;
 }
 
 function normalizeSelectedFiles(primary, fallback, workspace) {
@@ -650,6 +695,7 @@ function runProcess(command, args, options = {}) {
     let stderr = '';
     const appendStdout = (chunk) => {
       stdout += chunk.toString();
+      options.onStdout?.(chunk);
     };
     const appendStderr = (chunk) => {
       stderr += chunk.toString();

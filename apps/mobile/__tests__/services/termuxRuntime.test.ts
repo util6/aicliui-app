@@ -104,8 +104,14 @@ describe('termuxRuntime', () => {
     expect(script).toContain("throw new Error('Path is outside the workspace: ' + path);");
     expect(script).toContain("return 'data:' + imageMimeType(filePath) + ';base64,' + buffer.toString('base64');");
     expect(script).toContain("opencode', ['serve', '--hostname', '127.0.0.1', '--port'");
+    expect(script).toContain("await sendGeminiPrompt({");
+    expect(script).toContain("onContent: emitAssistantContent");
     expect(script).toContain("const prompt = appendSelectedFilesToPrompt(input, files, workspace);");
-    expect(script).toContain("buildGeminiArgs({ input: prompt, model, approvalMode }).slice(1)");
+    expect(script).toContain("const args = buildGeminiArgs({ input: prompt, model, approvalMode }).slice(1);");
+    expect(script).toContain("let lineBuffer = '';");
+    expect(script).toContain("const handleStdout = (chunk) => {");
+    expect(script).toContain("emitContent(text);");
+    expect(script).toContain("onStdout: handleStdout");
     expect(script).toContain("'--output-format'");
     expect(script).toContain("'stream-json'");
     expect(script).toContain('parseGeminiStreamJsonLine');
@@ -128,7 +134,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain('activeRuns.set(conversationId, run);');
     expect(script).toContain('activeRuns.delete(conversationId);');
     expect(script).toContain("return { success: true, stopped: true };");
-    expect(script).toContain("runProcess('gemini', args, { cwd: workspace || process.env.HOME || process.cwd(), signal });");
+    expect(script).toContain("runProcess('gemini', args, {");
     expect(script).toContain("signal.addEventListener('abort', abort);");
     expect(script).toContain('exec node ./aicliui-daemon.mjs');
     expect(script).toContain('export AICLIUI_DAEMON_PID_FILE="$AICLIUI_HOME/daemon/daemon.pid"');
