@@ -22,6 +22,7 @@ export function createOpenCodeAdapter(
   const port = options?.port ?? 4096;
   const client = options?.client;
   const serverManager = options?.serverManager;
+  const sessionByConversationId = new Map<string, string>();
   return {
     backend: 'opencode',
     name: 'opencode',
@@ -38,10 +39,23 @@ export function createOpenCodeAdapter(
     async *sendMessage(input: SendMessageInput) {
       const activeClient = client ?? (serverManager ? await serverManager.ensureClient() : null);
       if (activeClient) {
-        const result = await activeClient.sendPrompt({
-          prompt: input.input,
-          directory: input.workspace,
-        });
+        const cachedSessionId = sessionByConversationId.get(input.conversationId);
+        const slashCommand = parseOpenCodeSlashCommand(input.input);
+        const result = slashCommand
+          ? await activeClient.sendCommand({
+              command: slashCommand.command,
+              arguments: slashCommand.arguments,
+              sessionId: cachedSessionId,
+              directory: input.workspace,
+              model: input.model,
+              agent: input.sessionMode,
+            })
+          : await activeClient.sendPrompt({
+              prompt: input.input,
+              sessionId: cachedSessionId,
+              directory: input.workspace,
+            });
+        sessionByConversationId.set(input.conversationId, result.sessionId);
         yield {
           type: 'thought',
           subject: 'OpenCode',
@@ -70,5 +84,15 @@ export function createOpenCodeAdapter(
       if (!activeClient) return [];
       return activeClient.listCommands({ directory: input.workspace });
     },
+  };
+}
+
+export function parseOpenCodeSlashCommand(input: string): { command: string; arguments: string } | null {
+  const trimmed = input.trim();
+  const match = trimmed.match(/^\/([a-zA-Z0-9_-]+)(?:\s+(.*))?$/);
+  if (!match) return null;
+  return {
+    command: match[1],
+    arguments: match[2] ?? '',
   };
 }

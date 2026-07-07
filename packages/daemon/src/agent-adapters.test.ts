@@ -51,6 +51,8 @@ describe('agent adapters', () => {
       {
         client: {
           sendPrompt: async () => ({ sessionId: 'ses_123', text: 'from opencode' }),
+          sendCommand: async () => ({ sessionId: 'ses_123', text: 'unused command' }),
+          listCommands: async () => [],
         },
       },
     );
@@ -66,6 +68,67 @@ describe('agent adapters', () => {
     ]);
   });
 
+  it('sends OpenCode slash input through the command endpoint and reuses the conversation session', async () => {
+    const calls: unknown[] = [];
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async (input) => {
+            calls.push({ type: 'prompt', input });
+            return { sessionId: 'ses_reuse', text: 'first response' };
+          },
+          sendCommand: async (input) => {
+            calls.push({ type: 'command', input });
+            return { sessionId: 'ses_reuse', text: 'command response' };
+          },
+          listCommands: async () => [],
+        },
+      },
+    );
+
+    const firstEvents = [];
+    for await (const event of adapter.sendMessage({ conversationId: 'conv-1', input: 'hello', workspace: '/tmp/project' })) {
+      firstEvents.push(event);
+    }
+    const commandEvents = [];
+    for await (const event of adapter.sendMessage({ conversationId: 'conv-1', input: '/review now', workspace: '/tmp/project' })) {
+      commandEvents.push(event);
+    }
+
+    expect(firstEvents).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_reuse' },
+      { type: 'content', content: 'first response' },
+    ]);
+    expect(commandEvents).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_reuse' },
+      { type: 'content', content: 'command response' },
+    ]);
+    expect(calls).toEqual([
+      {
+        type: 'prompt',
+        input: {
+          prompt: 'hello',
+          directory: '/tmp/project',
+          sessionId: undefined,
+        },
+      },
+      {
+        type: 'command',
+        input: {
+          command: 'review',
+          arguments: 'now',
+          directory: '/tmp/project',
+          sessionId: 'ses_reuse',
+          model: undefined,
+          agent: undefined,
+        },
+      },
+    ]);
+  });
+
   it('uses an OpenCode server manager when a direct client was not injected', async () => {
     const adapter = createOpenCodeAdapter(
       {
@@ -75,6 +138,8 @@ describe('agent adapters', () => {
         serverManager: {
           ensureClient: async () => ({
             sendPrompt: async () => ({ sessionId: 'ses_456', text: 'from managed opencode' }),
+            sendCommand: async () => ({ sessionId: 'ses_456', text: 'unused command' }),
+            listCommands: async () => [],
           }),
         },
       },

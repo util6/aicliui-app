@@ -56,6 +56,57 @@ describe('OpenCode local API client', () => {
     });
   });
 
+  it('sends slash commands through the OpenCode command endpoint', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init });
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_cmd' } });
+        }
+        if (String(url).includes('/session/ses_cmd/command')) {
+          return jsonResponse({ info: { id: 'msg_cmd' }, parts: [] });
+        }
+        if (String(url).endsWith('/api/session/ses_cmd/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_cmd/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'command result' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    await expect(
+      client.sendCommand({
+        command: 'review',
+        arguments: 'now',
+        directory: '/tmp/project',
+        model: 'anthropic/claude-sonnet-4',
+        agent: 'build',
+      }),
+    ).resolves.toEqual({
+      sessionId: 'ses_cmd',
+      text: 'command result',
+    });
+
+    expect(calls.map((call) => [call.url, call.init?.method])).toEqual([
+      ['http://127.0.0.1:4096/api/session', 'POST'],
+      ['http://127.0.0.1:4096/session/ses_cmd/command?directory=%2Ftmp%2Fproject', 'POST'],
+      ['http://127.0.0.1:4096/api/session/ses_cmd/wait', 'POST'],
+      ['http://127.0.0.1:4096/api/session/ses_cmd/context', 'GET'],
+    ]);
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({
+      command: 'review',
+      arguments: 'now',
+      model: 'anthropic/claude-sonnet-4',
+      agent: 'build',
+    });
+  });
+
   it('extracts assistant text from common context message shapes', () => {
     expect(
       extractOpenCodeAssistantText([

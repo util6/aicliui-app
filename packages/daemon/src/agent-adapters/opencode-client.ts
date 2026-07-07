@@ -9,6 +9,17 @@ export type OpenCodePromptInput = {
   directory?: string;
 };
 
+export type OpenCodeCommandInput = {
+  command: string;
+  arguments?: string;
+  sessionId?: string;
+  directory?: string;
+  workspace?: string;
+  model?: string;
+  agent?: string;
+  messageId?: string;
+};
+
 export type OpenCodeCommandListInput = {
   directory?: string;
   workspace?: string;
@@ -21,6 +32,7 @@ export type OpenCodePromptResult = {
 
 export type OpenCodeSessionClient = {
   sendPrompt(input: OpenCodePromptInput): Promise<OpenCodePromptResult>;
+  sendCommand(input: OpenCodeCommandInput): Promise<OpenCodePromptResult>;
   listCommands(input?: OpenCodeCommandListInput): Promise<Array<{ command: string; description: string; hint?: string }>>;
 };
 
@@ -49,11 +61,15 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
     return (await response.json()) as T;
   }
 
-  async function createSession(input: OpenCodePromptInput): Promise<string> {
+  async function createSession(input: { directory?: string; workspace?: string }): Promise<string> {
+    const location = {
+      ...(input.directory ? { directory: input.directory } : {}),
+      ...(input.workspace ? { workspace: input.workspace } : {}),
+    };
     const response = await requestJson<{ data?: { id?: unknown } }>('/api/session', {
       method: 'POST',
       body: JSON.stringify({
-        ...(input.directory ? { location: { directory: input.directory } } : {}),
+        ...(Object.keys(location).length ? { location } : {}),
       }),
     });
     const id = response.data?.id;
@@ -86,6 +102,28 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
         text: extractOpenCodeAssistantText(context.data ?? []),
       };
     },
+    async sendCommand(input) {
+      const sessionId = input.sessionId ?? (await createSession(input));
+      await requestJson(commandSendPath(sessionId, input), {
+        method: 'POST',
+        body: JSON.stringify({
+          command: input.command,
+          arguments: input.arguments ?? '',
+          ...(input.messageId ? { messageID: input.messageId } : {}),
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.agent ? { agent: input.agent } : {}),
+        }),
+      });
+      await requestJson(`/api/session/${encodeURIComponent(sessionId)}/wait`, { method: 'POST' });
+      const context = await requestJson<{ data?: unknown[] }>(
+        `/api/session/${encodeURIComponent(sessionId)}/context`,
+        { method: 'GET' },
+      );
+      return {
+        sessionId,
+        text: extractOpenCodeAssistantText(context.data ?? []),
+      };
+    },
     async listCommands(input = {}) {
       const v2Path = commandListV2Path(input);
       try {
@@ -98,6 +136,14 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
       }
     },
   };
+}
+
+function commandSendPath(sessionId: string, input: OpenCodeCommandInput): string {
+  const params = new URLSearchParams();
+  if (input.directory) params.set('directory', input.directory);
+  if (input.workspace) params.set('workspace', input.workspace);
+  const query = params.toString();
+  return `/session/${encodeURIComponent(sessionId)}/command${query ? `?${query}` : ''}`;
 }
 
 function commandListV2Path(input: OpenCodeCommandListInput): string {

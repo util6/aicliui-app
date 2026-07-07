@@ -19,6 +19,7 @@ const conversations = new Map();
 const messages = new Map();
 const activeRuns = new Map();
 const pendingConfirmations = new Map();
+const openCodeSessions = new Map();
 let openCodeServerPromise = null;
 let saveQueue = Promise.resolve();
 const storeReady = loadStore();
@@ -733,17 +734,8 @@ async function sendOpenCodePrompt({
   const attachments = await buildOpenCodeFileAttachments(files, workspace);
   const modelRef = parseOpenCodeModelRef(model);
   const agentId = parseOpenCodeAgent(agent);
-  const session = await requestOpenCodeJson(baseUrl, '/api/session', {
-    method: 'POST',
-    signal,
-    body: JSON.stringify({
-      ...(workspace ? { location: { directory: workspace } } : {}),
-      ...(modelRef ? { model: modelRef } : {}),
-      ...(agentId ? { agent: agentId } : {}),
-    }),
-  });
-  const sessionId = session && session.data && typeof session.data.id === 'string' ? session.data.id : '';
-  if (!sessionId) throw new Error('OpenCode session.create returned no session id');
+  const sessionId = await ensureOpenCodeSession({ conversationId, workspace, modelRef, agentId, signal });
+  const slashCommand = parseOpenCodeSlashCommand(input);
   const eventStream = subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, {
     onContent,
     onTool,
@@ -756,17 +748,30 @@ async function sendOpenCodePrompt({
 
   try {
     await eventStream.ready;
-    await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/prompt', {
-      method: 'POST',
-      signal,
-      body: JSON.stringify({
-        prompt: {
-          text: input,
-          files: attachments,
-          agents: [],
-        },
-      }),
-    });
+    if (slashCommand) {
+      await requestOpenCodeJson(baseUrl, openCodeCommandSendPath(sessionId, workspace), {
+        method: 'POST',
+        signal,
+        body: JSON.stringify({
+          command: slashCommand.command,
+          arguments: slashCommand.arguments,
+          ...(model ? { model } : {}),
+          ...(agentId ? { agent: agentId } : {}),
+        }),
+      });
+    } else {
+      await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/prompt', {
+        method: 'POST',
+        signal,
+        body: JSON.stringify({
+          prompt: {
+            text: input,
+            files: attachments,
+            agents: [],
+          },
+        }),
+      });
+    }
     await requestOpenCodeJson(baseUrl, '/api/session/' + encodeURIComponent(sessionId) + '/wait', { method: 'POST', signal });
   } finally {
     eventStream.close();
@@ -780,6 +785,40 @@ async function sendOpenCodePrompt({
   return {
     sessionId,
     text: extractOpenCodeAssistantText(Array.isArray(context && context.data) ? context.data : []),
+  };
+}
+
+async function ensureOpenCodeSession({ conversationId, workspace, modelRef, agentId, signal }) {
+  const cached = openCodeSessions.get(conversationId);
+  if (cached) return cached;
+
+  const session = await requestOpenCodeJson(await ensureOpenCodeServer(), '/api/session', {
+    method: 'POST',
+    signal,
+    body: JSON.stringify({
+      ...(workspace ? { location: { directory: workspace } } : {}),
+      ...(modelRef ? { model: modelRef } : {}),
+      ...(agentId ? { agent: agentId } : {}),
+    }),
+  });
+  const sessionId = session && session.data && typeof session.data.id === 'string' ? session.data.id : '';
+  if (!sessionId) throw new Error('OpenCode session.create returned no session id');
+  openCodeSessions.set(conversationId, sessionId);
+  return sessionId;
+}
+
+function openCodeCommandSendPath(sessionId, workspace) {
+  const path = '/session/' + encodeURIComponent(sessionId) + '/command';
+  return workspace ? path + '?directory=' + encodeURIComponent(workspace) : path;
+}
+
+function parseOpenCodeSlashCommand(input) {
+  const trimmed = typeof input === 'string' ? input.trim() : '';
+  const match = trimmed.match(/^\/([a-zA-Z0-9_-]+)(?:\s+(.*))?$/);
+  if (!match) return null;
+  return {
+    command: match[1],
+    arguments: match[2] || '',
   };
 }
 
@@ -1784,6 +1823,7 @@ function upsertCodexPlanMessage(conversationId, msgId, plan) {
 async function removeConversation(id) {
   const existed = conversations.delete(id);
   messages.delete(id);
+  openCodeSessions.delete(id);
   if (existed) await saveStore();
   return existed;
 }
