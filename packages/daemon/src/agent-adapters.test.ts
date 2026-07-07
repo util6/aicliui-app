@@ -2,8 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  buildCodexCommand,
+  createCodexAdapter,
+  extractCodexEventText,
+  extractCodexPlanUpdate,
+  extractCodexToolUpdate,
+} from './agent-adapters/codex-adapter.js';
 import { buildGeminiCommand, createGeminiAdapter, parseGeminiStreamJsonLine } from './agent-adapters/gemini-adapter.js';
 import { buildOpenCodeServeCommand, createOpenCodeAdapter } from './agent-adapters/opencode-adapter.js';
+import { createFallbackAgentAdapterRegistry } from './agent-adapters/default-registry.js';
 import { createAgentAdapterRegistry } from './agent-adapters/registry.js';
 import type { CliAgentAdapter } from './agent-adapters/types.js';
 
@@ -17,6 +25,14 @@ describe('agent adapters', () => {
     await expect(registry.probeAll()).resolves.toEqual([
       { backend: 'opencode', state: 'ready', version: '1.2.3' },
       { backend: 'gemini', state: 'missing', detail: 'command not found' },
+    ]);
+  });
+
+  it('exposes OpenCode, Gemini, and Codex adapters in fallback registry shape', () => {
+    expect(createFallbackAgentAdapterRegistry().listAgents()).toEqual([
+      { backend: 'opencode', name: 'opencode', label: 'OpenCode' },
+      { backend: 'gemini', name: 'gemini', label: 'Gemini CLI' },
+      { backend: 'codex', name: 'codex', label: 'Codex CLI' },
     ]);
   });
 
@@ -112,6 +128,198 @@ describe('agent adapters', () => {
             'review\n\nSelected files:\n- README.md\n- src/app.ts',
             '--output-format',
             'stream-json',
+          ],
+        },
+        cwd: '/tmp/project',
+      },
+    ]);
+  });
+
+  it('builds Codex CLI exec commands for json output', () => {
+    expect(buildCodexCommand({ prompt: 'hello', model: 'gpt-5', approvalMode: 'autoEdit' })).toEqual({
+      command: 'codex',
+      args: [
+        'exec',
+        '--json',
+        '--skip-git-repo-check',
+        '--model',
+        'gpt-5',
+        '--sandbox',
+        'workspace-write',
+        'hello',
+      ],
+    });
+    expect(buildCodexCommand({ prompt: 'ship it', approvalMode: 'yolo' })).toEqual({
+      command: 'codex',
+      args: ['exec', '--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox', 'ship it'],
+    });
+  });
+
+  it('extracts Codex json content, tool updates, and plans', () => {
+    expect(
+      extractCodexEventText({
+        type: 'item.completed',
+        item: { type: 'agent_message', text: 'done' },
+      }),
+    ).toBe('done');
+
+    expect(
+      extractCodexToolUpdate({
+        type: 'item.completed',
+        item: {
+          id: 'cmd-1',
+          type: 'command_execution',
+          command: 'npm test',
+          aggregated_output: 'ok',
+          exit_code: 0,
+        },
+      }),
+    ).toEqual({
+      toolCallId: 'cmd-1',
+      kind: 'command_execution',
+      title: 'npm test',
+      description: 'npm test\n\nok',
+      status: 'success',
+    });
+
+    expect(
+      extractCodexPlanUpdate({
+        type: 'item.updated',
+        item: {
+          id: 'todo-1',
+          type: 'todo_list',
+          items: [
+            { text: 'Inspect repo', completed: true },
+            { text: 'Implement adapter', completed: false },
+          ],
+        },
+      }),
+    ).toEqual({
+      sessionId: 'todo-1',
+      entries: [
+        { title: 'Inspect repo', status: 'completed' },
+        { title: 'Implement adapter', status: 'pending' },
+      ],
+    });
+  });
+
+  it('executes Codex CLI and streams content, tools, and plan events', async () => {
+    const calls: unknown[] = [];
+    const adapter = createCodexAdapter({
+      commandExists: async () => true,
+      runCommand: async (spec, options) => {
+        calls.push({ spec, cwd: options?.cwd });
+        options?.onStdout?.(
+          Buffer.from(
+            [
+              JSON.stringify({
+                type: 'item.started',
+                item: { id: 'cmd-1', type: 'command_execution', command: 'npm test', status: 'in_progress' },
+              }),
+              JSON.stringify({
+                type: 'item.updated',
+                item: { id: 'todo-1', type: 'todo_list', items: [{ text: 'Run tests', completed: false }] },
+              }),
+              JSON.stringify({
+                type: 'item.completed',
+                item: { id: 'msg-1', type: 'agent_message', text: 'All done' },
+              }),
+            ].join('\n') + '\n',
+          ),
+        );
+        return { stdout: '', stderr: '' };
+      },
+    });
+
+    const events = [];
+    for await (const event of adapter.sendMessage({
+      conversationId: 'conv-1',
+      input: 'test',
+      workspace: '/tmp/project',
+      model: 'gpt-5',
+      sessionMode: 'autoEdit',
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        type: 'thought',
+        subject: 'Codex CLI',
+        description:
+          'codex exec --json --skip-git-repo-check --model gpt-5 --sandbox workspace-write test',
+      },
+      {
+        type: 'codex_tool_call',
+        data: {
+          toolCallId: 'cmd-1',
+          kind: 'command_execution',
+          title: 'npm test',
+          description: 'npm test',
+          status: 'executing',
+        },
+      },
+      {
+        type: 'plan',
+        data: {
+          sessionId: 'todo-1',
+          entries: [{ title: 'Run tests', status: 'pending' }],
+        },
+      },
+      { type: 'content', content: 'All done' },
+    ]);
+    expect(calls).toEqual([
+      {
+        spec: {
+          command: 'codex',
+          args: [
+            'exec',
+            '--json',
+            '--skip-git-repo-check',
+            '--model',
+            'gpt-5',
+            '--sandbox',
+            'workspace-write',
+            'test',
+          ],
+        },
+        cwd: '/tmp/project',
+      },
+    ]);
+  });
+
+  it('passes selected file context to Codex prompts', async () => {
+    const calls: unknown[] = [];
+    const adapter = createCodexAdapter({
+      commandExists: async () => true,
+      runCommand: async (spec, options) => {
+        calls.push({ spec, cwd: options?.cwd });
+        return { stdout: JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'done' } }), stderr: '' };
+      },
+    });
+
+    const events = [];
+    for await (const event of adapter.sendMessage({
+      conversationId: 'conv-1',
+      input: 'review',
+      workspace: '/tmp/project',
+      files: ['/tmp/project/README.md'],
+    })) {
+      events.push(event);
+    }
+
+    expect(events.at(-1)).toEqual({ type: 'content', content: 'done' });
+    expect(calls).toEqual([
+      {
+        spec: {
+          command: 'codex',
+          args: [
+            'exec',
+            '--json',
+            '--skip-git-repo-check',
+            '--sandbox',
+            'read-only',
+            'review\n\nSelected files:\n- README.md',
           ],
         },
         cwd: '/tmp/project',

@@ -34,8 +34,10 @@ export type IResponseMessage = {
 
 export type RuntimeInstallState = 'missing' | 'installing' | 'ready' | 'error';
 
+export type AgentBackend = 'opencode' | 'gemini' | 'codex';
+
 export type AgentHealth = {
-  backend: 'opencode' | 'gemini';
+  backend: AgentBackend;
   state: RuntimeInstallState;
   version?: string;
   detail?: string;

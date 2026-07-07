@@ -1,4 +1,5 @@
 import { createFallbackAdapter } from './fallback-adapter.js';
+import { createCodexAdapter } from './codex-adapter.js';
 import { createGeminiAdapter } from './gemini-adapter.js';
 import { localCommandRunner } from './local-command-runner.js';
 import { createOpenCodeAdapter } from './opencode-adapter.js';
@@ -9,6 +10,7 @@ export function createDefaultAgentAdapterRegistry(): AgentAdapterRegistry {
   return createAgentAdapterRegistry([
     createOpenCodeAdapter(localCommandRunner, { serverManager: createOpenCodeServerManager() }),
     createGeminiAdapter(localCommandRunner),
+    createCodexAdapter(localCommandRunner),
   ]);
 }
 
@@ -16,5 +18,6 @@ export function createFallbackAgentAdapterRegistry(): AgentAdapterRegistry {
   return createAgentAdapterRegistry([
     createFallbackAdapter('opencode', 'OpenCode'),
     createFallbackAdapter('gemini', 'Gemini CLI'),
+    createFallbackAdapter('codex', 'Codex CLI'),
   ]);
 }
