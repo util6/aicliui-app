@@ -107,6 +107,11 @@
     "contextUsed": "context used",
     "contextUsageHigh": "High",
     "slashCommands": "Commands",
+    "queuedCommandTitle": "Queued commands",
+    "queuedCommands": "{{count}} queued",
+    "queuedCommandFiles": "{{count}} file(s)",
+    "removeQueuedCommand": "Remove queued command",
+    "clearQueuedCommands": "Clear",
     "toolSummaryExecuting": "Executing...",
     "toolSummaryCompleted": "Executed {{count}} steps",
     "toolSummaryWithErrors": "Executed {{count}} steps ({{errorCount}} failed)"

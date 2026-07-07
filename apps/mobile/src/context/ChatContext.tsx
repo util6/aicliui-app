@@ -44,6 +44,8 @@ type ChatContextType = {
   thought: ThoughtData;
   loadConversation: (id: string) => void;
   sendMessage: (text: string, files?: string[]) => void;
+  removeQueuedCommand: (commandId: string) => void;
+  clearQueuedCommands: () => void;
   stopGeneration: () => void;
   confirmAction: (confirmationId: string, callId: string, confirmKey: string) => Promise<void>;
 };
@@ -60,6 +62,8 @@ const ChatContext = createContext<ChatContextType>({
   thought: null,
   loadConversation: () => {},
   sendMessage: () => {},
+  removeQueuedCommand: () => {},
+  clearQueuedCommands: () => {},
   stopGeneration: () => {},
   confirmAction: () => Promise.resolve(),
 });
@@ -461,6 +465,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     [conversationId, enqueueMessage, executeSend],
   );
 
+  const removeQueuedCommand = useCallback(
+    (commandId: string) => {
+      setQueuedCommands((prev) => prev.filter((command) => command.id !== commandId));
+    },
+    [setQueuedCommands],
+  );
+
+  const clearQueuedCommands = useCallback(() => {
+    setQueuedCommands([]);
+  }, [setQueuedCommands]);
+
   const stopGeneration = useCallback(() => {
     if (!conversationId) return;
     suppressNextQueueDrainRef.current = true;
@@ -514,6 +529,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         thought,
         loadConversation,
         sendMessage,
+        removeQueuedCommand,
+        clearQueuedCommands,
         stopGeneration,
         confirmAction,
       }}

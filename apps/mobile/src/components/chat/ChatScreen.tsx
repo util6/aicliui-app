@@ -7,6 +7,7 @@ import { ToolCallSummary } from './ToolCallSummary';
 import { ChatInputBar } from './ChatInputBar';
 import { ChatSessionBar } from './ChatSessionBar';
 import { ContextUsageIndicator } from './ContextUsageIndicator';
+import { QueuedCommandPanel } from './QueuedCommandPanel';
 import { useChat } from '../../context/ChatContext';
 import { useConversations } from '../../context/ConversationContext';
 import { useThemeColor } from '../../hooks/useThemeColor';
@@ -28,6 +29,8 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     slashCommands,
     loadConversation,
     sendMessage,
+    removeQueuedCommand,
+    clearQueuedCommands,
     stopGeneration,
   } = useChat();
   const { conversations } = useConversations();
@@ -93,12 +96,16 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         </View>
       )}
       <ContextUsageIndicator usage={contextUsage} />
+      <QueuedCommandPanel
+        items={queuedCommands}
+        onRemove={removeQueuedCommand}
+        onClear={clearQueuedCommands}
+      />
       <ChatInputBar
         onSend={sendMessage}
         onStop={stopGeneration}
         isStreaming={isStreaming}
         canSend={canSendMessage}
-        queuedCount={queuedCommands.length}
         slashCommands={slashCommands}
       />
     </KeyboardAvoidingView>

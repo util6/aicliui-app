@@ -34,6 +34,8 @@ function RuntimeProbe() {
     contextUsage,
     confirmations,
     sendMessage,
+    removeQueuedCommand,
+    clearQueuedCommands,
   } = useChat();
 
   useEffect(() => {
@@ -45,6 +47,9 @@ function RuntimeProbe() {
       <Text testID='streaming'>{isStreaming ? 'streaming' : 'idle'}</Text>
       <Text testID='can-send'>{canSendMessage ? 'can-send' : 'blocked'}</Text>
       <Text testID='queued-count'>{queuedCommands.length}</Text>
+      <Text testID='queued-items'>
+        {queuedCommands.map((command) => `${command.input}:${command.files.length}`).join('|')}
+      </Text>
       <Text testID='thought'>{thought?.subject ?? ''}</Text>
       <Text testID='messages'>{messages.map((message) => message.content?.content ?? '').join('|')}</Text>
       <Text testID='message-types'>{messages.map((message) => message.type).join('|')}</Text>
@@ -72,6 +77,21 @@ function RuntimeProbe() {
       </Text>
       <Text testID='send-second' onPress={() => sendMessage('second')}>
         send-second
+      </Text>
+      <Text testID='send-third' onPress={() => sendMessage('third')}>
+        send-third
+      </Text>
+      <Text testID='send-files' onPress={() => sendMessage('with files', ['src/App.tsx', 'src/App.tsx', ''])}>
+        send-files
+      </Text>
+      <Text testID='remove-first-queued' onPress={() => {
+        const [first] = queuedCommands;
+        if (first) removeQueuedCommand(first.id);
+      }}>
+        remove-first-queued
+      </Text>
+      <Text testID='clear-queue' onPress={clearQueuedCommands}>
+        clear-queue
       </Text>
     </>
   );
@@ -343,6 +363,76 @@ describe('ChatContext runtime state', () => {
         conversation_id: 'conv-1',
       }),
     );
+  });
+
+  it('removes a queued command before the queue drains', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('can-send').props.children).toBe('can-send'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('send'));
+      fireEvent.press(screen.getByTestId('send-second'));
+    });
+
+    expect(screen.getByTestId('queued-count').props.children).toBe(1);
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('remove-first-queued'));
+    });
+
+    expect(screen.getByTestId('queued-count').props.children).toBe(0);
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'finish',
+        msg_id: 'assistant-1',
+        conversation_id: 'conv-1',
+        data: null,
+      });
+    });
+
+    expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(1);
+  });
+
+  it('clears queued commands and preserves attached file metadata before clearing', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('can-send').props.children).toBe('can-send'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('send'));
+      fireEvent.press(screen.getByTestId('send-files'));
+      fireEvent.press(screen.getByTestId('send-third'));
+    });
+
+    expect(screen.getByTestId('queued-count').props.children).toBe(2);
+    expect(screen.getByTestId('queued-items').props.children).toBe('with files:1|third:0');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('clear-queue'));
+    });
+
+    expect(screen.getByTestId('queued-count').props.children).toBe(0);
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'finish',
+        msg_id: 'assistant-1',
+        conversation_id: 'conv-1',
+        data: null,
+      });
+    });
+
+    expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(1);
   });
 
   it('restores runtime summary gate when a conversation is opened', async () => {
