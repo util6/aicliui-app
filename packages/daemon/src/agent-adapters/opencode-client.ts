@@ -18,6 +18,14 @@ export type OpenCodeCommandInput = {
   model?: string;
   agent?: string;
   messageId?: string;
+  parts?: OpenCodeCommandPart[];
+};
+
+export type OpenCodeCommandPart = {
+  type: 'file';
+  mime: string;
+  filename?: string;
+  url: string;
 };
 
 export type OpenCodeCommandListInput = {
@@ -112,6 +120,7 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
           ...(input.messageId ? { messageID: input.messageId } : {}),
           ...(input.model ? { model: input.model } : {}),
           ...(input.agent ? { agent: input.agent } : {}),
+          ...(input.parts?.length ? { parts: input.parts } : {}),
         }),
       });
       await requestJson(`/api/session/${encodeURIComponent(sessionId)}/wait`, { method: 'POST' });

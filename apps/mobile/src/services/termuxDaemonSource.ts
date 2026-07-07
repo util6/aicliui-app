@@ -751,6 +751,7 @@ async function sendOpenCodePrompt({
   try {
     await eventStream.ready;
     if (slashCommand) {
+      const commandParts = await buildOpenCodeCommandParts(files, workspace);
       await requestOpenCodeJson(baseUrl, openCodeCommandSendPath(sessionId, workspace), {
         method: 'POST',
         signal,
@@ -759,6 +760,7 @@ async function sendOpenCodePrompt({
           arguments: slashCommand.arguments,
           ...(model ? { model } : {}),
           ...(agentId ? { agent: agentId } : {}),
+          ...(commandParts.length ? { parts: commandParts } : {}),
         }),
       });
     } else {
@@ -1293,6 +1295,25 @@ async function buildOpenCodeFileAttachments(files, workspace) {
     }
   }
   return attachments;
+}
+
+async function buildOpenCodeCommandParts(files, workspace) {
+  const parts = [];
+  for (const filePath of files) {
+    try {
+      const stats = await stat(filePath);
+      if (!stats.isFile()) continue;
+      parts.push({
+        type: 'file',
+        mime: fileMimeType(filePath),
+        filename: basename(filePath),
+        url: pathToFileURL(filePath).toString(),
+      });
+    } catch {
+      // Ignore files that disappeared between selection and send.
+    }
+  }
+  return parts;
 }
 
 function appendSelectedFilesToPrompt(input, files, workspace) {

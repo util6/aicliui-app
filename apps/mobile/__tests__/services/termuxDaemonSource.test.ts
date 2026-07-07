@@ -10,4 +10,13 @@ describe('Termux daemon OpenCode slash commands', () => {
       'return commands.some((command) => command.command === slashCommand.command) ? slashCommand : null;',
     );
   });
+
+  it('sends selected files as OpenCode command file parts', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain('const commandParts = await buildOpenCodeCommandParts(files, workspace);');
+    expect(TERMUX_DAEMON_SOURCE).toContain('...(commandParts.length ? { parts: commandParts } : {}),');
+    expect(TERMUX_DAEMON_SOURCE).toContain('async function buildOpenCodeCommandParts(files, workspace)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("type: 'file',");
+    expect(TERMUX_DAEMON_SOURCE).toContain('url: pathToFileURL(filePath).toString(),');
+    expect(TERMUX_DAEMON_SOURCE).toContain('filename: basename(filePath),');
+  });
 });

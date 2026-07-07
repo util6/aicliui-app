@@ -87,6 +87,14 @@ describe('OpenCode local API client', () => {
         directory: '/tmp/project',
         model: 'anthropic/claude-sonnet-4',
         agent: 'build',
+        parts: [
+          {
+            type: 'file',
+            mime: 'text/plain',
+            filename: 'README.md',
+            url: 'file:///tmp/project/README.md',
+          },
+        ],
       }),
     ).resolves.toEqual({
       sessionId: 'ses_cmd',
@@ -104,6 +112,14 @@ describe('OpenCode local API client', () => {
       arguments: 'now',
       model: 'anthropic/claude-sonnet-4',
       agent: 'build',
+      parts: [
+        {
+          type: 'file',
+          mime: 'text/plain',
+          filename: 'README.md',
+          url: 'file:///tmp/project/README.md',
+        },
+      ],
     });
   });
 
