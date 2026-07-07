@@ -245,8 +245,19 @@ export function composeMessage(message: TMessage | undefined, list: TMessage[]):
 
   // Tool group merging by callId
   if (message.type === 'tool_group' && Array.isArray(message.content)) {
-    const remainingMap = new Map(message.content.map((t: any) => [t.callId, t]));
-    if (remainingMap.size === 0) return list;
+    const remainingMap = new Map<string, any>();
+    const unkeyedTools: any[] = [];
+
+    for (const tool of message.content) {
+      const key = getToolGroupCallId(tool);
+      if (key) {
+        remainingMap.set(key, tool);
+      } else {
+        unkeyedTools.push(tool);
+      }
+    }
+
+    if (remainingMap.size === 0 && unkeyedTools.length === 0) return list;
 
     let didUpdate = false;
     const updatedList = list.map((existingMsg) => {
@@ -254,10 +265,12 @@ export function composeMessage(message: TMessage | undefined, list: TMessage[]):
 
       let merged = false;
       const newContent = existingMsg.content.map((tool: any) => {
-        const update = remainingMap.get(tool.callId);
+        const key = getToolGroupCallId(tool);
+        if (!key) return tool;
+        const update = remainingMap.get(key);
         if (!update) return tool;
         merged = true;
-        remainingMap.delete(tool.callId);
+        remainingMap.delete(key);
         return { ...tool, ...update };
       });
 
@@ -267,8 +280,8 @@ export function composeMessage(message: TMessage | undefined, list: TMessage[]):
     });
 
     const base = didUpdate ? updatedList : list;
-    if (remainingMap.size > 0) {
-      return [...base, { ...message, content: Array.from(remainingMap.values()) }];
+    if (remainingMap.size > 0 || unkeyedTools.length > 0) {
+      return [...base, { ...message, content: [...Array.from(remainingMap.values()), ...unkeyedTools] }];
     }
     return didUpdate ? base : list;
   }
@@ -406,6 +419,12 @@ function isRecord(value: unknown): value is Record<string, any> {
 
 function isTipType(value: unknown): value is 'error' | 'info' | 'success' | 'warning' {
   return value === 'error' || value === 'info' || value === 'success' || value === 'warning';
+}
+
+function getToolGroupCallId(tool: unknown): string | undefined {
+  if (!isRecord(tool)) return undefined;
+  const value = tool.callId ?? tool.call_id;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
 function normalizeErrorPayload(value: unknown): { message: string; error?: Record<string, unknown> } {

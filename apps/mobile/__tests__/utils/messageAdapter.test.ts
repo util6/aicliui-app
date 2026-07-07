@@ -304,6 +304,24 @@ describe('composeMessage', () => {
       expect(result[0].content[1]).toEqual({ callId: 'c2', status: 'running' });
     });
 
+    it('merges desktop-style tool_group items by call_id', () => {
+      const existing = makeMsg({
+        type: 'tool_group',
+        content: [{ call_id: 'c1', status: 'Executing' }, { call_id: 'c2', status: 'Executing' }],
+      });
+      const incoming = makeMsg({
+        id: 'id-2',
+        type: 'tool_group',
+        content: [{ call_id: 'c2', status: 'Success', result_display: 'ok' }],
+      });
+
+      const result = composeMessage(incoming, [existing]);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].content[0]).toEqual({ call_id: 'c1', status: 'Executing' });
+      expect(result[0].content[1]).toEqual({ call_id: 'c2', status: 'Success', result_display: 'ok' });
+    });
+
     it('appends unmatched tool_group items as a new group', () => {
       const existing = makeMsg({
         type: 'tool_group',

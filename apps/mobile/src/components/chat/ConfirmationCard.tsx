@@ -20,13 +20,13 @@ export function ConfirmationCard({ content }: ConfirmationCardProps) {
   const border = useThemeColor({}, 'border');
   const textSecondary = useThemeColor({}, 'textSecondary');
 
-  // ACP permission format: { confirmation: { id, action, description, callId, options } }
+  // ACP permission format: { confirmation: { id, action, description, callId/call_id, options } }
   const confirmation = content.confirmation || content;
   const confirmationId = confirmation.id || '';
   const title = confirmation.title || confirmation.action || t('chat.permissionRequest');
   const description = confirmation.description || '';
   const options = confirmation.options || [];
-  const callId = confirmation.callId || '';
+  const callId = confirmation.callId || confirmation.call_id || '';
 
   const handleConfirm = (optionValue: string) => {
     if (confirmationId && callId) {
