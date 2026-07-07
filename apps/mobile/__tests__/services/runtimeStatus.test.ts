@@ -31,6 +31,7 @@ describe('runtimeStatus', () => {
   it('maps known agent backends and states to display labels', () => {
     expect(getAgentDisplayName('opencode')).toBe('OpenCode');
     expect(getAgentDisplayName('gemini')).toBe('Gemini CLI');
+    expect(getAgentDisplayName('codex')).toBe('Codex CLI');
     expect(getAgentDisplayName('custom')).toBe('custom');
     expect(getAgentStateLabelKey('ready')).toBe('connect.statusReady');
     expect(getAgentStateLabelKey('installing')).toBe('connect.statusInstalling');

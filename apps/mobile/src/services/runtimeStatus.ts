@@ -34,6 +34,7 @@ export function getRuntimeStatus(timeoutMs = 5000): Promise<RuntimeStatus> {
 export function getAgentDisplayName(backend: string): string {
   if (backend === 'opencode') return 'OpenCode';
   if (backend === 'gemini') return 'Gemini CLI';
+  if (backend === 'codex') return 'Codex CLI';
   return backend;
 }
 
