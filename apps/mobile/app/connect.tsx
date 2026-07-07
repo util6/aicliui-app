@@ -7,6 +7,13 @@ import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../src/components/ui/ThemedText';
 import { useConnection } from '../src/context/ConnectionContext';
 import { useThemeColor } from '../src/hooks/useThemeColor';
+import {
+  getAgentDisplayName,
+  getAgentStateLabelKey,
+  getRuntimeStatus,
+  type RuntimeAgentHealth,
+  type RuntimeStatus,
+} from '../src/services/runtimeStatus';
 import { wsService } from '../src/services/websocket';
 import { getOrCreateLocalDaemonConfig, LOCAL_DAEMON_PORT } from '../src/services/localRuntime';
 import {
@@ -26,7 +33,7 @@ type RuntimeRowProps = {
 
 export default function ConnectScreen() {
   const { t } = useTranslation();
-  const { connect } = useConnection();
+  const { connect, connectionState } = useConnection();
   const router = useRouter();
   const tint = useThemeColor({}, 'tint');
   const background = useThemeColor({}, 'background');
@@ -35,6 +42,8 @@ export default function ConnectScreen() {
   const textSecondary = useThemeColor({}, 'textSecondary');
   const [isConnecting, setIsConnecting] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
+  const [isCheckingRuntime, setIsCheckingRuntime] = useState(false);
+  const [daemonStatus, setDaemonStatus] = useState<RuntimeStatus | null>(null);
   const [runtimeProbe, setRuntimeProbe] = useState<TermuxRuntimeProbe>({
     nativeModule: 'unavailable',
     termuxInstalled: 'unknown',
@@ -57,11 +66,26 @@ export default function ConnectScreen() {
       const config = await getOrCreateLocalDaemonConfig();
       await connect(config.host, config.port, config.token);
       await waitForConnected();
+      setDaemonStatus(await getRuntimeStatus());
       router.replace('/(tabs)/chat');
     } catch {
       Alert.alert(t('common.error'), t('connect.daemonUnavailable'));
     } finally {
       setIsConnecting(false);
+    }
+  };
+
+  const refreshRuntimeStatus = async () => {
+    setIsCheckingRuntime(true);
+    try {
+      const config = await getOrCreateLocalDaemonConfig();
+      await connect(config.host, config.port, config.token);
+      await waitForConnected();
+      setDaemonStatus(await getRuntimeStatus());
+    } catch {
+      Alert.alert(t('common.error'), t('connect.daemonUnavailable'));
+    } finally {
+      setIsCheckingRuntime(false);
     }
   };
 
@@ -120,8 +144,8 @@ export default function ConnectScreen() {
         <RuntimeRow
           icon='server-outline'
           label={t('connect.daemon')}
-          value={`127.0.0.1:${LOCAL_DAEMON_PORT}`}
-          tone='pending'
+          value={daemonStatus ? daemonStatus.daemon.version : daemonStateLabel(connectionState, t)}
+          tone={connectionState === 'connected' ? 'ready' : connectionState === 'auth_failed' ? 'missing' : 'pending'}
         />
         <RuntimeRow
           icon='hardware-chip-outline'
@@ -129,6 +153,15 @@ export default function ConnectScreen() {
           value={probeLabel(runtimeProbe.runCommandPermission, t)}
           tone={probeTone(runtimeProbe.runCommandPermission)}
         />
+        {agentRows(daemonStatus).map((agent) => (
+          <RuntimeRow
+            key={agent.backend}
+            icon={agent.backend === 'opencode' ? 'code-slash-outline' : 'sparkles-outline'}
+            label={getAgentDisplayName(agent.backend)}
+            value={agentLabel(agent, t)}
+            tone={agentTone(agent.state)}
+          />
+        ))}
       </View>
 
       <View style={styles.actions}>
@@ -165,9 +198,49 @@ export default function ConnectScreen() {
             </>
           )}
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.secondaryButton, { borderColor: border }]}
+          onPress={refreshRuntimeStatus}
+          activeOpacity={0.8}
+          disabled={isCheckingRuntime}
+        >
+          {isCheckingRuntime ? (
+            <ActivityIndicator color={tint} />
+          ) : (
+            <>
+              <Ionicons name='sync-outline' size={20} color={tint} />
+              <ThemedText style={[styles.secondaryButtonText, { color: tint }]}>
+                {t('connect.refreshRuntimeStatus')}
+              </ThemedText>
+            </>
+          )}
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
+}
+
+function agentRows(status: RuntimeStatus | null): RuntimeAgentHealth[] {
+  return status?.agents ?? [];
+}
+
+function agentLabel(agent: RuntimeAgentHealth, t: (key: string) => string): string {
+  const state = t(getAgentStateLabelKey(agent.state));
+  return agent.version ? `${state} · ${agent.version}` : state;
+}
+
+function agentTone(state: RuntimeAgentHealth['state']): RuntimeRowProps['tone'] {
+  if (state === 'ready') return 'ready';
+  if (state === 'missing' || state === 'error') return 'missing';
+  return 'pending';
+}
+
+function daemonStateLabel(state: string, t: (key: string) => string): string {
+  if (state === 'connected') return t('connect.statusConnected');
+  if (state === 'connecting') return t('connect.statusConnecting');
+  if (state === 'auth_failed') return t('connect.statusAuthFailed');
+  return `127.0.0.1:${LOCAL_DAEMON_PORT}`;
 }
 
 function probeLabel(state: ProbeState, t: (key: string) => string): string {
