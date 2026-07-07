@@ -496,6 +496,7 @@ async function sendMessage(params, emit) {
         input,
         workspace,
         model,
+        agent: approvalMode,
         files: selectedFiles,
         signal: run.signal,
         onContent: emitAssistantContent,
@@ -579,16 +580,18 @@ function stopStream(params) {
   return { success: true, stopped: true };
 }
 
-async function sendOpenCodePrompt({ input, workspace, model, files, signal, onContent, onTool }) {
+async function sendOpenCodePrompt({ input, workspace, model, agent, files, signal, onContent, onTool }) {
   const baseUrl = await ensureOpenCodeServer();
   const attachments = await buildOpenCodeFileAttachments(files, workspace);
   const modelRef = parseOpenCodeModelRef(model);
+  const agentId = parseOpenCodeAgent(agent);
   const session = await requestOpenCodeJson(baseUrl, '/api/session', {
     method: 'POST',
     signal,
     body: JSON.stringify({
       ...(workspace ? { location: { directory: workspace } } : {}),
       ...(modelRef ? { model: modelRef } : {}),
+      ...(agentId ? { agent: agentId } : {}),
     }),
   });
   const sessionId = session && session.data && typeof session.data.id === 'string' ? session.data.id : '';
@@ -630,6 +633,10 @@ function parseOpenCodeModelRef(model) {
   const providerID = model.slice(0, index).trim();
   const id = model.slice(index + 1).trim();
   return providerID && id ? { providerID, id } : null;
+}
+
+function parseOpenCodeAgent(agent) {
+  return agent === 'build' || agent === 'plan' ? agent : null;
 }
 
 function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, handlers) {

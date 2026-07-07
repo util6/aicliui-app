@@ -135,8 +135,12 @@ describe('termuxRuntime', () => {
     expect(script).toContain('server listening on');
     expect(script).toContain("'/api/session'");
     expect(script).toContain('const modelRef = parseOpenCodeModelRef(model);');
+    expect(script).toContain('const agentId = parseOpenCodeAgent(agent);');
     expect(script).toContain('...(modelRef ? { model: modelRef } : {})');
+    expect(script).toContain('...(agentId ? { agent: agentId } : {})');
     expect(script).toContain('function parseOpenCodeModelRef(model)');
+    expect(script).toContain('function parseOpenCodeAgent(agent)');
+    expect(script).toContain("return agent === 'build' || agent === 'plan' ? agent : null;");
     expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/prompt'");
     expect(script).toContain('const selectedFiles = normalizeSelectedFiles(params.files, conversation.extra.defaultFiles, workspace);');
     expect(script).toContain("const rawPath = value.startsWith('/') || value.startsWith('~') ? value : join(root, value);");
