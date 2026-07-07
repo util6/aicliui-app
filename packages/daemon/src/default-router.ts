@@ -1,4 +1,6 @@
 import type { AgentInfo, Conversation, RuntimeStatus } from '@aicliui/shared';
+import { createDefaultAgentAdapterRegistry } from './agent-adapters/default-registry.js';
+import type { AgentAdapterRegistry } from './agent-adapters/registry.js';
 import { BridgeRouter } from './bridge-router.js';
 import { InMemoryConversationStore, type CreateConversationInput } from './conversation-store.js';
 
@@ -6,16 +8,18 @@ const startedAt = Date.now();
 
 type DefaultRouterOptions = {
   store?: InMemoryConversationStore;
+  adapters?: AgentAdapterRegistry;
 };
 
 export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRouter {
   const router = new BridgeRouter();
   const store = options?.store ?? new InMemoryConversationStore();
+  const adapters = options?.adapters ?? createDefaultAgentAdapterRegistry();
 
-  router.register('runtime.get-status', () => getRuntimeStatus());
+  router.register('runtime.get-status', async () => getRuntimeStatus(adapters));
   router.register('acp.get-available-agents', () => ({
     success: true,
-    data: getAvailableAgents(),
+    data: adapters.listAgents(),
   }));
   router.register('acp.probe-model-info', () => ({
     success: true,
@@ -46,25 +50,24 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     const params = asRecord(data);
     return store.updateConversation(stringParam(params.id), asRecord(params.updates) as Partial<Conversation>);
   });
-  router.register('chat.send.message', (data, context) => {
+  router.register('chat.send.message', async (data, context) => {
     const params = asRecord(data);
     const conversationId = stringParam(params.conversation_id);
     const input = stringParam(params.input);
     const userMsgId = typeof params.msg_id === 'string' ? params.msg_id : undefined;
     const assistantMsgId = `assistant_${userMsgId || Date.now().toString(36)}`;
-    const assistantContent = `Local daemon received: ${input}`;
+    const conversation = store.getConversation(conversationId);
+    const backend = conversation?.extra.backend || 'opencode';
+    const adapter = adapters.get(backend);
+    if (!adapter) {
+      throw new Error(`Agent adapter '${backend}' was not found`);
+    }
 
     store.addTextMessage({
       conversationId,
       msgId: userMsgId,
       position: 'right',
       content: input,
-    });
-    store.addTextMessage({
-      conversationId,
-      msgId: assistantMsgId,
-      position: 'left',
-      content: assistantContent,
     });
 
     context.emit('chat.response.stream', {
@@ -73,11 +76,40 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       conversation_id: conversationId,
       data: null,
     });
-    context.emit('chat.response.stream', {
-      type: 'content',
-      msg_id: assistantMsgId,
-      conversation_id: conversationId,
-      data: { content: assistantContent },
+
+    let assistantContent = '';
+    for await (const event of adapter.sendMessage({
+      conversationId,
+      input,
+      msgId: userMsgId,
+      workspace: conversation?.extra.workspace,
+      model: typeof conversation?.extra.currentModelId === 'string' ? conversation.extra.currentModelId : undefined,
+      sessionMode: typeof conversation?.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined,
+    })) {
+      if (event.type === 'thought') {
+        context.emit('chat.response.stream', {
+          type: 'thought',
+          msg_id: assistantMsgId,
+          conversation_id: conversationId,
+          data: { subject: event.subject, description: event.description },
+        });
+        continue;
+      }
+
+      assistantContent += event.content;
+      context.emit('chat.response.stream', {
+        type: 'content',
+        msg_id: assistantMsgId,
+        conversation_id: conversationId,
+        data: { content: event.content },
+      });
+    }
+
+    store.addTextMessage({
+      conversationId,
+      msgId: assistantMsgId,
+      position: 'left',
+      content: assistantContent,
     });
     context.emit('chat.response.stream', {
       type: 'finish',
@@ -103,13 +135,10 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
 }
 
 export function getAvailableAgents(): AgentInfo[] {
-  return [
-    { backend: 'opencode', name: 'opencode', label: 'OpenCode' },
-    { backend: 'gemini', name: 'gemini', label: 'Gemini CLI' },
-  ];
+  return createDefaultAgentAdapterRegistry().listAgents();
 }
 
-export function getRuntimeStatus(): RuntimeStatus {
+export async function getRuntimeStatus(adapters = createDefaultAgentAdapterRegistry()): Promise<RuntimeStatus> {
   return {
     daemon: {
       version: '0.1.0',
@@ -119,10 +148,7 @@ export function getRuntimeStatus(): RuntimeStatus {
       runCommandPermission: 'unknown',
       allowExternalApps: 'unknown',
     },
-    agents: [
-      { backend: 'opencode', state: 'missing' },
-      { backend: 'gemini', state: 'missing' },
-    ],
+    agents: await adapters.probeAll(),
   };
 }
 

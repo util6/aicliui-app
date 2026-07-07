@@ -60,6 +60,10 @@ export class InMemoryConversationStore {
     return [...(this.messages.get(conversationId) ?? [])];
   }
 
+  getConversation(conversationId: string): Conversation | undefined {
+    return this.conversations.get(conversationId);
+  }
+
   addTextMessage(input: {
     conversationId: string;
     msgId?: string;

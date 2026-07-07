@@ -19,6 +19,8 @@ export type Conversation = {
     agentName?: string;
     pinned?: boolean;
     pinnedAt?: number;
+    currentModelId?: string;
+    sessionMode?: string;
   };
 };
 
