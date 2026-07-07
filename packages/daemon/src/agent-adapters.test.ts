@@ -694,6 +694,122 @@ describe('agent adapters', () => {
     expect(confirmCalls).toEqual([{ sessionId: 'ses_stream', requestId: 'perm_1', reply: 'once' }]);
   });
 
+  it('forwards OpenCode question events through the mobile confirmation channel', async () => {
+    const questionReplies: unknown[] = [];
+    const questionRejects: unknown[] = [];
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async () => ({ sessionId: 'unused', text: 'unused fallback' }),
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+          streamPrompt: async function* () {
+            yield { type: 'session', sessionId: 'ses_question' };
+            yield {
+              type: 'question',
+              request: {
+                id: 'que_1',
+                sessionID: 'ses_question',
+                questions: [
+                  {
+                    header: 'Style',
+                    question: 'Which output style?',
+                    options: [
+                      { label: 'Brief', description: 'Short answer' },
+                      { label: 'Detailed', description: 'Long answer' },
+                    ],
+                  },
+                ],
+                tool: { callID: 'tool_question', messageID: 'msg_question' },
+              },
+            };
+            yield { type: 'content', content: 'after question' };
+          },
+          replyQuestion: async (input) => {
+            questionReplies.push(input);
+            return { success: true };
+          },
+          rejectQuestion: async (input) => {
+            questionRejects.push(input);
+            return { success: true };
+          },
+        },
+      },
+    );
+
+    const events = [];
+    for await (const event of adapter.sendMessage({ conversationId: 'conv-1', input: 'hello' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_question' },
+      {
+        type: 'permission',
+        confirmation: {
+          id: 'que_1',
+          title: 'OpenCode question',
+          action: 'question',
+          description: 'Style\nWhich output style?',
+          call_id: 'tool_question',
+          callId: 'tool_question',
+          command_type: 'question',
+          options: [
+            { label: 'Brief', value: 'Brief' },
+            { label: 'Detailed', value: 'Detailed' },
+            { label: 'Reject', value: 'reject' },
+          ],
+        },
+      },
+      { type: 'content', content: 'after question' },
+    ]);
+
+    await expect(
+      adapter.confirm?.({
+        conversationId: 'conv-1',
+        confirmationId: 'que_1',
+        callId: 'tool_question',
+        data: 'Detailed',
+      }),
+    ).resolves.toEqual({ success: true });
+    expect(questionReplies).toEqual([{ sessionId: 'ses_question', requestId: 'que_1', answers: [['Detailed']] }]);
+
+    const rejectAdapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async () => ({ sessionId: 'unused', text: 'unused fallback' }),
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+          streamPrompt: async function* () {
+            yield { type: 'question', request: { id: 'que_2', sessionID: 'ses_question', questions: [] } };
+          },
+          rejectQuestion: async (input) => {
+            questionRejects.push(input);
+            return { success: true };
+          },
+        },
+      },
+    );
+    for await (const _event of rejectAdapter.sendMessage({ conversationId: 'conv-1', input: 'hello' })) {
+      // Exhaust the stream so the question is registered.
+    }
+    await expect(
+      rejectAdapter.confirm?.({
+        conversationId: 'conv-1',
+        confirmationId: 'que_2',
+        callId: 'que_2',
+        data: 'reject',
+      }),
+    ).resolves.toEqual({ success: true });
+    expect(questionRejects).toContainEqual({ sessionId: 'ses_question', requestId: 'que_2' });
+  });
+
   it('sends OpenCode slash input through the command endpoint and reuses the conversation session', async () => {
     const calls: unknown[] = [];
     const adapter = createOpenCodeAdapter(

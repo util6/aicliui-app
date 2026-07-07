@@ -73,6 +73,12 @@ export type OpenCodePermissionRequest = Record<string, unknown> & {
 
 export type OpenCodePermissionReply = 'once' | 'always' | 'reject';
 
+export type OpenCodeQuestionRequest = Record<string, unknown> & {
+  id: string;
+  sessionID: string;
+  questions?: unknown[];
+};
+
 export type OpenCodeStreamEvent =
   | {
       type: 'session';
@@ -93,6 +99,14 @@ export type OpenCodeStreamEvent =
   | {
       type: 'permission_resolved';
       requestId: string;
+    }
+  | {
+      type: 'question';
+      request: OpenCodeQuestionRequest;
+    }
+  | {
+      type: 'question_resolved';
+      requestId: string;
     };
 
 export type OpenCodeConfirmPermissionInput = {
@@ -101,12 +115,25 @@ export type OpenCodeConfirmPermissionInput = {
   reply: OpenCodePermissionReply;
 };
 
+export type OpenCodeReplyQuestionInput = {
+  sessionId: string;
+  requestId: string;
+  answers: string[][];
+};
+
+export type OpenCodeRejectQuestionInput = {
+  sessionId: string;
+  requestId: string;
+};
+
 export type OpenCodeSessionClient = {
   sendPrompt(input: OpenCodePromptInput): Promise<OpenCodePromptResult>;
   sendCommand(input: OpenCodeCommandInput): Promise<OpenCodePromptResult>;
   streamPrompt?(input: OpenCodePromptInput): AsyncIterable<OpenCodeStreamEvent>;
   streamCommand?(input: OpenCodeCommandInput): AsyncIterable<OpenCodeStreamEvent>;
   confirmPermission?(input: OpenCodeConfirmPermissionInput): Promise<{ success: true }>;
+  replyQuestion?(input: OpenCodeReplyQuestionInput): Promise<{ success: true }>;
+  rejectQuestion?(input: OpenCodeRejectQuestionInput): Promise<{ success: true }>;
   listCommands(input?: OpenCodeCommandListInput): Promise<Array<{ command: string; description: string; hint?: string }>>;
   listModels?(): Promise<OpenCodeModelInfo[]>;
 };
@@ -200,6 +227,12 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
         },
         onPermissionResolved(requestId) {
           queue.push({ type: 'permission_resolved', requestId });
+        },
+        onQuestion(request) {
+          queue.push({ type: 'question', request });
+        },
+        onQuestionResolved(requestId) {
+          queue.push({ type: 'question_resolved', requestId });
         },
       },
     });
@@ -340,6 +373,19 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
       }
       return { success: true };
     },
+    async replyQuestion(input) {
+      await requestJson(`/api/session/${encodeURIComponent(input.sessionId)}/question/${encodeURIComponent(input.requestId)}/reply`, {
+        method: 'POST',
+        body: JSON.stringify({ answers: input.answers }),
+      });
+      return { success: true };
+    },
+    async rejectQuestion(input) {
+      await requestJson(`/api/session/${encodeURIComponent(input.sessionId)}/question/${encodeURIComponent(input.requestId)}/reject`, {
+        method: 'POST',
+      });
+      return { success: true };
+    },
     async listCommands(input = {}) {
       const v2Path = commandListV2Path(input);
       try {
@@ -363,6 +409,8 @@ type OpenCodeEventStreamHandlers = {
   onTool(tool: OpenCodeToolUpdate): void;
   onPermission(request: OpenCodePermissionRequest): void;
   onPermissionResolved(requestId: string): void;
+  onQuestion(request: OpenCodeQuestionRequest): void;
+  onQuestionResolved(requestId: string): void;
 };
 
 function createAsyncQueue<T>(): {
@@ -455,6 +503,7 @@ function subscribeOpenCodeSessionEvents(input: {
       const decoder = new TextDecoder();
       const extractTextDelta = createOpenCodeTextDeltaExtractor(input.sessionId);
       const extractPermissionEvent = createOpenCodePermissionEventExtractor(input.sessionId);
+      const extractQuestionEvent = createOpenCodeQuestionEventExtractor(input.sessionId);
       const parse = createSseParser((event) => {
         const text = extractTextDelta(event);
         if (text) input.handlers.onContent(text);
@@ -465,6 +514,10 @@ function subscribeOpenCodeSessionEvents(input: {
         const permissionEvent = extractPermissionEvent(event);
         if (permissionEvent?.type === 'asked') input.handlers.onPermission(permissionEvent.request);
         if (permissionEvent?.type === 'resolved') input.handlers.onPermissionResolved(permissionEvent.requestId);
+
+        const questionEvent = extractQuestionEvent(event);
+        if (questionEvent?.type === 'asked') input.handlers.onQuestion(questionEvent.request);
+        if (questionEvent?.type === 'resolved') input.handlers.onQuestionResolved(questionEvent.requestId);
       });
 
       while (true) {
@@ -603,6 +656,44 @@ function extractOpenCodePermissionResolved(event: unknown, sessionId: string): s
   const type = typeof payload.type === 'string' ? payload.type : '';
   const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
   if (type !== 'permission.v2.replied' && type !== 'permission.replied') return '';
+  if (data.sessionID !== sessionId) return '';
+  return typeof data.requestID === 'string' ? data.requestID : typeof data.id === 'string' ? data.id : '';
+}
+
+function createOpenCodeQuestionEventExtractor(
+  sessionId: string,
+): (event: unknown) => { type: 'asked'; request: OpenCodeQuestionRequest } | { type: 'resolved'; requestId: string } | null {
+  return (event) => {
+    const request = extractOpenCodeQuestionAsked(event, sessionId);
+    if (request) return { type: 'asked', request };
+    const requestId = extractOpenCodeQuestionResolved(event, sessionId);
+    if (requestId) return { type: 'resolved', requestId };
+    return null;
+  };
+}
+
+function extractOpenCodeQuestionAsked(event: unknown, sessionId: string): OpenCodeQuestionRequest | null {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'question.v2.asked' && type !== 'question.asked') return null;
+  return data.sessionID === sessionId && typeof data.id === 'string' ? (data as OpenCodeQuestionRequest) : null;
+}
+
+function extractOpenCodeQuestionResolved(event: unknown, sessionId: string): string {
+  if (!isRecord(event)) return '';
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (
+    type !== 'question.v2.replied' &&
+    type !== 'question.replied' &&
+    type !== 'question.v2.rejected' &&
+    type !== 'question.rejected'
+  ) {
+    return '';
+  }
   if (data.sessionID !== sessionId) return '';
   return typeof data.requestID === 'string' ? data.requestID : typeof data.id === 'string' ? data.id : '';
 }

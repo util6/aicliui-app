@@ -325,6 +325,100 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode question events and can reply or reject them', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init });
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_question' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'question.v2.asked',
+              data: {
+                sessionID: 'ses_question',
+                id: 'que_1',
+                questions: [
+                  {
+                    header: 'Style',
+                    question: 'Which output style?',
+                    options: [{ label: 'Brief', description: 'Short answer' }],
+                  },
+                ],
+                tool: { callID: 'tool_question', messageID: 'msg_question' },
+              },
+            },
+            {
+              type: 'question.v2.replied',
+              data: { sessionID: 'ses_question', requestID: 'que_1', answers: [['Brief']] },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_question/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_question/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_question/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'question handled' }] }],
+          });
+        }
+        if (String(url).endsWith('/api/session/ses_question/question/que_1/reply')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_question/question/que_2/reject')) {
+          return emptyResponse();
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+    await expect(client.replyQuestion!({ sessionId: 'ses_question', requestId: 'que_1', answers: [['Brief']] })).resolves.toEqual({
+      success: true,
+    });
+    await expect(client.rejectQuestion!({ sessionId: 'ses_question', requestId: 'que_2' })).resolves.toEqual({
+      success: true,
+    });
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_question' },
+      {
+        type: 'question',
+        request: expect.objectContaining({
+          id: 'que_1',
+          sessionID: 'ses_question',
+          questions: [
+            {
+              header: 'Style',
+              question: 'Which output style?',
+              options: [{ label: 'Brief', description: 'Short answer' }],
+            },
+          ],
+        }),
+      },
+      { type: 'question_resolved', requestId: 'que_1' },
+      { type: 'content', content: 'question handled' },
+    ]);
+    expect(calls.map((call) => [call.url, call.init?.method, call.init?.body ? JSON.parse(String(call.init.body)) : null])).toContainEqual([
+      'http://127.0.0.1:4096/api/session/ses_question/question/que_1/reply',
+      'POST',
+      { answers: [['Brief']] },
+    ]);
+    expect(calls.map((call) => [call.url, call.init?.method])).toContainEqual([
+      'http://127.0.0.1:4096/api/session/ses_question/question/que_2/reject',
+      'POST',
+    ]);
+  });
+
   it('falls back to context text when the OpenCode SSE stream is unavailable', async () => {
     const client = createOpenCodeClient({
       baseUrl: 'http://127.0.0.1:4096',

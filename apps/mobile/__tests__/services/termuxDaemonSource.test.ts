@@ -94,4 +94,18 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("emit('conversation.artifact', updated);");
     expect(TERMUX_DAEMON_SOURCE).toContain('function artifactStatusParam(value)');
   });
+
+  it('routes OpenCode question events through the local confirmation channel', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain('const pendingQuestions = new Map();');
+    expect(TERMUX_DAEMON_SOURCE).toContain('onQuestion: emitAssistantQuestion');
+    expect(TERMUX_DAEMON_SOURCE).toContain('onQuestionResolved: emitAssistantQuestionResolved');
+    expect(TERMUX_DAEMON_SOURCE).toContain('createOpenCodeQuestionEventExtractor');
+    expect(TERMUX_DAEMON_SOURCE).toContain("type !== 'question.v2.asked' && type !== 'question.asked'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type !== 'question.v2.replied' && type !== 'question.replied'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('function toOpenCodeQuestionConfirmation(request, conversationId, msgId, baseUrl)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("command_type: 'question'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('async function replyOpenCodeQuestion(record, answers)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('async function rejectOpenCodeQuestion(record)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("'/api/session/' + encodeURIComponent(record.sessionId) + '/question/'");
+  });
 });

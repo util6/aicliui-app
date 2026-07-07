@@ -20,6 +20,7 @@ const messages = new Map();
 const artifacts = new Map();
 const activeRuns = new Map();
 const pendingConfirmations = new Map();
+const pendingQuestions = new Map();
 const openCodeSessions = new Map();
 let openCodeServerPromise = null;
 let saveQueue = Promise.resolve();
@@ -763,6 +764,9 @@ function pendingConfirmationCount(conversationId) {
   for (const record of pendingConfirmations.values()) {
     if (record.conversationId === conversationId) count += 1;
   }
+  for (const record of pendingQuestions.values()) {
+    if (record.conversationId === conversationId) count += 1;
+  }
   return count;
 }
 
@@ -849,6 +853,9 @@ async function sendMessage(params, emit) {
     void saveStore();
     emit('confirmation.add', confirmation);
   };
+  const emitAssistantQuestion = (confirmation) => {
+    emitAssistantPermission(confirmation);
+  };
   const emitAssistantPermissionResolved = (confirmationId) => {
     if (!confirmationId) return;
     pendingConfirmations.delete(confirmationId);
@@ -859,6 +866,11 @@ async function sendMessage(params, emit) {
       void saveStore();
     }
     emit('confirmation.remove', { conversation_id: conversationId, id: confirmationId });
+  };
+  const emitAssistantQuestionResolved = (confirmationId) => {
+    if (!confirmationId) return;
+    pendingQuestions.delete(confirmationId);
+    emitAssistantPermissionResolved(confirmationId);
   };
   activeRuns.set(conversationId, run);
   conversation.status = 'running';
@@ -894,6 +906,8 @@ async function sendMessage(params, emit) {
         onTool: emitAssistantTool,
         onPermission: emitAssistantPermission,
         onPermissionResolved: emitAssistantPermissionResolved,
+        onQuestion: emitAssistantQuestion,
+        onQuestionResolved: emitAssistantQuestionResolved,
       });
       emit('chat.response.stream', {
         type: 'thought',
@@ -1037,6 +1051,8 @@ async function sendOpenCodePrompt({
   onTool,
   onPermission,
   onPermissionResolved,
+  onQuestion,
+  onQuestionResolved,
 }) {
   const baseUrl = await ensureOpenCodeServer();
   const attachments = await buildOpenCodeFileAttachments(files, workspace);
@@ -1052,6 +1068,11 @@ async function sendOpenCodePrompt({
       if (confirmation) onPermission(confirmation);
     },
     onPermissionResolved,
+    onQuestion: (request) => {
+      const confirmation = toOpenCodeQuestionConfirmation(request, conversationId, msgId, baseUrl);
+      if (confirmation) onQuestion(confirmation);
+    },
+    onQuestionResolved,
   });
 
   try {
@@ -1178,6 +1199,7 @@ function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, h
       const extractTextDelta = createOpenCodeTextDeltaExtractor(sessionId);
       const extractToolUpdate = createOpenCodeToolUpdateExtractor(sessionId);
       const extractPermissionEvent = createOpenCodePermissionEventExtractor(sessionId);
+      const extractQuestionEvent = createOpenCodeQuestionEventExtractor(sessionId);
       const parse = createSseParser((event) => {
         const text = extractTextDelta(event);
         if (text) handlers.onContent(text);
@@ -1186,6 +1208,9 @@ function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, h
         const permissionEvent = extractPermissionEvent(event);
         if (permissionEvent?.type === 'asked') handlers.onPermission(permissionEvent.request);
         if (permissionEvent?.type === 'resolved') handlers.onPermissionResolved(permissionEvent.requestId);
+        const questionEvent = extractQuestionEvent(event);
+        if (questionEvent?.type === 'asked') handlers.onQuestion(questionEvent.request);
+        if (questionEvent?.type === 'resolved') handlers.onQuestionResolved(questionEvent.requestId);
       });
       while (true) {
         const next = await reader.read();
@@ -1318,6 +1343,38 @@ function extractOpenCodePermissionResolved(event, sessionId) {
   return typeof data.requestID === 'string' ? data.requestID : typeof data.id === 'string' ? data.id : '';
 }
 
+function createOpenCodeQuestionEventExtractor(sessionId) {
+  return (event) => {
+    const request = extractOpenCodeQuestionAsked(event, sessionId);
+    if (request) return { type: 'asked', request };
+    const requestId = extractOpenCodeQuestionResolved(event, sessionId);
+    if (requestId) return { type: 'resolved', requestId };
+    return null;
+  };
+}
+
+function extractOpenCodeQuestionAsked(event, sessionId) {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'question.v2.asked' && type !== 'question.asked') return null;
+  return data.sessionID === sessionId && typeof data.id === 'string' ? data : null;
+}
+
+function extractOpenCodeQuestionResolved(event, sessionId) {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (
+    type !== 'question.v2.replied' && type !== 'question.replied' &&
+    type !== 'question.v2.rejected' && type !== 'question.rejected'
+  ) return null;
+  if (data.sessionID !== sessionId) return null;
+  return typeof data.requestID === 'string' ? data.requestID : typeof data.id === 'string' ? data.id : '';
+}
+
 function toOpenCodeConfirmation(request, conversationId, msgId, baseUrl) {
   const requestId = typeof request.id === 'string' ? request.id : '';
   const sessionId = typeof request.sessionID === 'string' ? request.sessionID : '';
@@ -1357,6 +1414,50 @@ function toOpenCodeConfirmation(request, conversationId, msgId, baseUrl) {
   return confirmation;
 }
 
+function toOpenCodeQuestionConfirmation(request, conversationId, msgId, baseUrl) {
+  const requestId = typeof request.id === 'string' ? request.id : '';
+  const sessionId = typeof request.sessionID === 'string' ? request.sessionID : '';
+  if (!requestId || !sessionId) return null;
+
+  const question = Array.isArray(request.questions) ? request.questions.find(isRecord) : undefined;
+  const header = question ? stringValue(question.header) : undefined;
+  const prompt = question ? stringValue(question.question) : undefined;
+  const description = [header, prompt].filter(Boolean).join('\n') || 'OpenCode question';
+  const source = isRecord(request.tool) ? request.tool : isRecord(request.source) ? request.source : {};
+  const callId = stringValue(source.callID) || requestId;
+  const confirmation = {
+    id: requestId,
+    msg_id: msgId,
+    conversation_id: conversationId,
+    title: 'OpenCode question',
+    action: 'question',
+    description,
+    call_id: callId,
+    callId,
+    command_type: 'question',
+    options: [...openCodeQuestionOptions(question), { label: 'Reject', value: 'reject' }],
+  };
+  pendingQuestions.set(requestId, {
+    conversationId,
+    sessionId,
+    requestId,
+    callId,
+    baseUrl,
+    confirmation,
+  });
+  return confirmation;
+}
+
+function openCodeQuestionOptions(question) {
+  const rawOptions = Array.isArray(question && question.options) ? question.options : [];
+  return rawOptions
+    .map((option) => {
+      const label = typeof option === 'string' ? option : isRecord(option) ? stringValue(option.label) : undefined;
+      return label ? { label, value: label } : null;
+    })
+    .filter(Boolean);
+}
+
 function openCodePermissionDescription(action, resources, metadata) {
   const lines = ['Action: ' + action];
   if (resources.length) lines.push('Resources:', ...resources.map((item) => '- ' + item));
@@ -1367,7 +1468,7 @@ function openCodePermissionDescription(action, resources, metadata) {
 }
 
 function listConfirmations(conversationId) {
-  return Array.from(pendingConfirmations.values())
+  return [...pendingConfirmations.values(), ...pendingQuestions.values()]
     .filter((record) => record.conversationId === conversationId)
     .map((record) => record.confirmation);
 }
@@ -1378,10 +1479,45 @@ function clearConfirmationsForConversation(conversationId, emit) {
     pendingConfirmations.delete(confirmationId);
     emit('confirmation.remove', { conversation_id: conversationId, id: confirmationId });
   }
+  for (const [confirmationId, record] of pendingQuestions) {
+    if (record.conversationId !== conversationId) continue;
+    pendingQuestions.delete(confirmationId);
+    emit('confirmation.remove', { conversation_id: conversationId, id: confirmationId });
+  }
 }
 
 async function confirmPendingPermission(params, emit) {
   const confirmationId = requiredString(params.msg_id || params.id);
+  const questionRecord = pendingQuestions.get(confirmationId);
+  if (questionRecord) {
+    if (params.data === 'reject') {
+      await rejectOpenCodeQuestion(questionRecord);
+    } else {
+      const answer = normalizeOpenCodeQuestionAnswer(params.data);
+      if (!answer.length) {
+        return {
+          success: false,
+          error: { code: 'INVALID_CONFIRMATION_REPLY', message: 'Unsupported question answer' },
+        };
+      }
+      await replyOpenCodeQuestion(questionRecord, [answer]);
+    }
+    pendingQuestions.delete(confirmationId);
+    const conversation = conversations.get(questionRecord.conversationId);
+    if (conversation && activeRuns.has(questionRecord.conversationId)) {
+      conversation.status = 'running';
+      conversation.runtime = runningRuntimeSummary(
+        'running',
+        activeRuns.get(questionRecord.conversationId)?.turnId || null,
+        pendingConfirmationCount(questionRecord.conversationId),
+      );
+      conversation.modifyTime = Date.now();
+      void saveStore();
+    }
+    emit('confirmation.remove', { conversation_id: questionRecord.conversationId, id: confirmationId });
+    return { success: true };
+  }
+
   const record = pendingConfirmations.get(confirmationId);
   if (!record) {
     return {
@@ -1436,12 +1572,36 @@ async function replyOpenCodePermission(record, reply) {
   }
 }
 
+async function replyOpenCodeQuestion(record, answers) {
+  await requestOpenCodeJson(
+    record.baseUrl,
+    '/api/session/' + encodeURIComponent(record.sessionId) + '/question/' + encodeURIComponent(record.requestId) + '/reply',
+    {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    },
+  );
+}
+
+async function rejectOpenCodeQuestion(record) {
+  await requestOpenCodeJson(
+    record.baseUrl,
+    '/api/session/' + encodeURIComponent(record.sessionId) + '/question/' + encodeURIComponent(record.requestId) + '/reject',
+    { method: 'POST' },
+  );
+}
+
 function normalizeOpenCodePermissionReply(value) {
   if (value === 'once' || value === 'always' || value === 'reject') return value;
   if (value === 'proceed_once' || value === 'allow' || value === 'approve' || value === 'yes') return 'once';
   if (value === 'proceed_always' || value === 'proceed_always_tool' || value === 'proceed_always_server') return 'always';
   if (value === 'cancel' || value === 'deny' || value === 'no') return 'reject';
   return null;
+}
+
+function normalizeOpenCodeQuestionAnswer(value) {
+  if (Array.isArray(value)) return value.filter((item) => typeof item === 'string' && item.length > 0);
+  return typeof value === 'string' && value.length > 0 ? [value] : [];
 }
 
 function openCodeToolTitle(part, state) {

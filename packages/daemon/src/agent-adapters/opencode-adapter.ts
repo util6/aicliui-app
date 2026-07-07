@@ -16,6 +16,7 @@ import type {
   OpenCodePermissionRequest,
   OpenCodePermissionReply,
   OpenCodePromptFile,
+  OpenCodeQuestionRequest,
   OpenCodeSessionClient,
   OpenCodeStreamEvent,
 } from './opencode-client.js';
@@ -42,6 +43,7 @@ export function createOpenCodeAdapter(
   const serverManager = options?.serverManager;
   const sessionByConversationId = new Map<string, string>();
   const pendingPermissions = new Map<string, { sessionId: string; requestId: string }>();
+  const pendingQuestions = new Map<string, { sessionId: string; requestId: string }>();
 
   async function getActiveClient(): Promise<OpenCodeSessionClient | null> {
     return client ?? (serverManager ? await serverManager.ensureClient() : null);
@@ -168,6 +170,49 @@ export function createOpenCodeAdapter(
       return activeClient.listCommands({ directory: input.workspace });
     },
     async confirm(input) {
+      const questionRecord = pendingQuestions.get(input.confirmationId);
+      if (questionRecord) {
+        const activeClient = await getActiveClient();
+        if (input.data === 'reject') {
+          if (!activeClient?.rejectQuestion) {
+            return {
+              success: false,
+              error: { code: 'CONFIRMATION_NOT_SUPPORTED', message: 'OpenCode client cannot reject questions' },
+            };
+          }
+
+          const result = await activeClient.rejectQuestion({
+            sessionId: questionRecord.sessionId,
+            requestId: questionRecord.requestId,
+          });
+          pendingQuestions.delete(input.confirmationId);
+          return result;
+        }
+
+        if (!activeClient?.replyQuestion) {
+          return {
+            success: false,
+            error: { code: 'CONFIRMATION_NOT_SUPPORTED', message: 'OpenCode client cannot answer questions' },
+          };
+        }
+
+        const answer = normalizeOpenCodeQuestionAnswer(input.data);
+        if (answer.length === 0) {
+          return {
+            success: false,
+            error: { code: 'INVALID_CONFIRMATION_REPLY', message: 'Unsupported OpenCode question answer' },
+          };
+        }
+
+        const result = await activeClient.replyQuestion({
+          sessionId: questionRecord.sessionId,
+          requestId: questionRecord.requestId,
+          answers: [answer],
+        });
+        pendingQuestions.delete(input.confirmationId);
+        return result;
+      }
+
       const record = pendingPermissions.get(input.confirmationId);
       if (!record) {
         return {
@@ -246,6 +291,26 @@ export function createOpenCodeAdapter(
         }
         case 'permission_resolved':
           pendingPermissions.delete(event.requestId);
+          yield {
+            type: 'permission_resolved',
+            confirmationId: event.requestId,
+          };
+          break;
+        case 'question': {
+          const confirmation = toOpenCodeQuestionConfirmation(event.request);
+          if (!confirmation) break;
+          pendingQuestions.set(confirmation.id, {
+            sessionId: event.request.sessionID,
+            requestId: event.request.id,
+          });
+          yield {
+            type: 'permission',
+            confirmation,
+          };
+          break;
+        }
+        case 'question_resolved':
+          pendingQuestions.delete(event.requestId);
           yield {
             type: 'permission_resolved',
             confirmationId: event.requestId,
@@ -369,6 +434,39 @@ function toOpenCodeConfirmation(request: OpenCodePermissionRequest): CliConfirma
   };
 }
 
+function toOpenCodeQuestionConfirmation(request: OpenCodeQuestionRequest): CliConfirmation | null {
+  const requestId = request.id;
+  const sessionId = request.sessionID;
+  if (!requestId || !sessionId) return null;
+
+  const question = Array.isArray(request.questions) ? request.questions.find(isRecord) : undefined;
+  const header = question ? stringValue(question.header) : undefined;
+  const prompt = question ? stringValue(question.question) : undefined;
+  const description = [header, prompt].filter(Boolean).join('\n') || 'OpenCode question';
+  const source = isRecord(request.tool) ? request.tool : isRecord(request.source) ? request.source : {};
+  const callId = stringValue(source.callID) || requestId;
+  return {
+    id: requestId,
+    title: 'OpenCode question',
+    action: 'question',
+    description,
+    call_id: callId,
+    callId,
+    command_type: 'question',
+    options: [...openCodeQuestionOptions(question), { label: 'Reject', value: 'reject' }],
+  };
+}
+
+function openCodeQuestionOptions(question: Record<string, unknown> | undefined): CliConfirmation['options'] {
+  const rawOptions = Array.isArray(question?.options) ? question.options : [];
+  return rawOptions
+    .map((option) => {
+      const label = typeof option === 'string' ? option : isRecord(option) ? stringValue(option.label) : undefined;
+      return label ? { label, value: label } : null;
+    })
+    .filter((option): option is { label: string; value: string } => option !== null);
+}
+
 function openCodePermissionDescription(action: string, resources: string[], metadata: unknown): string {
   const lines = [`Action: ${action}`];
   if (resources.length) lines.push('Resources:', ...resources.map((item) => `- ${item}`));
@@ -386,6 +484,13 @@ function normalizeOpenCodePermissionReply(value: unknown): OpenCodePermissionRep
   }
   if (value === 'cancel' || value === 'deny' || value === 'no') return 'reject';
   return null;
+}
+
+function normalizeOpenCodeQuestionAnswer(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+  }
+  return typeof value === 'string' && value.length > 0 ? [value] : [];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
