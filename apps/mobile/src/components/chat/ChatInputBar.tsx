@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, TextInput, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -13,11 +13,18 @@ type ChatInputBarProps = {
   canSend?: boolean;
   queuedCount?: number;
   queueWarning?: QueueWarningReason | null;
+  draft?: ChatInputDraft | null;
+  onDraftConsumed?: (draftId: string) => void;
   disabled?: boolean;
   slashCommands?: SlashCommandItem[];
 };
 
 type QueueWarningReason = 'emptyInput' | 'inputTooLong' | 'tooManyFiles' | 'queueFull' | 'queueTooLarge';
+type ChatInputDraft = {
+  id: string;
+  text: string;
+  files?: string[];
+};
 
 export function ChatInputBar({
   onSend,
@@ -26,6 +33,8 @@ export function ChatInputBar({
   canSend = true,
   queuedCount = 0,
   queueWarning = null,
+  draft = null,
+  onDraftConsumed,
   disabled,
   slashCommands = [],
 }: ChatInputBarProps) {
@@ -39,6 +48,8 @@ export function ChatInputBar({
   const textColor = useThemeColor({}, 'text');
   const textSecondary = useThemeColor({}, 'textSecondary');
   const [text, setText] = useState('');
+  const [draftFiles, setDraftFiles] = useState<string[]>([]);
+  const [loadedDraftId, setLoadedDraftId] = useState<string | null>(null);
   const isDisabled = disabled === true;
   const canQueue = !isDisabled && !canSend && isStreaming === true;
   const sendBlocked = isDisabled || (!canSend && !canQueue);
@@ -46,6 +57,13 @@ export function ChatInputBar({
   const matchingSlashCommands =
     slashQuery === null ? [] : filterSlashCommands(slashCommands, slashQuery).slice(0, 6);
   const showSlashCommands = canSend && !sendBlocked && matchingSlashCommands.length > 0;
+
+  useEffect(() => {
+    if (!draft || draft.id === loadedDraftId) return;
+    setText(draft.text);
+    setDraftFiles(draft.files ?? []);
+    setLoadedDraftId(draft.id);
+  }, [draft, loadedDraftId]);
 
   const handleSend = () => {
     if (sendBlocked) return;
@@ -56,8 +74,16 @@ export function ChatInputBar({
 
     const trimmed = text.trim();
     if (!trimmed) return;
-    onSend(trimmed);
+    if (draftFiles.length > 0) {
+      onSend(trimmed, draftFiles);
+    } else {
+      onSend(trimmed);
+    }
     setText('');
+    setDraftFiles([]);
+    if (loadedDraftId) {
+      onDraftConsumed?.(loadedDraftId);
+    }
   };
 
   const handleSelectSlashCommand = (command: SlashCommandItem) => {

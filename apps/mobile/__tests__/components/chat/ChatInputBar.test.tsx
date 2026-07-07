@@ -123,4 +123,30 @@ describe('ChatInputBar slash commands', () => {
     expect(screen.getByText('warning-outline')).toBeTruthy();
     expect(screen.getByText('Queue is full. Remove a command before adding more.')).toBeTruthy();
   });
+
+  it('loads an external draft and sends its files', () => {
+    const onSend = jest.fn();
+    const onDraftConsumed = jest.fn();
+    const screen = render(
+      <ChatInputBar
+        onSend={onSend}
+        draft={{
+          id: 'queue-1',
+          text: 'queued command',
+          files: ['src/App.tsx'],
+        }}
+        onDraftConsumed={onDraftConsumed}
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('chat.inputPlaceholder');
+    expect(input.props.value).toBe('queued command');
+
+    fireEvent.changeText(input, 'edited command');
+    fireEvent.press(screen.getByText('arrow-up-circle'));
+
+    expect(onSend).toHaveBeenCalledWith('edited command', ['src/App.tsx']);
+    expect(onDraftConsumed).toHaveBeenCalledWith('queue-1');
+    expect(input.props.value).toBe('');
+  });
 });
