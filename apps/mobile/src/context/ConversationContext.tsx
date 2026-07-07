@@ -77,6 +77,12 @@ type ConversationContextType = {
   renameConversation: (id: string, name: string) => Promise<boolean>;
 };
 
+type StreamStatusMessage = {
+  type?: string;
+  conversation_id?: string;
+  data?: unknown;
+};
+
 const ConversationContext = createContext<ConversationContextType>({
   conversations: [],
   isLoading: false,
@@ -100,6 +106,7 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
   const [availableAgents, setAvailableAgents] = useState<AgentInfo[]>([]);
   const [activeConversationId, setActiveConversationIdRaw] = useState<string | null>(null);
   const [pendingAgent, setPendingAgent] = useState<AgentInfo | null>(null);
+  const completedConversationIdsRef = useRef<Set<string>>(new Set());
   const { connectionState, config } = useConnection();
 
   // When selecting an existing conversation, clear pendingAgent
@@ -174,13 +181,20 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
     const debounceRef = { timer: null as ReturnType<typeof setTimeout> | null };
 
     const unsub = bridge.on('chat.response.stream', (data: unknown) => {
-      const raw = data as { type?: string; conversation_id?: string; data?: unknown };
-      const status = getStreamConversationStatus(raw);
-      if (!status || !raw.conversation_id) return;
+      const raw = data as StreamStatusMessage;
+      const conversationId = raw.conversation_id;
+      if (!conversationId) return;
+      const status = getStreamConversationStatus(raw, completedConversationIdsRef.current);
+      if (!status) return;
 
-      setConversations((prev) => patchConversationStatus(prev, raw.conversation_id!, status));
+      if (status === 'running') {
+        completedConversationIdsRef.current.delete(conversationId);
+      } else {
+        completedConversationIdsRef.current.add(conversationId);
+      }
+
+      setConversations((prev) => patchConversationStatus(prev, conversationId, status));
       if (status !== 'finished') return;
-
       if (debounceRef.timer) clearTimeout(debounceRef.timer);
       debounceRef.timer = setTimeout(() => void refresh(), 1000);
     });
@@ -339,15 +353,31 @@ export function useConversations() {
   return useContext(ConversationContext);
 }
 
-function getStreamConversationStatus(message: {
-  type?: string;
-  data?: unknown;
-}): Conversation['status'] | null {
+function getStreamConversationStatus(
+  message: StreamStatusMessage,
+  completedConversationIds: Set<string>,
+): Conversation['status'] | null {
   if (message.type === 'start') return 'running';
   if (message.type === 'finish' || message.type === 'error') return 'finished';
   if (isErrorTipMessage(message)) return 'finished';
   if (message.type === 'agent_status' && isTerminalAgentStatus(message.data)) return 'finished';
-  return null;
+  if (!isGeneratingStreamMessage(message.type)) return null;
+  return message.conversation_id && completedConversationIds.has(message.conversation_id) ? null : 'running';
+}
+
+function isGeneratingStreamMessage(type: unknown): boolean {
+  return (
+    type === 'content' ||
+    type === 'thought' ||
+    type === 'thinking' ||
+    type === 'tool_call' ||
+    type === 'tool_group' ||
+    type === 'acp_tool_call' ||
+    type === 'codex_tool_call' ||
+    type === 'acp_permission' ||
+    type === 'permission' ||
+    type === 'plan'
+  );
 }
 
 function patchConversationStatus(

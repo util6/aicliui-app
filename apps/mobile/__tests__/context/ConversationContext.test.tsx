@@ -79,6 +79,30 @@ describe('ConversationContext stream status sync', () => {
     expect(screen.getByTestId('status').props.children).toBe('running');
   });
 
+  it('marks a conversation running when generation output arrives before start', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-user-conversations') return Promise.resolve([conversationWithStatus('finished')]);
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <Probe />
+      </ConversationProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('status').props.children).toBe('finished'));
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'thought',
+        conversation_id: 'conv-1',
+      });
+    });
+
+    expect(screen.getByTestId('status').props.children).toBe('running');
+  });
+
   it('marks a conversation finished when a stream terminates', async () => {
     let persistedStatus: Conversation['status'] = 'running';
     mockRequest.mockImplementation((name: string) => {
@@ -111,5 +135,42 @@ describe('ConversationContext stream status sync', () => {
     await waitFor(() =>
       expect(mockRequest.mock.calls.filter(([name]) => name === 'database.get-user-conversations')).toHaveLength(2),
     );
+  });
+
+  it('ignores late generation output after a stream terminates until the next start', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-user-conversations') return Promise.resolve([conversationWithStatus('running')]);
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <Probe />
+      </ConversationProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('status').props.children).toBe('running'));
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'finish',
+        conversation_id: 'conv-1',
+      });
+      listeners.get('chat.response.stream')?.({
+        type: 'thought',
+        conversation_id: 'conv-1',
+      });
+    });
+
+    expect(screen.getByTestId('status').props.children).toBe('finished');
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'start',
+        conversation_id: 'conv-1',
+      });
+    });
+
+    expect(screen.getByTestId('status').props.children).toBe('running');
   });
 });
