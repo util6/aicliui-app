@@ -168,13 +168,18 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
     return () => clearInterval(timer);
   }, [connectionState, refresh]);
 
-  // Refresh conversation list on chat finish events (debounced)
+  // Keep sidebar status in sync with live streams, then refresh after terminal
+  // events to pick up persisted metadata such as modifyTime.
   useEffect(() => {
     const debounceRef = { timer: null as ReturnType<typeof setTimeout> | null };
 
     const unsub = bridge.on('chat.response.stream', (data: unknown) => {
-      const raw = data as { type: string };
-      if (raw.type !== 'finish') return;
+      const raw = data as { type?: string; conversation_id?: string; data?: unknown };
+      const status = getStreamConversationStatus(raw);
+      if (!status || !raw.conversation_id) return;
+
+      setConversations((prev) => patchConversationStatus(prev, raw.conversation_id!, status));
+      if (status !== 'finished') return;
 
       if (debounceRef.timer) clearTimeout(debounceRef.timer);
       debounceRef.timer = setTimeout(() => void refresh(), 1000);
@@ -332,4 +337,46 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
 
 export function useConversations() {
   return useContext(ConversationContext);
+}
+
+function getStreamConversationStatus(message: {
+  type?: string;
+  data?: unknown;
+}): Conversation['status'] | null {
+  if (message.type === 'start') return 'running';
+  if (message.type === 'finish' || message.type === 'error') return 'finished';
+  if (isErrorTipMessage(message)) return 'finished';
+  if (message.type === 'agent_status' && isTerminalAgentStatus(message.data)) return 'finished';
+  return null;
+}
+
+function patchConversationStatus(
+  conversations: Conversation[],
+  conversationId: string,
+  status: Conversation['status'],
+): Conversation[] {
+  let changed = false;
+  const next = conversations.map((conversation) => {
+    if (conversation.id !== conversationId || conversation.status === status) {
+      return conversation;
+    }
+    changed = true;
+    return { ...conversation, status };
+  });
+  return changed ? next : conversations;
+}
+
+function isErrorTipMessage(message: { type?: string; data?: unknown }): boolean {
+  if (message.type !== 'tips') return false;
+  return (
+    typeof message.data === 'object' &&
+    message.data !== null &&
+    (message.data as { type?: unknown }).type === 'error'
+  );
+}
+
+function isTerminalAgentStatus(data: unknown): boolean {
+  if (typeof data !== 'object' || data === null) return false;
+  const status = (data as { status?: unknown }).status;
+  return status === 'error' || status === 'disconnected';
 }
