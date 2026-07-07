@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildGeminiCommand, parseGeminiStreamJsonLine } from './agent-adapters/gemini-adapter.js';
+import { buildGeminiCommand, createGeminiAdapter, parseGeminiStreamJsonLine } from './agent-adapters/gemini-adapter.js';
 import { buildOpenCodeServeCommand, createOpenCodeAdapter } from './agent-adapters/opencode-adapter.js';
 import { createAgentAdapterRegistry } from './agent-adapters/registry.js';
 import type { CliAgentAdapter } from './agent-adapters/types.js';
@@ -37,6 +37,86 @@ describe('agent adapters', () => {
       content: ' world',
     });
     expect(parseGeminiStreamJsonLine('not json')).toBeNull();
+  });
+
+  it('executes Gemini CLI and streams parsed content from stdout', async () => {
+    const calls: unknown[] = [];
+    const adapter = createGeminiAdapter({
+      commandExists: async () => true,
+      runCommand: async (spec, options) => {
+        calls.push({ spec, cwd: options?.cwd });
+        options?.onStdout?.(Buffer.from(JSON.stringify({ value: 'hello ' }) + '\n'));
+        options?.onStdout?.(Buffer.from(JSON.stringify({ delta: 'world' }) + '\n'));
+        return { stdout: '', stderr: '' };
+      },
+    });
+
+    const events = [];
+    for await (const event of adapter.sendMessage({
+      conversationId: 'conv-1',
+      input: 'hello',
+      workspace: '/tmp/project',
+      model: 'gemini-2.5-pro',
+      sessionMode: 'yolo',
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      {
+        type: 'thought',
+        subject: 'Gemini CLI',
+        description: 'gemini -p hello --output-format stream-json --model gemini-2.5-pro --approval-mode yolo',
+      },
+      { type: 'content', content: 'hello ' },
+      { type: 'content', content: 'world' },
+    ]);
+    expect(calls).toEqual([
+      {
+        spec: {
+          command: 'gemini',
+          args: ['-p', 'hello', '--output-format', 'stream-json', '--model', 'gemini-2.5-pro', '--approval-mode', 'yolo'],
+        },
+        cwd: '/tmp/project',
+      },
+    ]);
+  });
+
+  it('passes selected file context to Gemini prompts', async () => {
+    const calls: unknown[] = [];
+    const adapter = createGeminiAdapter({
+      commandExists: async () => true,
+      runCommand: async (spec, options) => {
+        calls.push({ spec, cwd: options?.cwd });
+        return { stdout: JSON.stringify({ value: 'done' }) + '\n', stderr: '' };
+      },
+    });
+
+    const events = [];
+    for await (const event of adapter.sendMessage({
+      conversationId: 'conv-1',
+      input: 'review',
+      workspace: '/tmp/project',
+      files: ['/tmp/project/README.md', '/tmp/project/src/app.ts'],
+    })) {
+      events.push(event);
+    }
+
+    expect(events.at(-1)).toEqual({ type: 'content', content: 'done' });
+    expect(calls).toEqual([
+      {
+        spec: {
+          command: 'gemini',
+          args: [
+            '-p',
+            'review\n\nSelected files:\n- README.md\n- src/app.ts',
+            '--output-format',
+            'stream-json',
+          ],
+        },
+        cwd: '/tmp/project',
+      },
+    ]);
   });
 
   it('builds the OpenCode local API server command shape', () => {

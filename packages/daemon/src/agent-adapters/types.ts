@@ -110,9 +110,22 @@ export type CommandSpec = {
   args: string[];
 };
 
+export type CommandRunOptions = {
+  cwd?: string;
+  signal?: AbortSignal;
+  onStdout?: (chunk: Buffer) => void;
+  onStderr?: (chunk: Buffer) => void;
+};
+
+export type CommandRunResult = {
+  stdout: string;
+  stderr: string;
+};
+
 export type CommandRunner = {
   commandExists(command: string): Promise<boolean>;
   readVersion?(command: string, args?: string[]): Promise<string | undefined>;
+  runCommand?(spec: CommandSpec, options?: CommandRunOptions): Promise<CommandRunResult>;
 };
 
 export type CliAgentAdapter = {

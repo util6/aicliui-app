@@ -1,5 +1,6 @@
+import { relative } from 'node:path';
 import type { AgentHealth } from '@aicliui/shared';
-import type { CliAgentAdapter, CommandRunner, CommandSpec, SendMessageInput } from './types.js';
+import type { CliAgentAdapter, CliAgentEvent, CommandRunner, CommandSpec, SendMessageInput } from './types.js';
 
 export type GeminiCommandOptions = {
   prompt: string;
@@ -48,8 +49,9 @@ export function createGeminiAdapter(runner: CommandRunner): CliAgentAdapter {
       };
     },
     async *sendMessage(input: SendMessageInput) {
+      const prompt = appendSelectedFilesToPrompt(input.input, input.files ?? [], input.workspace);
       const command = buildGeminiCommand({
-        prompt: input.input,
+        prompt,
         model: input.model,
         approvalMode: input.sessionMode,
       });
@@ -58,10 +60,128 @@ export function createGeminiAdapter(runner: CommandRunner): CliAgentAdapter {
         subject: 'Gemini CLI',
         description: [command.command, ...command.args].join(' '),
       };
-      yield {
-        type: 'content',
-        content: 'Gemini CLI execution is queued for the Termux runtime adapter.',
+
+      if (!runner.runCommand) {
+        yield {
+          type: 'content',
+          content: 'Gemini CLI execution is queued for the Termux runtime adapter.',
+        };
+        return;
+      }
+
+      let lineBuffer = '';
+      let emittedContent = '';
+      const queue = createAsyncQueue<CliAgentEvent>();
+      const emitContent = (content: string) => {
+        if (!content) return;
+        emittedContent += content;
+        queue.push({ type: 'content', content });
       };
+      const handleStdout = (chunk: Buffer) => {
+        const lines = (lineBuffer + chunk.toString()).split(/\r?\n/);
+        lineBuffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const parsed = parseGeminiStreamJsonLine(line);
+          if (parsed) emitContent(parsed.content);
+        }
+      };
+
+      const run = runner.runCommand(command, {
+        cwd: input.workspace || process.env.HOME || process.cwd(),
+        onStdout: handleStdout,
+      });
+      const finalized = run.then(
+        (result) => {
+          const tail = parseGeminiStreamJsonLine(lineBuffer);
+          if (tail) emitContent(tail.content);
+          if (!emittedContent) {
+            const fallback = extractGeminiStreamText(result.stdout) || result.stdout.trim();
+            if (fallback) emitContent(fallback);
+          }
+          queue.close();
+          return result;
+        },
+        (error) => {
+          queue.fail(error);
+          return { stdout: '', stderr: '' };
+        },
+      );
+
+      for await (const event of queue) {
+        yield event;
+      }
+      await finalized;
+    },
+  };
+}
+
+function extractGeminiStreamText(stdout: string): string {
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => parseGeminiStreamJsonLine(line)?.content ?? '')
+    .join('');
+}
+
+function appendSelectedFilesToPrompt(input: string, files: string[], workspace?: string): string {
+  if (files.length === 0) return input;
+  const root = workspace || process.cwd();
+  const fileList = files.map((filePath) => `- ${normalizeRelativePath(relative(root, filePath))}`).join('\n');
+  return `${input}\n\nSelected files:\n${fileList}`;
+}
+
+function normalizeRelativePath(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
+function createAsyncQueue<T>(): {
+  push: (value: T) => void;
+  close: () => void;
+  fail: (error: unknown) => void;
+  [Symbol.asyncIterator]: () => AsyncIterator<T>;
+} {
+  const values: T[] = [];
+  const waiters: Array<{
+    resolve: (result: IteratorResult<T>) => void;
+    reject: (error: unknown) => void;
+  }> = [];
+  let closed = false;
+  let failure: unknown;
+
+  const next = (): Promise<IteratorResult<T>> => {
+    if (values.length > 0) return Promise.resolve({ value: values.shift() as T, done: false });
+    if (failure !== undefined) return Promise.reject(failure);
+    if (closed) return Promise.resolve({ value: undefined, done: true });
+    return new Promise<IteratorResult<T>>((resolve, reject) => {
+      waiters.push({ resolve, reject });
+    });
+  };
+
+  return {
+    push(value) {
+      if (closed || failure !== undefined) return;
+      const waiter = waiters.shift();
+      if (waiter) {
+        waiter.resolve({ value, done: false });
+        return;
+      }
+      values.push(value);
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      for (const waiter of waiters.splice(0)) {
+        waiter.resolve({ value: undefined, done: true });
+      }
+    },
+    fail(error) {
+      if (closed || failure !== undefined) return;
+      failure = error;
+      for (const waiter of waiters.splice(0)) {
+        waiter.reject(error);
+      }
+    },
+    [Symbol.asyncIterator]() {
+      return { next };
     },
   };
 }
