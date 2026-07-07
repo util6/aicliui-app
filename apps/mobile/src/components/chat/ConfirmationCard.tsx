@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
@@ -10,27 +10,64 @@ type ConfirmationCardProps = {
   msgId?: string;
 };
 
-export function ConfirmationCard({ content }: ConfirmationCardProps) {
+type ConfirmationOption = {
+  label: string;
+  value: string;
+};
+
+export function ConfirmationCard({ content, msgId }: ConfirmationCardProps) {
   const { t } = useTranslation();
   const { confirmAction } = useChat();
   const confirmBg = useThemeColor({}, 'confirmBg');
   const confirmBorder = useThemeColor({}, 'confirmBorder');
   const success = useThemeColor({}, 'success');
+  const error = useThemeColor({}, 'error');
+  const tipErrorBg = useThemeColor({}, 'tipErrorBg');
+  const tipSuccessBg = useThemeColor({}, 'tipSuccessBg');
   const surface = useThemeColor({}, 'surface');
   const border = useThemeColor({}, 'border');
   const textSecondary = useThemeColor({}, 'textSecondary');
+  const [respondingValue, setRespondingValue] = useState<string | null>(null);
+  const [hasResponded, setHasResponded] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // ACP permission format: { confirmation: { id, action, description, callId/call_id, options } }
   const confirmation = content.confirmation || content;
-  const confirmationId = confirmation.id || '';
-  const title = confirmation.title || confirmation.action || t('chat.permissionRequest');
-  const description = confirmation.description || '';
-  const options = confirmation.options || [];
-  const callId = confirmation.callId || confirmation.call_id || '';
+  const toolCall = recordOrUndefined(confirmation.tool_call);
+  const rawInput = recordOrUndefined(toolCall?.raw_input);
+  const confirmationId = stringOrUndefined(confirmation.id) ?? msgId ?? '';
+  const title =
+    stringOrUndefined(confirmation.title) ??
+    stringOrUndefined(confirmation.action) ??
+    stringOrUndefined(toolCall?.title) ??
+    stringOrUndefined(rawInput?.description) ??
+    t('chat.permissionRequest');
+  const description =
+    stringOrUndefined(confirmation.description) ??
+    (stringOrUndefined(rawInput?.description) !== title ? stringOrUndefined(rawInput?.description) : undefined) ??
+    stringOrUndefined(rawInput?.command) ??
+    '';
+  const options = normalizeOptions(confirmation.options);
+  const callId =
+    stringOrUndefined(confirmation.callId) ??
+    stringOrUndefined(confirmation.call_id) ??
+    stringOrUndefined(toolCall?.tool_call_id) ??
+    msgId ??
+    '';
+  const isResponding = respondingValue !== null;
 
-  const handleConfirm = (optionValue: string) => {
-    if (confirmationId && callId) {
-      confirmAction(confirmationId, callId, optionValue);
+  const handleConfirm = async (optionValue: string) => {
+    if (isResponding || hasResponded || !confirmationId || !callId) return;
+
+    setRespondingValue(optionValue);
+    setErrorMessage(null);
+    try {
+      await confirmAction(confirmationId, callId, optionValue);
+      setHasResponded(true);
+    } catch (e) {
+      setErrorMessage(formatConfirmationError(e, t('chat.confirmationFailed')));
+    } finally {
+      setRespondingValue(null);
     }
   };
 
@@ -42,34 +79,59 @@ export function ConfirmationCard({ content }: ConfirmationCardProps) {
           {description}
         </ThemedText>
       ) : null}
-      <View style={styles.actions}>
-        {options.map((opt: any, i: number) => {
-          const isApprove =
-            opt.value === 'allow' ||
-            opt.value === 'approve' ||
-            opt.value === 'yes' ||
-            opt.label?.toLowerCase().includes('allow') ||
-            opt.label?.toLowerCase().includes('approve');
+      {!hasResponded && (
+        <View style={styles.actions}>
+          {options.map((opt, i) => {
+            const isApprove =
+              opt.value === 'allow' ||
+              opt.value === 'approve' ||
+              opt.value === 'once' ||
+              opt.value === 'always' ||
+              opt.value === 'proceed_once' ||
+              opt.value === 'proceed_always' ||
+              opt.value === 'yes' ||
+              opt.label?.toLowerCase().includes('allow') ||
+              opt.label?.toLowerCase().includes('approve');
+            const disabled = isResponding;
+            const isCurrentResponse = respondingValue === opt.value;
 
-          return (
-            <TouchableOpacity
-              key={i}
-              style={[
-                styles.button,
-                isApprove
-                  ? { backgroundColor: success }
-                  : { backgroundColor: surface, borderWidth: 1, borderColor: border },
-              ]}
-              onPress={() => handleConfirm(opt.value)}
-              activeOpacity={0.7}
-            >
-              <ThemedText style={[styles.buttonText, isApprove ? styles.approveText : { color: textSecondary }]}>
-                {opt.label || (isApprove ? t('chat.approve') : t('chat.deny'))}
-              </ThemedText>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+            return (
+              <TouchableOpacity
+                key={i}
+                style={[
+                  styles.button,
+                  isApprove
+                    ? { backgroundColor: success }
+                    : { backgroundColor: surface, borderWidth: 1, borderColor: border },
+                  disabled && styles.disabledButton,
+                ]}
+                onPress={() => handleConfirm(opt.value)}
+                disabled={disabled}
+                accessibilityState={{ disabled }}
+                activeOpacity={0.7}
+              >
+                <ThemedText style={[styles.buttonText, isApprove ? styles.approveText : { color: textSecondary }]}>
+                  {isCurrentResponse
+                    ? t('chat.processing')
+                    : opt.label || (isApprove ? t('chat.approve') : t('chat.deny'))}
+                </ThemedText>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+      {errorMessage ? (
+        <View style={[styles.statusBox, { backgroundColor: tipErrorBg }]}>
+          <ThemedText style={[styles.statusText, { color: error }]}>{errorMessage}</ThemedText>
+        </View>
+      ) : null}
+      {hasResponded ? (
+        <View style={[styles.statusBox, { backgroundColor: tipSuccessBg }]}>
+          <ThemedText style={[styles.statusText, { color: success }]}>
+            {t('chat.responseSentSuccessfully')}
+          </ThemedText>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -101,6 +163,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
+  disabledButton: {
+    opacity: 0.55,
+  },
   buttonText: {
     fontSize: 14,
     fontWeight: '600',
@@ -108,4 +173,42 @@ const styles = StyleSheet.create({
   approveText: {
     color: '#fff',
   },
+  statusBox: {
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  statusText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
 });
+
+function normalizeOptions(options: unknown): ConfirmationOption[] {
+  if (!Array.isArray(options)) return [];
+
+  return options
+    .map((option, index) => {
+      if (typeof option !== 'object' || option === null) return null;
+      const data = option as { label?: unknown; value?: unknown; name?: unknown; option_id?: unknown };
+      const value = stringOrUndefined(data.value) ?? stringOrUndefined(data.option_id);
+      if (!value) return null;
+      const label = stringOrUndefined(data.label) ?? stringOrUndefined(data.name) ?? value ?? `Option ${index + 1}`;
+      return { label, value };
+    })
+    .filter((option): option is ConfirmationOption => option !== null);
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function recordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
+}
+
+function formatConfirmationError(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error.length > 0) return error;
+  return fallback;
+}

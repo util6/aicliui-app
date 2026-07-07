@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Text } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { ChatProvider, useChat } from '@/src/context/ChatContext';
@@ -59,6 +59,28 @@ function RuntimeProbe() {
         send
       </Text>
     </>
+  );
+}
+
+function ConfirmProbe() {
+  const { loadConversation, confirmAction } = useChat();
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    loadConversation('conv-1');
+  }, [loadConversation]);
+
+  return (
+    <Text
+      testID='confirm-action'
+      onPress={() => {
+        void confirmAction('permission-1', 'call-1', 'reject')
+          .then(() => setStatus('sent'))
+          .catch((error) => setStatus(error instanceof Error ? error.message : String(error)));
+      }}
+    >
+      {status}
+    </Text>
   );
 }
 
@@ -479,5 +501,41 @@ describe('ChatContext runtime state', () => {
 
     expect(screen.getByTestId('confirmation-titles').props.children).toBe('Updated permission');
     expect(screen.getByTestId('permission-titles').props.children).toBe('Updated permission');
+  });
+
+  it('surfaces bridge confirmation failures to the caller', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-conversation-messages') return Promise.resolve([]);
+      if (name === 'conversation.get') return Promise.resolve(null);
+      if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
+      if (name === 'confirmation.list') return Promise.resolve([]);
+      if (name === 'confirmation.confirm') {
+        return Promise.resolve({
+          success: false,
+          error: { code: 'CONFIRMATION_NOT_FOUND', message: 'Confirmation not found' },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ChatProvider>
+        <ConfirmProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledWith('confirmation.list', { conversation_id: 'conv-1' }));
+
+    fireEvent.press(screen.getByTestId('confirm-action'));
+
+    await waitFor(() => expect(screen.getByTestId('confirm-action').props.children).toBe('Confirmation not found'));
+    expect(mockRequest).toHaveBeenCalledWith('confirmation.confirm', {
+      conversation_id: 'conv-1',
+      msg_id: 'permission-1',
+      callId: 'call-1',
+      data: 'reject',
+    });
+    warnSpy.mockRestore();
   });
 });

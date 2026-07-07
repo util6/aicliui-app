@@ -26,7 +26,7 @@ type ChatContextType = {
   loadConversation: (id: string) => void;
   sendMessage: (text: string, files?: string[]) => void;
   stopGeneration: () => void;
-  confirmAction: (confirmationId: string, callId: string, confirmKey: string) => void;
+  confirmAction: (confirmationId: string, callId: string, confirmKey: string) => Promise<void>;
 };
 
 const ChatContext = createContext<ChatContextType>({
@@ -40,7 +40,7 @@ const ChatContext = createContext<ChatContextType>({
   loadConversation: () => {},
   sendMessage: () => {},
   stopGeneration: () => {},
-  confirmAction: () => {},
+  confirmAction: () => Promise.resolve(),
 });
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
@@ -376,15 +376,26 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const confirmAction = useCallback(
     (confirmationId: string, callId: string, confirmKey: string) => {
-      if (!conversationId) return;
-      bridge
+      if (!conversationId) {
+        return Promise.reject(new Error('No active conversation'));
+      }
+      return bridge
         .request('confirmation.confirm', {
           conversation_id: conversationId,
           msg_id: confirmationId,
           callId,
           data: confirmKey,
         })
-        .catch((e) => console.warn('[Chat] confirm failed:', e));
+        .then((response) => {
+          const errorMessage = getBridgeFailureMessage(response);
+          if (errorMessage) {
+            throw new Error(errorMessage);
+          }
+        })
+        .catch((e) => {
+          console.warn('[Chat] confirm failed:', e);
+          throw e;
+        });
     },
     [conversationId],
   );
@@ -504,4 +515,17 @@ function removeConfirmationMessages(messages: TMessage[], confirmationId: unknow
 
 function isConfirmationMessage(message: TMessage): boolean {
   return message.type === 'acp_permission' || message.type === 'codex_permission';
+}
+
+function getBridgeFailureMessage(response: unknown): string | null {
+  if (typeof response !== 'object' || response === null) return null;
+  const result = response as { success?: unknown; error?: unknown };
+  if (result.success !== false) return null;
+  if (typeof result.error === 'object' && result.error !== null) {
+    const error = result.error as { message?: unknown; code?: unknown };
+    if (typeof error.message === 'string' && error.message.length > 0) return error.message;
+    if (typeof error.code === 'string' && error.code.length > 0) return error.code;
+  }
+  if (typeof result.error === 'string' && result.error.length > 0) return result.error;
+  return 'Confirmation failed';
 }
