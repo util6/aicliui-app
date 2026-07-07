@@ -24,6 +24,30 @@ type AcpModelInfo = {
   configOptionId?: string;
 };
 
+type AcpConfigOption = {
+  id: string;
+  category?: string | null;
+  type?: string | null;
+  option_type?: string | null;
+  current_value?: string | null;
+  options: Array<{
+    value: string;
+    name?: string | null;
+    label?: string | null;
+    description?: string | null;
+  }>;
+};
+
+type EnsureRuntimeResponse = {
+  config_options?: AcpConfigOption[];
+  modelInfo?: AcpModelInfo | null;
+};
+
+type ConfigOptionIds = {
+  model?: string;
+  mode?: string;
+};
+
 type ChatScreenProps = {
   conversationId: string;
 };
@@ -53,6 +77,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   } = useChat();
   const { conversations, updateConversationExecutionContext } = useConversations();
   const [modelInfo, setModelInfo] = useState<AcpModelInfo | null>(null);
+  const [configOptionIds, setConfigOptionIds] = useState<ConfigOptionIds>({});
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const [isFilePickerVisible, setIsFilePickerVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
@@ -84,15 +109,25 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   useEffect(() => {
     let cancelled = false;
     setModelInfo(null);
+    setConfigOptionIds({});
     if (!activeBackend) return;
 
     bridge
-      .request<{ success: boolean; data?: { modelInfo: AcpModelInfo | null } }>(
-        'acp.probe-model-info',
-        { backend: activeBackend },
+      .request<EnsureRuntimeResponse>('conversation.ensure-runtime', { conversation_id: conversationId })
+      .then((res) => {
+        if (cancelled) return;
+        const configOptions = Array.isArray(res?.config_options) ? res.config_options : [];
+        setConfigOptionIds(getConfigOptionIds(configOptions));
+        setModelInfo(modelInfoFromConfigOptions(configOptions) ?? res?.modelInfo ?? null);
+      })
+      .catch(() =>
+        bridge.request<{ success: boolean; data?: { modelInfo: AcpModelInfo | null } }>(
+          'acp.probe-model-info',
+          { backend: activeBackend },
+        ),
       )
       .then((res) => {
-        if (!cancelled && res?.success) {
+        if (!cancelled && res && 'success' in res && res.success) {
           setModelInfo(res.data?.modelInfo ?? null);
         }
       })
@@ -105,7 +140,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeBackend]);
+  }, [activeBackend, conversationId]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -131,21 +166,37 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   const handleSessionModelSelect = useCallback(
     (model: { id: string; label: string }) => {
       if (!activeConversation) return;
-      void updateConversationExecutionContext(activeConversation.id, {
+      const patch = {
         currentModelId: model.id,
         currentModelLabel: model.label,
-      });
+      };
+      void bridge
+        .request('conversation.set-config-option', {
+          conversation_id: activeConversation.id,
+          option_id: configOptionIds.model ?? 'model',
+          value: model.id,
+        })
+        .catch(() => null)
+        .then(() => updateConversationExecutionContext(activeConversation.id, patch));
     },
-    [activeConversation, updateConversationExecutionContext],
+    [activeConversation, configOptionIds.model, updateConversationExecutionContext],
   );
   const handleSessionModeSelect = useCallback(
     (mode: string) => {
       if (!activeConversation) return;
-      void updateConversationExecutionContext(activeConversation.id, {
+      const patch = {
         sessionMode: mode,
-      });
+      };
+      void bridge
+        .request('conversation.set-config-option', {
+          conversation_id: activeConversation.id,
+          option_id: configOptionIds.mode ?? 'mode',
+          value: mode,
+        })
+        .catch(() => null)
+        .then(() => updateConversationExecutionContext(activeConversation.id, patch));
     },
-    [activeConversation, updateConversationExecutionContext],
+    [activeConversation, configOptionIds.mode, updateConversationExecutionContext],
   );
   const handleAttachedFilesSelected = useCallback((files: string[]) => {
     setAttachedFiles(uniqueFiles(files));
@@ -227,6 +278,34 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
 
 function uniqueFiles(files: string[]): string[] {
   return Array.from(new Set(files.filter((file) => typeof file === 'string' && file.length > 0)));
+}
+
+function getConfigOptionIds(configOptions: AcpConfigOption[]): ConfigOptionIds {
+  const model = configOptions.find((option) => option.category === 'model' || option.id === 'model');
+  const mode = configOptions.find((option) => option.category === 'mode' || option.id === 'mode');
+  return {
+    ...(model ? { model: model.id } : {}),
+    ...(mode ? { mode: mode.id } : {}),
+  };
+}
+
+function modelInfoFromConfigOptions(configOptions: AcpConfigOption[]): AcpModelInfo | null {
+  const option = configOptions.find((item) => item.category === 'model' || item.id === 'model');
+  const optionType = option?.option_type ?? option?.type;
+  if (!option || optionType !== 'select') return null;
+  const currentModelId = option.current_value ?? null;
+  const currentModel = option.options.find((item) => item.value === currentModelId);
+  return {
+    currentModelId,
+    currentModelLabel: currentModel?.label || currentModel?.name || currentModelId,
+    availableModels: option.options.map((item) => ({
+      id: item.value,
+      label: item.label || item.name || item.value,
+    })),
+    canSwitch: option.options.length > 0,
+    source: 'configOption',
+    configOptionId: option.id,
+  };
 }
 
 const styles = StyleSheet.create({

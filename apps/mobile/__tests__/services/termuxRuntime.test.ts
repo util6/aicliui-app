@@ -107,6 +107,18 @@ describe('termuxRuntime', () => {
     expect(script).toContain('await storeReady;');
     expect(script).toContain('await rename(tmpPath, storePath);');
     expect(script).toContain("if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: await getModelInfo(params.backend) } };");
+    expect(script).toContain("if (key === 'conversation.ensure-runtime') return await ensureConversationRuntime(params);");
+    expect(script).toContain("if (key === 'conversation.set-config-option') return await setConfigOption(params);");
+    expect(script).toContain('const agentModes = {');
+    expect(script).toContain('async function ensureConversationRuntime(params)');
+    expect(script).toContain('async function setConfigOption(params)');
+    expect(script).toContain('async function buildConversationConfigOptions(conversation)');
+    expect(script).toContain("config_options: configOptions");
+    expect(script).toContain("confirmation: 'observed'");
+    expect(script).toContain('function modelInfoFromConfigOptions(configOptions)');
+    expect(script).toContain('function applyConfigOption(conversation, option, value, selected)');
+    expect(script).toContain('conversation.extra.currentModelId = value;');
+    expect(script).toContain('conversation.extra.sessionMode = value;');
     expect(script).toContain("if (backend === 'opencode') return await getOpenCodeModelInfo();");
     expect(script).toContain("if (backend === 'codex') return getCodexModelInfo();");
     expect(script).toContain("if (backend !== 'gemini') return null;");

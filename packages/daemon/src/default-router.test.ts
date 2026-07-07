@@ -144,6 +144,167 @@ describe('default bridge routes', () => {
     });
   });
 
+  it('ensures conversation runtime and exposes AionUi-style config options', async () => {
+    const store = new InMemoryConversationStore({ now: () => 1300, id: () => 'runtime-conv-1' });
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'codex',
+          name: 'codex',
+          label: 'Codex CLI',
+          probe: async () => ({ backend: 'codex', state: 'ready' }),
+          getModelInfo: async () => ({
+            currentModelId: null,
+            currentModelLabel: 'Default Codex model',
+            availableModels: [{ id: 'gpt-5-codex', label: 'GPT-5 Codex' }],
+            canSwitch: true,
+            source: 'models',
+          }),
+          sendMessage: async function* () {
+            yield { type: 'content', content: 'ok' };
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_runtime',
+        data: {
+          type: 'codex',
+          name: 'runtime',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'codex', sessionMode: 'default' },
+        },
+      },
+    });
+
+    const [runtime] = await router.handleIncoming({
+      name: 'subscribe-conversation.ensure-runtime',
+      data: { id: 'm_runtime', data: { conversation_id: 'runtime-conv-1' } },
+    });
+
+    expect(runtime.data).toMatchObject({
+      recovered: false,
+      runtime: {
+        state: 'idle',
+        can_send_message: true,
+        is_processing: false,
+        turn_id: null,
+      },
+      config_options: [
+        {
+          id: 'model',
+          category: 'model',
+          option_type: 'select',
+          current_value: null,
+          options: [{ value: 'gpt-5-codex', label: 'GPT-5 Codex' }],
+        },
+        {
+          id: 'mode',
+          category: 'mode',
+          option_type: 'select',
+          current_value: 'default',
+          options: expect.arrayContaining([{ value: 'autoEdit', label: 'Auto Edit' }]),
+        },
+      ],
+    });
+  });
+
+  it('sets model and mode config options through the conversation runtime route', async () => {
+    const store = new InMemoryConversationStore({ now: () => 1400, id: () => 'config-conv-1' });
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'codex',
+          name: 'codex',
+          label: 'Codex CLI',
+          probe: async () => ({ backend: 'codex', state: 'ready' }),
+          getModelInfo: async () => ({
+            currentModelId: null,
+            currentModelLabel: 'Default Codex model',
+            availableModels: [{ id: 'gpt-5-codex', label: 'GPT-5 Codex' }],
+            canSwitch: true,
+            source: 'models',
+          }),
+          sendMessage: async function* () {
+            yield { type: 'content', content: 'ok' };
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_config',
+        data: {
+          type: 'codex',
+          name: 'config',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'codex', sessionMode: 'default' },
+        },
+      },
+    });
+
+    const [modelUpdate] = await router.handleIncoming({
+      name: 'subscribe-conversation.set-config-option',
+      data: {
+        id: 'm_set_model',
+        data: {
+          conversation_id: 'config-conv-1',
+          option_id: 'model',
+          value: 'gpt-5-codex',
+        },
+      },
+    });
+    const [modeUpdate] = await router.handleIncoming({
+      name: 'subscribe-conversation.set-config-option',
+      data: {
+        id: 'm_set_mode',
+        data: {
+          conversation_id: 'config-conv-1',
+          option_id: 'mode',
+          value: 'autoEdit',
+        },
+      },
+    });
+    const [conversation] = await router.handleIncoming({
+      name: 'subscribe-conversation.get',
+      data: { id: 'm_get_config', data: { conversation_id: 'config-conv-1' } },
+    });
+
+    expect(modelUpdate.data).toMatchObject({
+      confirmation: 'observed',
+      config_options: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'model',
+          current_value: 'gpt-5-codex',
+        }),
+      ]),
+    });
+    expect(modeUpdate.data).toMatchObject({
+      confirmation: 'observed',
+      config_options: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'mode',
+          current_value: 'autoEdit',
+        }),
+      ]),
+    });
+    expect(conversation.data).toMatchObject({
+      model: { id: 'gpt-5-codex', useModel: 'GPT-5 Codex' },
+      extra: {
+        currentModelId: 'gpt-5-codex',
+        currentModelLabel: 'GPT-5 Codex',
+        sessionMode: 'autoEdit',
+      },
+    });
+  });
+
   it('serves workspace trees and file contents for the mobile file UI', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'aicliui-workspace-'));
     try {

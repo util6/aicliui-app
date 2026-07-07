@@ -1,10 +1,15 @@
 import type {
+  AgentConfigOption,
   AgentInfo,
+  AgentModelInfo,
   Conversation,
   ConversationRuntimeSummary,
   ConversationStatus,
+  EnsureConversationRuntimeResponse,
   RuntimeStatus,
+  SetConfigOptionResponse,
 } from '@aicliui/shared';
+import { getAgentModes } from '@aicliui/shared';
 import { createDefaultAgentAdapterRegistry } from './agent-adapters/default-registry.js';
 import type { AgentAdapterRegistry } from './agent-adapters/registry.js';
 import { BridgeRouter } from './bridge-router.js';
@@ -41,6 +46,43 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     success: true,
     data: { modelInfo: await getAdapterModelInfo(adapters, stringParam(asRecord(data).backend, '')) },
   }));
+  router.register('conversation.ensure-runtime', async (data): Promise<EnsureConversationRuntimeResponse> => {
+    const conversation = requireConversation(store, stringParam(asRecord(data).conversation_id));
+    const configOptions = await buildConversationConfigOptions(adapters, conversation);
+    return {
+      recovered: false,
+      runtime: conversation.runtime ?? idleRuntimeSummary('finished', pendingConfirmationCount(pendingConfirmations, conversation.id)),
+      config_options: configOptions,
+      modelInfo: modelInfoFromConfigOptions(configOptions),
+    };
+  });
+  router.register('conversation.set-config-option', async (data): Promise<SetConfigOptionResponse> => {
+    const params = asRecord(data);
+    const conversationId = stringParam(params.conversation_id);
+    const optionId = stringParam(params.option_id);
+    const value = stringParam(params.value);
+    const conversation = requireConversation(store, conversationId);
+    const currentConfigOptions = await buildConversationConfigOptions(adapters, conversation);
+    const option = currentConfigOptions.find((candidate) => candidate.id === optionId);
+    if (!option) {
+      throw new Error(`Config option '${optionId}' was not found`);
+    }
+
+    const selected = option.options.find((candidate) => candidate.value === value);
+    if (option.options.length > 0 && !selected) {
+      throw new Error(`Config option '${optionId}' does not support value '${value}'`);
+    }
+
+    const updates = getConfigOptionConversationUpdates(option, value, selected);
+    store.updateConversation(conversationId, updates);
+    const updatedConversation = requireConversation(store, conversationId);
+    const configOptions = await buildConversationConfigOptions(adapters, updatedConversation);
+    return {
+      confirmation: 'observed',
+      config_options: configOptions,
+      modelInfo: modelInfoFromConfigOptions(configOptions),
+    };
+  });
   router.register('database.get-user-conversations', (data) => {
     const params = asRecord(data);
     return store.listConversations(numberParam(params.page, 0), numberParam(params.pageSize, 100));
@@ -469,6 +511,108 @@ async function getAdapterModelInfo(adapters: AgentAdapterRegistry, backend: stri
   } catch {
     return null;
   }
+}
+
+function requireConversation(store: InMemoryConversationStore, conversationId: string): Conversation {
+  const conversation = store.getConversation(conversationId);
+  if (!conversation) {
+    throw new Error(`Conversation '${conversationId}' was not found`);
+  }
+  return conversation;
+}
+
+async function buildConversationConfigOptions(
+  adapters: AgentAdapterRegistry,
+  conversation: Conversation,
+): Promise<AgentConfigOption[]> {
+  const backend = conversation.extra.backend || conversation.type;
+  const configOptions: AgentConfigOption[] = [];
+  const modelInfo = await getAdapterModelInfo(adapters, backend);
+
+  if (modelInfo?.canSwitch && modelInfo.availableModels.length > 0) {
+    configOptions.push({
+      id: 'model',
+      name: 'Model',
+      label: 'Model',
+      category: 'model',
+      type: 'select',
+      option_type: 'select',
+      current_value: conversation.extra.currentModelId ?? modelInfo.currentModelId ?? null,
+      options: modelInfo.availableModels.map((model) => ({
+        value: model.id,
+        label: model.label,
+      })),
+    });
+  }
+
+  const modes = getAgentModes(backend);
+  if (modes.length > 0) {
+    configOptions.push({
+      id: 'mode',
+      name: 'Permission',
+      label: 'Permission',
+      category: 'mode',
+      type: 'select',
+      option_type: 'select',
+      current_value: conversation.extra.sessionMode ?? modes[0]?.value ?? null,
+      options: modes.map((mode) => ({
+        value: mode.value,
+        label: mode.label,
+        ...(mode.description ? { description: mode.description } : {}),
+      })),
+    });
+  }
+
+  return configOptions;
+}
+
+function modelInfoFromConfigOptions(configOptions: AgentConfigOption[]): AgentModelInfo | null {
+  const modelOption = configOptions.find((option) => option.category === 'model' || option.id === 'model');
+  if (!modelOption) return null;
+  const currentModelId = modelOption.current_value ?? null;
+  const currentModel = modelOption.options.find((option) => option.value === currentModelId);
+  return {
+    currentModelId,
+    currentModelLabel: currentModel?.label ?? currentModel?.name ?? currentModelId,
+    availableModels: modelOption.options.map((option) => ({
+      id: option.value,
+      label: option.label || option.name || option.value,
+    })),
+    canSwitch: modelOption.options.length > 0,
+    source: 'configOption',
+    configOptionId: modelOption.id,
+  };
+}
+
+function getConfigOptionConversationUpdates(
+  option: AgentConfigOption,
+  value: string,
+  selected: AgentConfigOption['options'][number] | undefined,
+): Partial<Conversation> {
+  const category = option.category || option.id;
+  if (category === 'model' || option.id === 'model') {
+    const label = selected?.label || selected?.name || value;
+    return {
+      model: {
+        id: value,
+        useModel: label,
+      },
+      extra: {
+        currentModelId: value,
+        currentModelLabel: label,
+      },
+    };
+  }
+
+  if (category === 'mode' || option.id === 'mode') {
+    return {
+      extra: {
+        sessionMode: value,
+      },
+    };
+  }
+
+  return {};
 }
 
 export async function getRuntimeStatus(adapters = createDefaultAgentAdapterRegistry()): Promise<RuntimeStatus> {

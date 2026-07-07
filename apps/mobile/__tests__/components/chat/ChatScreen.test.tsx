@@ -163,7 +163,56 @@ describe('ChatScreen', () => {
     const clearQueuedCommandDraft = jest.fn();
     const updateConversationExecutionContext = jest.fn();
     mockBridgeRequest.mockReset();
-    mockBridgeRequest.mockImplementation((name: string) => {
+    mockBridgeRequest.mockImplementation((name: string, data?: Record<string, unknown>) => {
+      if (name === 'conversation.ensure-runtime') {
+        return Promise.resolve({
+          recovered: false,
+          runtime: {
+            state: 'idle',
+            can_send_message: true,
+            has_task: false,
+            task_status: 'finished',
+            is_processing: false,
+            pending_confirmations: 0,
+            turn_id: null,
+          },
+          config_options: [
+            {
+              id: 'model',
+              category: 'model',
+              option_type: 'select',
+              current_value: 'gpt-4.1',
+              options: [{ value: 'gpt-5-codex', label: 'GPT-5 Codex' }],
+            },
+            {
+              id: 'mode',
+              category: 'mode',
+              option_type: 'select',
+              current_value: 'default',
+              options: [
+                { value: 'default', label: 'Plan' },
+                { value: 'autoEdit', label: 'Auto Edit' },
+              ],
+            },
+          ],
+        });
+      }
+      if (name === 'conversation.set-config-option') {
+        const optionId = data?.option_id;
+        const value = data?.value;
+        return Promise.resolve({
+          confirmation: 'observed',
+          config_options: [
+            {
+              id: optionId,
+              category: optionId,
+              option_type: 'select',
+              current_value: value,
+              options: [],
+            },
+          ],
+        });
+      }
       if (name === 'acp.probe-model-info') {
         return Promise.resolve({
           success: true,
@@ -253,25 +302,39 @@ describe('ChatScreen', () => {
     expect(chat.clearQueuedCommandDraft).toHaveBeenCalledWith('queue-1');
   });
 
-  it('probes active backend models and persists session bar model and mode selections', async () => {
+  it('warms the active runtime and persists session bar model and mode selections through config options', async () => {
     const screen = render(<ChatScreen conversationId='conv-1' />);
     const conversations = mockUseConversations.mock.results.at(-1)?.value;
 
     await waitFor(() => {
       expect(screen.getByTestId('session-model-count').props.children).toEqual(['models:', 1]);
     });
+    expect(mockBridgeRequest).toHaveBeenCalledWith('conversation.ensure-runtime', { conversation_id: 'conv-1' });
 
     fireEvent.press(screen.getByTestId('select-session-model'));
-    expect(conversations.updateConversationExecutionContext).toHaveBeenCalledWith('conv-1', {
-      currentModelId: 'gpt-5-codex',
-      currentModelLabel: 'GPT-5 Codex',
+    await waitFor(() => {
+      expect(mockBridgeRequest).toHaveBeenCalledWith('conversation.set-config-option', {
+        conversation_id: 'conv-1',
+        option_id: 'model',
+        value: 'gpt-5-codex',
+      });
+      expect(conversations.updateConversationExecutionContext).toHaveBeenCalledWith('conv-1', {
+        currentModelId: 'gpt-5-codex',
+        currentModelLabel: 'GPT-5 Codex',
+      });
     });
 
     fireEvent.press(screen.getByTestId('select-session-mode'));
-    expect(conversations.updateConversationExecutionContext).toHaveBeenCalledWith('conv-1', {
-      sessionMode: 'autoEdit',
+    await waitFor(() => {
+      expect(mockBridgeRequest).toHaveBeenCalledWith('conversation.set-config-option', {
+        conversation_id: 'conv-1',
+        option_id: 'mode',
+        value: 'autoEdit',
+      });
+      expect(conversations.updateConversationExecutionContext).toHaveBeenCalledWith('conv-1', {
+        sessionMode: 'autoEdit',
+      });
     });
-    expect(mockBridgeRequest).toHaveBeenCalledWith('acp.probe-model-info', { backend: 'codex' });
   });
 
   it('attaches active workspace files to the next mobile send and clears them after send', async () => {

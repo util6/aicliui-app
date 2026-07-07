@@ -18,6 +18,86 @@ export type AgentModelInfo = {
   configOptionId?: string;
 };
 
+export type AgentConfigOptionType = 'select' | 'boolean' | 'string';
+
+export type AgentConfigSelectOption = {
+  value: string;
+  name?: string;
+  label?: string;
+  description?: string;
+};
+
+export type AgentConfigOption = {
+  id: string;
+  name?: string;
+  label?: string;
+  description?: string;
+  category?: string;
+  type?: AgentConfigOptionType;
+  option_type?: AgentConfigOptionType;
+  current_value?: string | null;
+  options: AgentConfigSelectOption[];
+};
+
+export type EnsureConversationRuntimeResponse = {
+  recovered: boolean;
+  config_options: AgentConfigOption[];
+  runtime: ConversationRuntimeSummary;
+  modelInfo?: AgentModelInfo | null;
+};
+
+export type SetConfigOptionResponse = {
+  confirmation: 'observed' | 'command_ack';
+  config_options: AgentConfigOption[];
+  modelInfo?: AgentModelInfo | null;
+};
+
+export type AgentModeOption = {
+  value: string;
+  label: string;
+  description?: string;
+};
+
+export const AGENT_MODES: Record<string, AgentModeOption[]> = {
+  claude: [
+    { value: 'default', label: 'Default' },
+    { value: 'plan', label: 'Plan' },
+    { value: 'bypassPermissions', label: 'YOLO' },
+  ],
+  qwen: [
+    { value: 'default', label: 'Default' },
+    { value: 'yolo', label: 'YOLO' },
+  ],
+  opencode: [
+    { value: 'build', label: 'Build' },
+    { value: 'plan', label: 'Plan' },
+  ],
+  gemini: [
+    { value: 'default', label: 'Default' },
+    { value: 'autoEdit', label: 'Auto-Accept Edits' },
+    { value: 'yolo', label: 'YOLO' },
+  ],
+  codex: [
+    { value: 'default', label: 'Plan' },
+    { value: 'autoEdit', label: 'Auto Edit' },
+    { value: 'yolo', label: 'Full Auto' },
+  ],
+  cursor: [
+    { value: 'agent', label: 'Agent', description: 'Full agent capabilities with tool access' },
+    { value: 'plan', label: 'Plan', description: 'Read-only mode for planning and designing before implementation' },
+    { value: 'ask', label: 'Ask', description: 'Q&A mode - no edits or command execution' },
+  ],
+  snow: [
+    { value: 'default', label: 'Agent' },
+    { value: 'yolo', label: 'YOLO' },
+  ],
+};
+
+export function getAgentModes(backend: string | undefined): AgentModeOption[] {
+  if (!backend) return [];
+  return [...(AGENT_MODES[backend] || [])];
+}
+
 export type ConversationStatus = 'pending' | 'running' | 'waiting_confirmation' | 'finished';
 
 export type Conversation = {

@@ -42,6 +42,23 @@ const codexModels = parseModelOptions(
   ],
 );
 
+const agentModes = {
+  opencode: [
+    { value: 'build', label: 'Build' },
+    { value: 'plan', label: 'Plan' },
+  ],
+  gemini: [
+    { value: 'default', label: 'Default' },
+    { value: 'autoEdit', label: 'Auto-Accept Edits' },
+    { value: 'yolo', label: 'YOLO' },
+  ],
+  codex: [
+    { value: 'default', label: 'Plan' },
+    { value: 'autoEdit', label: 'Auto Edit' },
+    { value: 'yolo', label: 'Full Auto' },
+  ],
+};
+
 const agents = [
   { backend: 'opencode', name: 'opencode', label: 'OpenCode' },
   { backend: 'gemini', name: 'gemini', label: 'Gemini CLI' },
@@ -105,6 +122,8 @@ async function route(key, data, emit) {
   if (key === 'runtime.get-status') return getRuntimeStatus();
   if (key === 'acp.get-available-agents') return { success: true, data: agents };
   if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: await getModelInfo(params.backend) } };
+  if (key === 'conversation.ensure-runtime') return await ensureConversationRuntime(params);
+  if (key === 'conversation.set-config-option') return await setConfigOption(params);
   if (key === 'database.get-user-conversations') return listConversations(params.page, params.pageSize);
   if (key === 'database.get-conversation-messages') return messages.get(requiredString(params.conversation_id)) || [];
   if (key === 'conversation.get') return conversations.get(requiredString(params.conversation_id)) || null;
@@ -420,6 +439,118 @@ async function getOpenCodeModelInfo() {
   } catch (error) {
     console.warn('OpenCode model probe failed:', error instanceof Error ? error.message : error);
     return null;
+  }
+}
+
+async function ensureConversationRuntime(params) {
+  const conversationId = requiredString(params.conversation_id);
+  const conversation = conversations.get(conversationId);
+  if (!conversation) throw new Error("Conversation '" + conversationId + "' was not found");
+  const configOptions = await buildConversationConfigOptions(conversation);
+  return {
+    recovered: false,
+    runtime: conversation.runtime || idleRuntimeSummary('finished', pendingConfirmationCount(conversationId)),
+    config_options: configOptions,
+    modelInfo: modelInfoFromConfigOptions(configOptions),
+  };
+}
+
+async function setConfigOption(params) {
+  const conversationId = requiredString(params.conversation_id);
+  const optionId = requiredString(params.option_id);
+  const value = requiredString(params.value);
+  const conversation = conversations.get(conversationId);
+  if (!conversation) throw new Error("Conversation '" + conversationId + "' was not found");
+
+  const configOptions = await buildConversationConfigOptions(conversation);
+  const option = configOptions.find((candidate) => candidate.id === optionId);
+  if (!option) throw new Error("Config option '" + optionId + "' was not found");
+  const selected = option.options.find((candidate) => candidate.value === value);
+  if (option.options.length > 0 && !selected) {
+    throw new Error("Config option '" + optionId + "' does not support value '" + value + "'");
+  }
+
+  applyConfigOption(conversation, option, value, selected);
+  conversation.modifyTime = Date.now();
+  await saveStore();
+  const nextConfigOptions = await buildConversationConfigOptions(conversation);
+  return {
+    confirmation: 'observed',
+    config_options: nextConfigOptions,
+    modelInfo: modelInfoFromConfigOptions(nextConfigOptions),
+  };
+}
+
+async function buildConversationConfigOptions(conversation) {
+  const extra = isRecord(conversation.extra) ? conversation.extra : {};
+  const backend = typeof extra.backend === 'string' ? extra.backend : conversation.type;
+  const configOptions = [];
+  const modelInfo = await getModelInfo(backend);
+  if (modelInfo && modelInfo.canSwitch && Array.isArray(modelInfo.availableModels) && modelInfo.availableModels.length > 0) {
+    configOptions.push({
+      id: 'model',
+      name: 'Model',
+      label: 'Model',
+      category: 'model',
+      type: 'select',
+      option_type: 'select',
+      current_value: typeof extra.currentModelId === 'string' ? extra.currentModelId : modelInfo.currentModelId || null,
+      options: modelInfo.availableModels.map((model) => ({
+        value: model.id,
+        label: model.label,
+      })),
+    });
+  }
+
+  const modes = Array.isArray(agentModes[backend]) ? agentModes[backend] : [];
+  if (modes.length > 0) {
+    configOptions.push({
+      id: 'mode',
+      name: 'Permission',
+      label: 'Permission',
+      category: 'mode',
+      type: 'select',
+      option_type: 'select',
+      current_value: typeof extra.sessionMode === 'string' ? extra.sessionMode : modes[0].value,
+      options: modes.map((mode) => ({
+        value: mode.value,
+        label: mode.label,
+      })),
+    });
+  }
+  return configOptions;
+}
+
+function modelInfoFromConfigOptions(configOptions) {
+  const option = configOptions.find((candidate) => candidate.category === 'model' || candidate.id === 'model');
+  if (!option) return null;
+  const currentModelId = option.current_value || null;
+  const currentModel = option.options.find((candidate) => candidate.value === currentModelId);
+  return {
+    currentModelId,
+    currentModelLabel: currentModel ? currentModel.label || currentModel.name || currentModelId : currentModelId,
+    availableModels: option.options.map((candidate) => ({
+      id: candidate.value,
+      label: candidate.label || candidate.name || candidate.value,
+    })),
+    canSwitch: option.options.length > 0,
+    source: 'configOption',
+    configOptionId: option.id,
+  };
+}
+
+function applyConfigOption(conversation, option, value, selected) {
+  if (!isRecord(conversation.extra)) conversation.extra = {};
+  const category = option.category || option.id;
+  if (category === 'model' || option.id === 'model') {
+    const label = (selected && (selected.label || selected.name)) || value;
+    conversation.extra.currentModelId = value;
+    conversation.extra.currentModelLabel = label;
+    conversation.model = { id: value, useModel: label };
+    return;
+  }
+  if (category === 'mode' || option.id === 'mode') {
+    conversation.extra.sessionMode = value;
   }
 }
 
