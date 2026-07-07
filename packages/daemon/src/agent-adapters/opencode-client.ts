@@ -80,6 +80,7 @@ export type OpenCodeQuestionRequest = Record<string, unknown> & {
 };
 
 export type OpenCodeThinkingUpdate = {
+  subject?: string;
   content: string;
   status: 'thinking' | 'done';
 };
@@ -108,6 +109,7 @@ export type OpenCodeStreamEvent =
     }
   | {
       type: 'thinking';
+      subject?: string;
       content: string;
       status: 'thinking' | 'done';
     }
@@ -543,6 +545,7 @@ function subscribeOpenCodeSessionEvents(input: {
       const decoder = new TextDecoder();
       const extractTextDelta = createOpenCodeTextDeltaExtractor(input.sessionId);
       const extractReasoningEvent = createOpenCodeReasoningEventExtractor(input.sessionId);
+      const extractCompactionEvent = createOpenCodeCompactionEventExtractor(input.sessionId);
       const extractToolUpdate = createOpenCodeToolUpdateExtractor(input.sessionId);
       const extractContextUsage = createOpenCodeContextUsageExtractor(input.sessionId);
       const extractAgentStatus = createOpenCodeAgentStatusExtractor(input.sessionId);
@@ -554,6 +557,9 @@ function subscribeOpenCodeSessionEvents(input: {
 
         const reasoning = extractReasoningEvent(event);
         if (reasoning) input.handlers.onThinking(reasoning);
+
+        const compaction = extractCompactionEvent(event);
+        if (compaction) input.handlers.onThinking(compaction);
 
         const tool = extractToolUpdate(event);
         if (tool) input.handlers.onTool(tool);
@@ -671,6 +677,28 @@ function extractOpenCodeReasoningEvent(event: unknown, sessionId: string): OpenC
   }
   if (type === 'session.next.reasoning.ended') {
     return { content: '', status: 'done' };
+  }
+  return null;
+}
+
+function createOpenCodeCompactionEventExtractor(sessionId: string): (event: unknown) => OpenCodeThinkingUpdate | null {
+  return (event) => extractOpenCodeCompactionEvent(event, sessionId);
+}
+
+function extractOpenCodeCompactionEvent(event: unknown, sessionId: string): OpenCodeThinkingUpdate | null {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (data.sessionID !== sessionId) return null;
+  if (type === 'session.next.compaction.started') {
+    return { subject: 'OpenCode compaction', content: 'Compacting context', status: 'thinking' };
+  }
+  if (type === 'session.next.compaction.delta' && typeof data.text === 'string') {
+    return { subject: 'OpenCode compaction', content: data.text, status: 'thinking' };
+  }
+  if (type === 'session.next.compaction.ended') {
+    return { subject: 'OpenCode compaction', content: '', status: 'done' };
   }
   return null;
 }

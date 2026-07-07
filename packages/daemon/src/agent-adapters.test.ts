@@ -845,6 +845,42 @@ describe('agent adapters', () => {
     ]);
   });
 
+  it('preserves OpenCode thinking subjects from stream events', async () => {
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async () => ({ sessionId: 'unused', text: 'unused fallback' }),
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+          streamPrompt: async function* () {
+            yield { type: 'session', sessionId: 'ses_compact' };
+            yield {
+              type: 'thinking',
+              subject: 'OpenCode compaction',
+              content: 'Compacting context',
+              status: 'thinking',
+            };
+            yield { type: 'content', content: 'ready' };
+          },
+        },
+      },
+    );
+
+    const events = [];
+    for await (const event of adapter.sendMessage({ conversationId: 'conv-1', input: 'hello' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_compact' },
+      { type: 'thinking', subject: 'OpenCode compaction', content: 'Compacting context', status: 'thinking' },
+      { type: 'content', content: 'ready' },
+    ]);
+  });
+
   it('forwards OpenCode context usage events to the shared adapter contract', async () => {
     const adapter = createOpenCodeAdapter(
       {

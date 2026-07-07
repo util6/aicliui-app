@@ -279,7 +279,7 @@ export function createOpenCodeAdapter(
         case 'thinking':
           yield {
             type: 'thinking',
-            subject: 'OpenCode reasoning',
+            subject: event.subject ?? 'OpenCode reasoning',
             content: event.content,
             status: event.status,
           };

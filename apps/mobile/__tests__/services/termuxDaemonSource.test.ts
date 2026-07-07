@@ -115,8 +115,21 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.reasoning.delta'");
     expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.reasoning.ended'");
     expect(TERMUX_DAEMON_SOURCE).toContain("type: 'thinking',");
-    expect(TERMUX_DAEMON_SOURCE).toContain("subject: 'OpenCode reasoning'");
+    expect(TERMUX_DAEMON_SOURCE).toContain(
+      "subject: typeof update.subject === 'string' ? update.subject : 'OpenCode reasoning'",
+    );
     expect(TERMUX_DAEMON_SOURCE).toContain("status: 'done'");
+  });
+
+  it('routes OpenCode compaction events through the local thinking stream', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain('createOpenCodeCompactionEventExtractor');
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.compaction.started'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.compaction.delta'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.compaction.ended'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("subject: 'OpenCode compaction'");
+    expect(TERMUX_DAEMON_SOURCE).toContain(
+      "subject: typeof update.subject === 'string' ? update.subject : 'OpenCode reasoning'",
+    );
   });
 
   it('routes OpenCode v2 tool lifecycle events through the local tool stream', () => {
