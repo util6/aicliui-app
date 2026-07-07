@@ -32,9 +32,19 @@ const geminiModels = parseModelOptions(
   ],
 );
 
+const codexModels = parseModelOptions(
+  process.env.AICLIUI_CODEX_MODELS,
+  [
+    { id: 'gpt-5-codex', label: 'GPT-5 Codex' },
+    { id: 'gpt-5', label: 'GPT-5' },
+    { id: 'gpt-5-mini', label: 'GPT-5 Mini' },
+  ],
+);
+
 const agents = [
   { backend: 'opencode', name: 'opencode', label: 'OpenCode' },
   { backend: 'gemini', name: 'gemini', label: 'Gemini CLI' },
+  { backend: 'codex', name: 'codex', label: 'Codex CLI' },
 ];
 
 const server = new WebSocketServer({ host: '127.0.0.1', port });
@@ -115,7 +125,7 @@ async function getRuntimeStatus() {
     daemon: { version: '0.1.0-termux-bootstrap', startedAt, pid: process.pid },
     bootstrap: await readBootstrapStatus(),
     termux: { runCommandPermission: 'granted', allowExternalApps: 'unknown' },
-    agents: await Promise.all([probeAgent('opencode'), probeAgent('gemini')]),
+    agents: await Promise.all(agents.map((agent) => probeAgent(agent.backend))),
   };
 }
 
@@ -370,12 +380,23 @@ function listConversations(page = 0, pageSize = 100) {
 
 async function getModelInfo(backend) {
   if (backend === 'opencode') return await getOpenCodeModelInfo();
+  if (backend === 'codex') return getCodexModelInfo();
   if (backend !== 'gemini') return null;
   return {
     currentModelId: null,
     currentModelLabel: 'Default Gemini model',
     availableModels: geminiModels,
     canSwitch: geminiModels.length > 0,
+    source: 'models',
+  };
+}
+
+function getCodexModelInfo() {
+  return {
+    currentModelId: null,
+    currentModelLabel: 'Default Codex model',
+    availableModels: codexModels,
+    canSwitch: codexModels.length > 0,
     source: 'models',
   };
 }
@@ -420,6 +441,7 @@ function normalizeConversationModel(model, extra) {
 
 function modelLabel(modelId, backend) {
   if (backend === 'opencode' && modelId.includes('/')) return modelId.split('/').slice(1).join('/');
+  if (backend === 'codex') return codexModels.find((model) => model.id === modelId)?.label || modelId;
   return geminiModels.find((model) => model.id === modelId)?.label || modelId;
 }
 
@@ -543,15 +565,35 @@ async function sendMessage(params, emit) {
         onContent: emitAssistantContent,
       });
       if (!assistantContent) assistantContent = 'Gemini CLI completed, but no assistant text was returned.';
+    } else if (backend === 'codex') {
+      if (!(await commandExists('codex'))) {
+        throw new Error('codex command not found. The bootstrap tried npm install -g @openai/codex@latest; check Termux npm output in ~/.aicliui/logs/daemon.log.');
+      }
+      emit('chat.response.stream', {
+        type: 'thought',
+        msg_id: assistantMsgId,
+        conversation_id: conversationId,
+        data: { subject: 'Codex CLI', description: buildCodexCommandDescription({ input, model, approvalMode }) },
+      });
+      await sendCodexPrompt({
+        input,
+        workspace,
+        model,
+        approvalMode,
+        files: selectedFiles,
+        signal: run.signal,
+        onContent: emitAssistantContent,
+      });
+      if (!assistantContent) assistantContent = 'Codex CLI completed, but no assistant text was returned.';
     } else {
       throw new Error("Agent backend '" + backend + "' is not supported by this Termux daemon.");
     }
   } catch (error) {
+    const runtimeName = backend === 'opencode' ? 'OpenCode' : backend === 'codex' ? 'Codex CLI' : 'CLI';
     assistantContent =
       run.signal.aborted || isAbortError(error)
         ? 'Generation stopped.'
-        : (backend === 'opencode' ? 'OpenCode runtime failed: ' : 'CLI runtime failed: ') +
-          (error instanceof Error ? error.message : 'Unknown runtime error');
+        : runtimeName + ' runtime failed: ' + (error instanceof Error ? error.message : 'Unknown runtime error');
   } finally {
     if (activeRuns.get(conversationId) === run) activeRuns.delete(conversationId);
     clearConfirmationsForConversation(conversationId, emit);
@@ -996,6 +1038,24 @@ function buildGeminiArgs({ input, model, approvalMode }) {
   ];
 }
 
+function buildCodexCommandDescription({ input, model, approvalMode }) {
+  return buildCodexArgs({ input, model, approvalMode })
+    .map((part) => (/\s/.test(part) ? JSON.stringify(part) : part))
+    .join(' ');
+}
+
+function buildCodexArgs({ input, model, approvalMode }) {
+  const args = ['exec', '--json', '--skip-git-repo-check'];
+  if (model) args.push('--model', model);
+  if (approvalMode === 'yolo') {
+    args.push('--dangerously-bypass-approvals-and-sandbox');
+  } else {
+    args.push('--sandbox', approvalMode === 'autoEdit' ? 'workspace-write' : 'read-only');
+  }
+  args.push(input);
+  return args;
+}
+
 async function sendGeminiPrompt({ input, workspace, model, approvalMode, files, signal, onContent }) {
   const prompt = appendSelectedFilesToPrompt(input, files, workspace);
   const args = buildGeminiArgs({ input: prompt, model, approvalMode }).slice(1);
@@ -1023,6 +1083,37 @@ async function sendGeminiPrompt({ input, workspace, model, approvalMode, files, 
   if (content) return content;
 
   const fallback = extractGeminiStreamText(result.stdout) || result.stdout.trim();
+  emitContent(fallback);
+  return fallback;
+}
+
+async function sendCodexPrompt({ input, workspace, model, approvalMode, files, signal, onContent }) {
+  const prompt = appendSelectedFilesToPrompt(input, files, workspace);
+  const args = buildCodexArgs({ input: prompt, model, approvalMode });
+  let lineBuffer = '';
+  let content = '';
+  const emitContent = (text) => {
+    if (!text) return;
+    content += text;
+    onContent(text);
+  };
+  const handleStdout = (chunk) => {
+    const lines = (lineBuffer + chunk.toString()).split(/\r?\n/);
+    lineBuffer = lines.pop() || '';
+    for (const line of lines) {
+      const text = parseCodexJsonLine(line);
+      emitContent(text);
+    }
+  };
+  const result = await runProcess('codex', args, {
+    cwd: workspace || process.env.HOME || process.cwd(),
+    signal,
+    onStdout: handleStdout,
+  });
+  emitContent(parseCodexJsonLine(lineBuffer));
+  if (content) return content;
+
+  const fallback = extractCodexJsonText(result.stdout) || result.stdout.trim();
   emitContent(fallback);
   return fallback;
 }
@@ -1193,6 +1284,14 @@ function extractGeminiStreamText(output) {
     .join('');
 }
 
+function extractCodexJsonText(output) {
+  return output
+    .split(/\r?\n/)
+    .map((line) => parseCodexJsonLine(line))
+    .filter(Boolean)
+    .join('');
+}
+
 function parseGeminiStreamJsonLine(line) {
   if (!line.trim()) return '';
   let value;
@@ -1202,6 +1301,17 @@ function parseGeminiStreamJsonLine(line) {
     return '';
   }
   return extractGeminiText(value);
+}
+
+function parseCodexJsonLine(line) {
+  if (!line.trim()) return '';
+  let value;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    return '';
+  }
+  return extractCodexEventText(value);
 }
 
 function extractGeminiText(value) {
@@ -1217,6 +1327,31 @@ function extractGeminiText(value) {
   if (direct) return direct;
 
   return extractGeminiCandidateText(value.candidates);
+}
+
+function extractCodexEventText(value) {
+  if (typeof value === 'string') return value;
+  if (!isRecord(value)) return '';
+
+  const item = isRecord(value.item) ? value.item : {};
+  if (value.type === 'item.completed' && item.type === 'agent_message' && typeof item.text === 'string') {
+    return item.text;
+  }
+
+  if (value.type === 'error' && typeof value.message === 'string') return value.message;
+  if (value.type === 'turn.failed' && isRecord(value.error) && typeof value.error.message === 'string') {
+    return value.error.message;
+  }
+
+  const direct =
+    stringValue(value.text) ||
+    stringValue(value.content) ||
+    stringValue(value.delta) ||
+    (isRecord(value.message) ? stringValue(value.message.content) : undefined);
+  if (direct) return direct;
+
+  if (isRecord(value.data)) return extractCodexEventText(value.data);
+  return '';
 }
 
 function extractGeminiCandidateText(value) {

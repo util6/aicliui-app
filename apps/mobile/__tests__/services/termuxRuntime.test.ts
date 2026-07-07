@@ -86,6 +86,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain('npm install --omit=dev --prefix "$AICLIUI_HOME/daemon"');
     expect(script).toContain('npm install -g opencode-ai@latest');
     expect(script).toContain('npm install -g @google/gemini-cli@latest');
+    expect(script).toContain('npm install -g @openai/codex@latest');
     expect(script).toContain("import { WebSocketServer } from 'ws';");
     expect(script).toContain("import { spawn } from 'node:child_process';");
     expect(script).toContain("import { pathToFileURL } from 'node:url';");
@@ -99,11 +100,15 @@ describe('termuxRuntime', () => {
     expect(script).toContain('process.env.AICLIUI_GEMINI_MODELS');
     expect(script).toContain("{ id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' }");
     expect(script).toContain("{ id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' }");
+    expect(script).toContain('const codexModels = parseModelOptions(');
+    expect(script).toContain('process.env.AICLIUI_CODEX_MODELS');
+    expect(script).toContain("{ id: 'gpt-5-codex', label: 'GPT-5 Codex' }");
     expect(script).toContain('bootstrap: await readBootstrapStatus()');
     expect(script).toContain('await storeReady;');
     expect(script).toContain('await rename(tmpPath, storePath);');
     expect(script).toContain("if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: await getModelInfo(params.backend) } };");
     expect(script).toContain("if (backend === 'opencode') return await getOpenCodeModelInfo();");
+    expect(script).toContain("if (backend === 'codex') return getCodexModelInfo();");
     expect(script).toContain("if (backend !== 'gemini') return null;");
     expect(script).toContain("currentModelLabel: 'Default Gemini model'");
     expect(script).toContain('availableModels: geminiModels');
@@ -125,6 +130,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain("return 'data:' + imageMimeType(filePath) + ';base64,' + buffer.toString('base64');");
     expect(script).toContain("opencode', ['serve', '--hostname', '127.0.0.1', '--port'");
     expect(script).toContain("await sendGeminiPrompt({");
+    expect(script).toContain("await sendCodexPrompt({");
     expect(script).toContain("onContent: emitAssistantContent");
     expect(script).toContain("const prompt = appendSelectedFilesToPrompt(input, files, workspace);");
     expect(script).toContain("const args = buildGeminiArgs({ input: prompt, model, approvalMode }).slice(1);");
@@ -135,6 +141,14 @@ describe('termuxRuntime', () => {
     expect(script).toContain("'--output-format'");
     expect(script).toContain("'stream-json'");
     expect(script).toContain('parseGeminiStreamJsonLine');
+    expect(script).toContain('parseCodexJsonLine');
+    expect(script).toContain('extractCodexEventText');
+    expect(script).toContain('buildCodexArgs({ input: prompt, model, approvalMode })');
+    expect(script).toContain("'--json'");
+    expect(script).toContain("'--skip-git-repo-check'");
+    expect(script).toContain("if (approvalMode === 'yolo')");
+    expect(script).toContain("'--dangerously-bypass-approvals-and-sandbox'");
+    expect(script).toContain("approvalMode === 'autoEdit' ? 'workspace-write' : 'read-only'");
     expect(script).toContain('server listening on');
     expect(script).toContain("'/api/session'");
     expect(script).toContain('const modelRef = parseOpenCodeModelRef(model);');
@@ -206,6 +220,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain('activeRuns.delete(conversationId);');
     expect(script).toContain("return { success: true, stopped: true };");
     expect(script).toContain("runProcess('gemini', args, {");
+    expect(script).toContain("runProcess('codex', args, {");
     expect(script).toContain("signal.addEventListener('abort', abort);");
     expect(script).toContain('exec node ./aicliui-daemon.mjs');
     expect(script).toContain('export AICLIUI_DAEMON_PID_FILE="$AICLIUI_HOME/daemon/daemon.pid"');

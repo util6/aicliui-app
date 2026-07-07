@@ -135,6 +135,13 @@ if ! command -v gemini >/dev/null 2>&1; then
   fi
 fi
 
+if ! command -v codex >/dev/null 2>&1; then
+  write_bootstrap_status installing_codex "Installing Codex CLI"
+  if ! npm install -g @openai/codex@latest; then
+    write_bootstrap_status codex_install_failed "Failed to install Codex CLI; daemon can still start"
+  fi
+fi
+
 write_bootstrap_status writing_daemon "Writing daemon source files"
 
 cat > "$AICLIUI_HOME/daemon/aicliui-daemon.mjs" <<'AICLIUI_DAEMON_SOURCE'
