@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
 import { useThemeColor } from '../../hooks/useThemeColor';
-import type { SlashCommandItem } from '../../utils/slashCommands';
+import { filterSlashCommands, matchSlashQuery, type SlashCommandItem } from '../../utils/slashCommands';
 
 type ChatInputBarProps = {
   onSend: (text: string, files?: string[]) => void;
@@ -24,7 +24,9 @@ export function ChatInputBar({ onSend, onStop, isStreaming, disabled, slashComma
   const textColor = useThemeColor({}, 'text');
   const textSecondary = useThemeColor({}, 'textSecondary');
   const [text, setText] = useState('');
-  const matchingSlashCommands = getMatchingSlashCommands(text, slashCommands);
+  const slashQuery = matchSlashQuery(text);
+  const matchingSlashCommands =
+    slashQuery === null ? [] : filterSlashCommands(slashCommands, slashQuery).slice(0, 6);
   const showSlashCommands = matchingSlashCommands.length > 0;
 
   const handleSend = () => {
@@ -100,19 +102,6 @@ export function ChatInputBar({ onSend, onStop, isStreaming, disabled, slashComma
       </View>
     </View>
   );
-}
-
-function getMatchingSlashCommands(text: string, slashCommands: SlashCommandItem[]): SlashCommandItem[] {
-  if (!text.startsWith('/') || text.includes(' ') || slashCommands.length === 0) return [];
-
-  const query = text.slice(1).toLowerCase();
-  return slashCommands
-    .filter((command) => {
-      const name = command.name.toLowerCase();
-      const description = command.description.toLowerCase();
-      return name.includes(query) || description.includes(query);
-    })
-    .slice(0, 6);
 }
 
 const styles = StyleSheet.create({

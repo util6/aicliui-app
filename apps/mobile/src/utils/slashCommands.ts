@@ -15,6 +15,22 @@ export type SlashCommandItem = {
   emptyTurnTipParams?: Record<string, unknown>;
 };
 
+const SLASH_QUERY_RE = /^\/([a-zA-Z0-9_-]*)$/;
+
+export function matchSlashQuery(input: string): string | null {
+  const match = input.match(SLASH_QUERY_RE);
+  return match ? match[1] : null;
+}
+
+export function filterSlashCommands(commands: SlashCommandItem[], query: string): SlashCommandItem[] {
+  const keyword = query.trim().toLowerCase();
+  if (!keyword) {
+    return commands;
+  }
+
+  return commands.filter((command) => command.name.toLowerCase().includes(keyword));
+}
+
 type AvailableCommandPayload = {
   name?: unknown;
   command?: unknown;
