@@ -499,6 +499,16 @@ async function sendMessage(params, emit) {
       data: [tool],
     });
   };
+  const emitAssistantCodexTool = (tool) => {
+    if (!tool) return;
+    upsertCodexToolCallMessage(conversationId, assistantMsgId, tool);
+    emit('chat.response.stream', {
+      type: 'codex_tool_call',
+      msg_id: assistantMsgId,
+      conversation_id: conversationId,
+      data: tool,
+    });
+  };
   const emitAssistantPermission = (confirmation) => {
     if (!confirmation || !confirmation.id) return;
     emit('confirmation.add', confirmation);
@@ -583,6 +593,7 @@ async function sendMessage(params, emit) {
         files: selectedFiles,
         signal: run.signal,
         onContent: emitAssistantContent,
+        onTool: emitAssistantCodexTool,
       });
       if (!assistantContent) assistantContent = 'Codex CLI completed, but no assistant text was returned.';
     } else {
@@ -1087,7 +1098,7 @@ async function sendGeminiPrompt({ input, workspace, model, approvalMode, files, 
   return fallback;
 }
 
-async function sendCodexPrompt({ input, workspace, model, approvalMode, files, signal, onContent }) {
+async function sendCodexPrompt({ input, workspace, model, approvalMode, files, signal, onContent, onTool }) {
   const prompt = appendSelectedFilesToPrompt(input, files, workspace);
   const args = buildCodexArgs({ input: prompt, model, approvalMode });
   let lineBuffer = '';
@@ -1101,8 +1112,10 @@ async function sendCodexPrompt({ input, workspace, model, approvalMode, files, s
     const lines = (lineBuffer + chunk.toString()).split(/\r?\n/);
     lineBuffer = lines.pop() || '';
     for (const line of lines) {
-      const text = parseCodexJsonLine(line);
-      emitContent(text);
+      const event = parseCodexJsonEvent(line);
+      emitContent(extractCodexEventText(event));
+      const tool = extractCodexToolUpdate(event);
+      if (tool) onTool?.(tool);
     }
   };
   const result = await runProcess('codex', args, {
@@ -1110,7 +1123,10 @@ async function sendCodexPrompt({ input, workspace, model, approvalMode, files, s
     signal,
     onStdout: handleStdout,
   });
-  emitContent(parseCodexJsonLine(lineBuffer));
+  const trailingEvent = parseCodexJsonEvent(lineBuffer);
+  emitContent(extractCodexEventText(trailingEvent));
+  const trailingTool = extractCodexToolUpdate(trailingEvent);
+  if (trailingTool) onTool?.(trailingTool);
   if (content) return content;
 
   const fallback = extractCodexJsonText(result.stdout) || result.stdout.trim();
@@ -1304,14 +1320,16 @@ function parseGeminiStreamJsonLine(line) {
 }
 
 function parseCodexJsonLine(line) {
+  return extractCodexEventText(parseCodexJsonEvent(line));
+}
+
+function parseCodexJsonEvent(line) {
   if (!line.trim()) return '';
-  let value;
   try {
-    value = JSON.parse(line);
+    return JSON.parse(line);
   } catch {
     return '';
   }
-  return extractCodexEventText(value);
 }
 
 function extractGeminiText(value) {
@@ -1352,6 +1370,67 @@ function extractCodexEventText(value) {
 
   if (isRecord(value.data)) return extractCodexEventText(value.data);
   return '';
+}
+
+function extractCodexToolUpdate(value) {
+  if (!isRecord(value)) return null;
+  const type = typeof value.type === 'string' ? value.type : '';
+  if (!(type === 'item.started' || type === 'item.completed')) return null;
+  const item = isRecord(value.item) ? value.item : {};
+  if (item.type === 'agent_message') return null;
+  if (item.type === 'command_execution') return codexCommandExecutionTool(type, item);
+  return codexGenericTool(type, item);
+}
+
+function codexCommandExecutionTool(type, item) {
+  const toolCallId = stringValue(item.id);
+  if (!toolCallId) return null;
+  const command = stringValue(item.command) || 'command';
+  const output = stringValue(item.aggregated_output) || '';
+  const description = [command, output.trim()].filter(Boolean).join('\n\n');
+  return {
+    toolCallId,
+    kind: 'command_execution',
+    title: command,
+    description,
+    status: codexToolStatus(type, item),
+  };
+}
+
+function codexGenericTool(type, item) {
+  const toolCallId = stringValue(item.id);
+  if (!toolCallId) return null;
+  const kind = stringValue(item.type) || 'tool';
+  return {
+    toolCallId,
+    kind,
+    title: codexToolTitle(item, kind),
+    description: codexToolDescription(item),
+    status: codexToolStatus(type, item),
+  };
+}
+
+function codexToolStatus(type, item) {
+  if (type === 'item.started' || item.status === 'in_progress') return 'executing';
+  if (item.status === 'failed' || item.status === 'error') return 'error';
+  if (typeof item.exit_code === 'number' && item.exit_code !== 0) return 'error';
+  if (type === 'item.completed' || item.status === 'completed') return 'success';
+  if (item.status === 'canceled' || item.status === 'cancelled') return 'canceled';
+  return 'pending';
+}
+
+function codexToolTitle(item, fallback) {
+  return stringValue(item.title) || stringValue(item.name) || stringValue(item.command) || fallback;
+}
+
+function codexToolDescription(item) {
+  return (
+    stringValue(item.description) ||
+    stringValue(item.aggregated_output) ||
+    stringValue(item.output) ||
+    stringValue(item.error) ||
+    ''
+  );
 }
 
 function extractGeminiCandidateText(value) {
@@ -1463,6 +1542,36 @@ function upsertToolGroupMessage(conversationId, msgId, tool) {
     conversation_id: conversationId,
     type: 'tool_group',
     content: [tool],
+    createdAt: now,
+  });
+  conversation.modifyTime = now;
+  void saveStore();
+}
+
+function upsertCodexToolCallMessage(conversationId, msgId, tool) {
+  const list = messages.get(conversationId);
+  const conversation = conversations.get(conversationId);
+  if (!list || !conversation || !tool.toolCallId) return;
+  const now = Date.now();
+
+  for (const message of list) {
+    if (message.type !== 'codex_tool_call' || !isRecord(message.content)) continue;
+    if (message.content.toolCallId === tool.toolCallId) {
+      message.content = { ...message.content, ...tool };
+      message.createdAt = message.createdAt || now;
+      conversation.modifyTime = now;
+      void saveStore();
+      return;
+    }
+  }
+
+  list.push({
+    id: randomId(),
+    msg_id: msgId,
+    conversation_id: conversationId,
+    type: 'codex_tool_call',
+    position: 'left',
+    content: tool,
     createdAt: now,
   });
   conversation.modifyTime = now;

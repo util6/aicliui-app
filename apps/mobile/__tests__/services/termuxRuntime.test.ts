@@ -143,6 +143,16 @@ describe('termuxRuntime', () => {
     expect(script).toContain('parseGeminiStreamJsonLine');
     expect(script).toContain('parseCodexJsonLine');
     expect(script).toContain('extractCodexEventText');
+    expect(script).toContain('extractCodexToolUpdate');
+    expect(script).toContain("type === 'item.started' || type === 'item.completed'");
+    expect(script).toContain("item.type === 'agent_message'");
+    expect(script).toContain("item.type === 'command_execution'");
+    expect(script).toContain("type: 'codex_tool_call'");
+    expect(script).toContain('data: tool');
+    expect(script).toContain('upsertCodexToolCallMessage(conversationId, assistantMsgId, tool);');
+    expect(script).toContain('function upsertCodexToolCallMessage(conversationId, msgId, tool)');
+    expect(script).toContain("message.type !== 'codex_tool_call'");
+    expect(script).toContain('message.content.toolCallId === tool.toolCallId');
     expect(script).toContain('buildCodexArgs({ input: prompt, model, approvalMode })');
     expect(script).toContain("'--json'");
     expect(script).toContain("'--skip-git-repo-check'");
@@ -221,6 +231,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain("return { success: true, stopped: true };");
     expect(script).toContain("runProcess('gemini', args, {");
     expect(script).toContain("runProcess('codex', args, {");
+    expect(script).toContain('onTool: emitAssistantCodexTool');
     expect(script).toContain("signal.addEventListener('abort', abort);");
     expect(script).toContain('exec node ./aicliui-daemon.mjs');
     expect(script).toContain('export AICLIUI_DAEMON_PID_FILE="$AICLIUI_HOME/daemon/daemon.pid"');
