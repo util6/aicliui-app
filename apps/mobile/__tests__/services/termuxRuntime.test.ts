@@ -4,6 +4,7 @@ import {
   openTermuxAppAsync,
   runCommandAsync,
 } from '@aicliui/termux';
+import { spawnSync } from 'node:child_process';
 import * as localRuntime from '@/src/services/localRuntime';
 import {
   buildTermuxBootstrapScript,
@@ -77,10 +78,36 @@ describe('termuxRuntime', () => {
     expect(script).toContain("printf %s 'tok'\\''en' > \"$AICLIUI_HOME/daemon/token\"");
     expect(script).toContain('pkg install -y nodejs');
     expect(script).toContain('npm install --omit=dev --prefix "$AICLIUI_HOME/daemon"');
+    expect(script).toContain('npm install -g opencode-ai@latest');
     expect(script).toContain("import { WebSocketServer } from 'ws';");
-    expect(script).toContain("if (key === 'chat.send.message') return sendMessage(params, emit);");
+    expect(script).toContain("import { spawn } from 'node:child_process';");
+    expect(script).toContain("opencode', ['serve', '--hostname', '127.0.0.1', '--port'");
+    expect(script).toContain('server listening on');
+    expect(script).toContain("'/api/session'");
+    expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/prompt'");
+    expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/wait'");
+    expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/context'");
+    expect(script).toContain("if (key === 'chat.send.message') return await sendMessage(params, emit);");
     expect(script).toContain('exec node ./aicliui-daemon.mjs');
     expect(script).toContain('nohup "$AICLIUI_HOME/bin/start-daemon.sh"');
+  });
+
+  it('generates a syntactically valid ESM daemon script', () => {
+    const script = buildTermuxBootstrapScript({
+      host: '127.0.0.1',
+      port: '43117',
+      token: 'runtime-token',
+    });
+    const match = script.match(/AICLIUI_DAEMON_SOURCE'\n([\s\S]*?)\nAICLIUI_DAEMON_SOURCE/);
+    expect(match).not.toBeNull();
+
+    const result = spawnSync(process.execPath, ['--input-type=module', '--check', '-'], {
+      input: match?.[1] ?? '',
+      encoding: 'utf8',
+    });
+
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
   });
 
   it('starts the local runtime through Termux RUN_COMMAND when prerequisites are ready', async () => {
