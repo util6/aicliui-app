@@ -24,6 +24,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     isStreaming,
     canSendMessage,
     queuedCommands,
+    isQueuePaused,
     thought,
     contextUsage,
     slashCommands,
@@ -31,6 +32,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     sendMessage,
     removeQueuedCommand,
     clearQueuedCommands,
+    resumeQueuedCommands,
     stopGeneration,
   } = useChat();
   const { conversations } = useConversations();
@@ -98,8 +100,10 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
       <ContextUsageIndicator usage={contextUsage} />
       <QueuedCommandPanel
         items={queuedCommands}
+        isPaused={isQueuePaused}
         onRemove={removeQueuedCommand}
         onClear={clearQueuedCommands}
+        onResume={resumeQueuedCommands}
       />
       <ChatInputBar
         onSend={sendMessage}

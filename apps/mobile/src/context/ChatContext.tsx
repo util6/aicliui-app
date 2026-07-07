@@ -37,11 +37,17 @@ export type QueuedCommand = {
   createdAt: number;
 };
 
+type QueuedCommandState = {
+  items: QueuedCommand[];
+  isPaused: boolean;
+};
+
 type ChatContextType = {
   messages: TMessage[];
   isStreaming: boolean;
   canSendMessage: boolean;
   queuedCommands: QueuedCommand[];
+  isQueuePaused: boolean;
   conversationId: string | null;
   confirmations: any[];
   contextUsage: { used: number; size: number } | null;
@@ -51,6 +57,7 @@ type ChatContextType = {
   sendMessage: (text: string, files?: string[]) => void;
   removeQueuedCommand: (commandId: string) => void;
   clearQueuedCommands: () => void;
+  resumeQueuedCommands: () => void;
   stopGeneration: () => void;
   confirmAction: (confirmationId: string, callId: string, confirmKey: string) => Promise<void>;
 };
@@ -62,6 +69,7 @@ const ChatContext = createContext<ChatContextType>({
   isStreaming: false,
   canSendMessage: true,
   queuedCommands: [],
+  isQueuePaused: false,
   conversationId: null,
   confirmations: [],
   contextUsage: null,
@@ -71,6 +79,7 @@ const ChatContext = createContext<ChatContextType>({
   sendMessage: () => {},
   removeQueuedCommand: () => {},
   clearQueuedCommands: () => {},
+  resumeQueuedCommands: () => {},
   stopGeneration: () => {},
   confirmAction: () => Promise.resolve(),
 });
@@ -80,6 +89,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [canSendMessage, setCanSendMessageState] = useState(true);
   const [queuedCommands, setQueuedCommandsState] = useState<QueuedCommand[]>([]);
+  const [isQueuePaused, setIsQueuePausedState] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [confirmations, setConfirmations] = useState<any[]>([]);
   const [contextUsage, setContextUsage] = useState<{ used: number; size: number } | null>(null);
@@ -90,6 +100,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const isStreamingRef = useRef(false);
   const canSendMessageRef = useRef(true);
   const queuedCommandsRef = useRef<QueuedCommand[]>([]);
+  const isQueuePausedRef = useRef(false);
   const activeConversationIdRef = useRef<string | null>(null);
   const suppressNextQueueDrainRef = useRef(false);
   const turnFinishedRef = useRef(false);
@@ -118,7 +129,24 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const shouldPersist = options?.persist !== false;
     const targetConversationId = options?.conversationId ?? activeConversationIdRef.current;
     if (shouldPersist && targetConversationId) {
-      void persistQueuedCommands(targetConversationId, resolved);
+      void persistQueuedCommandState(targetConversationId, {
+        items: resolved,
+        isPaused: isQueuePausedRef.current,
+      });
+    }
+  }, []);
+
+  const setQueuePaused = useCallback((value: boolean, options?: { persist?: boolean; conversationId?: string }) => {
+    isQueuePausedRef.current = value;
+    setIsQueuePausedState(value);
+
+    const shouldPersist = options?.persist !== false;
+    const targetConversationId = options?.conversationId ?? activeConversationIdRef.current;
+    if (shouldPersist && targetConversationId) {
+      void persistQueuedCommandState(targetConversationId, {
+        items: queuedCommandsRef.current,
+        isPaused: value,
+      });
     }
   }, []);
 
@@ -127,13 +155,14 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       try {
         const stored = await AsyncStorage.getItem(getQueuedCommandsStorageKey(id));
         if (requestId !== loadRequestRef.current) return;
-        const restored = normalizeStoredQueuedCommands(stored);
-        setQueuedCommands(restored, { persist: false, conversationId: id });
+        const restored = normalizeStoredQueuedCommandState(stored);
+        setQueuedCommands(restored.items, { persist: false, conversationId: id });
+        setQueuePaused(restored.isPaused, { persist: false, conversationId: id });
       } catch (e) {
         console.warn('[Chat] Failed to restore queued commands:', e);
       }
     },
-    [setQueuedCommands],
+    [setQueuePaused, setQueuedCommands],
   );
 
   const executeSend = useCallback(
@@ -192,7 +221,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   );
 
   const drainNextQueuedCommand = useCallback(() => {
-    if (!conversationId || !canSendMessageRef.current || isStreamingRef.current) return false;
+    if (!conversationId || isQueuePausedRef.current || !canSendMessageRef.current || isStreamingRef.current) return false;
     const [next, ...rest] = queuedCommandsRef.current;
     if (!next) return false;
     setQueuedCommands(rest);
@@ -200,9 +229,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       onSendFailure: () => {
         if (activeConversationIdRef.current !== conversationId) return;
         setQueuedCommands((current) => restoreQueuedCommand(current, next));
+        setQueuePaused(true);
       },
     });
-  }, [conversationId, executeSend, setQueuedCommands]);
+  }, [conversationId, executeSend, setQueuePaused, setQueuedCommands]);
 
   const completeActiveThinking = useCallback(
     (boundary: Pick<IResponseMessage, 'conversation_id' | 'createdAt' | 'created_at'>, duration?: number) => {
@@ -275,6 +305,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setConversationId(id);
     setMessages([]);
     setQueuedCommands([], { persist: false, conversationId: id });
+    setQueuePaused(false, { persist: false, conversationId: id });
     suppressNextQueueDrainRef.current = false;
     turnFinishedRef.current = false;
     activeThinkingRef.current = null;
@@ -326,7 +357,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     await restorePendingConfirmations(id, requestId);
     await refreshSlashCommands(id, requestId);
     await restoreQueuedCommands(id, requestId);
-  }, [refreshSlashCommands, restorePendingConfirmations, restoreQueuedCommands, setCanSendMessage, setQueuedCommands, setStreamingState]);
+  }, [
+    refreshSlashCommands,
+    restorePendingConfirmations,
+    restoreQueuedCommands,
+    setCanSendMessage,
+    setQueuePaused,
+    setQueuedCommands,
+    setStreamingState,
+  ]);
 
   // Subscribe to streaming responses
   useEffect(() => {
@@ -507,13 +546,20 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const removeQueuedCommand = useCallback(
     (commandId: string) => {
       setQueuedCommands((prev) => prev.filter((command) => command.id !== commandId));
+      setQueuePaused(false);
     },
-    [setQueuedCommands],
+    [setQueuePaused, setQueuedCommands],
   );
 
   const clearQueuedCommands = useCallback(() => {
     setQueuedCommands([]);
-  }, [setQueuedCommands]);
+    setQueuePaused(false);
+  }, [setQueuePaused, setQueuedCommands]);
+
+  const resumeQueuedCommands = useCallback(() => {
+    setQueuePaused(false);
+    drainNextQueuedCommand();
+  }, [drainNextQueuedCommand, setQueuePaused]);
 
   const stopGeneration = useCallback(() => {
     if (!conversationId) return;
@@ -561,6 +607,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         isStreaming,
         canSendMessage,
         queuedCommands,
+        isQueuePaused,
         conversationId,
         confirmations,
         contextUsage,
@@ -570,6 +617,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         sendMessage,
         removeQueuedCommand,
         clearQueuedCommands,
+        resumeQueuedCommands,
         stopGeneration,
         confirmAction,
       }}
@@ -687,30 +735,48 @@ function restoreQueuedCommand(commands: QueuedCommand[], failedCommand: QueuedCo
   return [failedCommand, ...commands.filter((command) => command.id !== failedCommand.id)];
 }
 
-async function persistQueuedCommands(conversationId: string, commands: QueuedCommand[]): Promise<void> {
+async function persistQueuedCommandState(conversationId: string, state: QueuedCommandState): Promise<void> {
   try {
     const key = getQueuedCommandsStorageKey(conversationId);
-    if (commands.length === 0) {
+    if (state.items.length === 0 && !state.isPaused) {
       await AsyncStorage.removeItem(key);
       return;
     }
 
-    await AsyncStorage.setItem(key, JSON.stringify(commands));
+    await AsyncStorage.setItem(key, JSON.stringify({
+      items: state.items,
+      isPaused: state.items.length > 0 ? state.isPaused : false,
+    }));
   } catch (e) {
     console.warn('[Chat] Failed to persist queued commands:', e);
   }
 }
 
-function normalizeStoredQueuedCommands(value: string | null): QueuedCommand[] {
-  if (!value) return [];
+function normalizeStoredQueuedCommandState(value: string | null): QueuedCommandState {
+  if (!value) return { items: [], isPaused: false };
 
   try {
     const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizeStoredQueuedCommand).filter((item): item is QueuedCommand => item !== null);
+    if (Array.isArray(parsed)) {
+      return {
+        items: normalizeStoredQueuedCommandItems(parsed),
+        isPaused: false,
+      };
+    }
+    if (typeof parsed !== 'object' || parsed === null) return { items: [], isPaused: false };
+    const state = parsed as Partial<QueuedCommandState>;
+    const items = Array.isArray(state.items) ? normalizeStoredQueuedCommandItems(state.items) : [];
+    return {
+      items,
+      isPaused: items.length > 0 ? state.isPaused === true : false,
+    };
   } catch {
-    return [];
+    return { items: [], isPaused: false };
   }
+}
+
+function normalizeStoredQueuedCommandItems(items: unknown[]): QueuedCommand[] {
+  return items.map(normalizeStoredQueuedCommand).filter((item): item is QueuedCommand => item !== null);
 }
 
 function normalizeStoredQueuedCommand(value: unknown): QueuedCommand | null {

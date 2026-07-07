@@ -38,6 +38,8 @@ function RuntimeProbe() {
     sendMessage,
     removeQueuedCommand,
     clearQueuedCommands,
+    isQueuePaused,
+    resumeQueuedCommands,
   } = useChat();
 
   useEffect(() => {
@@ -52,6 +54,7 @@ function RuntimeProbe() {
       <Text testID='queued-items'>
         {queuedCommands.map((command) => `${command.input}:${command.files.length}`).join('|')}
       </Text>
+      <Text testID='queue-paused'>{isQueuePaused ? 'paused' : 'active'}</Text>
       <Text testID='thought'>{thought?.subject ?? ''}</Text>
       <Text testID='messages'>{messages.map((message) => message.content?.content ?? '').join('|')}</Text>
       <Text testID='message-types'>{messages.map((message) => message.type).join('|')}</Text>
@@ -94,6 +97,9 @@ function RuntimeProbe() {
       </Text>
       <Text testID='clear-queue' onPress={clearQueuedCommands}>
         clear-queue
+      </Text>
+      <Text testID='resume-queue' onPress={resumeQueuedCommands}>
+        resume-queue
       </Text>
     </>
   );
@@ -474,7 +480,38 @@ describe('ChatContext runtime state', () => {
 
     await waitFor(() => expect(screen.getByTestId('queued-count').props.children).toBe(1));
     expect(screen.getByTestId('queued-items').props.children).toBe('resume later:1');
+    expect(screen.getByTestId('queue-paused').props.children).toBe('active');
     expect(mockAsyncStorage.getItem).toHaveBeenCalledWith('chat-command-queue/conv-1');
+  });
+
+  it('restores paused queued command state from local storage', async () => {
+    mockAsyncStorage.getItem.mockImplementation((key: string) => {
+      if (key === 'chat-command-queue/conv-1') {
+        return Promise.resolve(
+          JSON.stringify({
+            items: [
+              {
+                id: 'queued-1',
+                input: 'retry after daemon restart',
+                files: [],
+                createdAt: 123,
+              },
+            ],
+            isPaused: true,
+          }),
+        );
+      }
+      return Promise.resolve(null);
+    });
+
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('queued-items').props.children).toBe('retry after daemon restart:0'));
+    expect(screen.getByTestId('queue-paused').props.children).toBe('paused');
   });
 
   it('persists queued commands and removes persisted state when the queue is cleared', async () => {
@@ -500,12 +537,15 @@ describe('ChatContext runtime state', () => {
     const persistedPayload = JSON.parse(
       mockAsyncStorage.setItem.mock.calls.find(([key]) => key === 'chat-command-queue/conv-1')?.[1] ?? '[]',
     );
-    expect(persistedPayload).toEqual([
-      expect.objectContaining({
-        input: 'with files',
-        files: ['src/App.tsx'],
-      }),
-    ]);
+    expect(persistedPayload).toEqual({
+      items: [
+        expect.objectContaining({
+          input: 'with files',
+          files: ['src/App.tsx'],
+        }),
+      ],
+      isPaused: false,
+    });
 
     await act(async () => {
       fireEvent.press(screen.getByTestId('clear-queue'));
@@ -514,7 +554,7 @@ describe('ChatContext runtime state', () => {
     await waitFor(() => expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('chat-command-queue/conv-1'));
   });
 
-  it('restores a drained queued command when the send request fails', async () => {
+  it('pauses the queue after a drained queued command fails and resumes on request', async () => {
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     mockRequest.mockImplementation((name: string) => {
       if (name === 'database.get-conversation-messages') return Promise.resolve([]);
@@ -523,7 +563,7 @@ describe('ChatContext runtime state', () => {
       if (name === 'confirmation.list') return Promise.resolve([]);
       if (name === 'chat.send.message') {
         const sendCount = mockRequest.mock.calls.filter(([requestName]) => requestName === name).length;
-        return sendCount === 1 ? Promise.resolve({ success: true }) : Promise.reject(new Error('daemon offline'));
+        return sendCount === 2 ? Promise.reject(new Error('daemon offline')) : Promise.resolve({ success: true });
       }
       return Promise.reject(new Error(`Unexpected bridge request ${name}`));
     });
@@ -553,6 +593,7 @@ describe('ChatContext runtime state', () => {
     });
 
     await waitFor(() => expect(screen.getByTestId('queued-items').props.children).toBe('second:0'));
+    expect(screen.getByTestId('queue-paused').props.children).toBe('paused');
     expect(screen.getByTestId('streaming').props.children).toBe('idle');
     expect(screen.getByTestId('can-send').props.children).toBe('can-send');
     expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(2);
@@ -561,6 +602,34 @@ describe('ChatContext runtime state', () => {
         'chat-command-queue/conv-1',
         expect.stringContaining('second'),
       ),
+    );
+    const pausedPayload = JSON.parse(
+      mockAsyncStorage.setItem.mock.calls.filter(([key]) => key === 'chat-command-queue/conv-1').at(-1)?.[1] ?? '{}',
+    );
+    expect(pausedPayload).toEqual({
+      items: [
+        expect.objectContaining({
+          input: 'second',
+        }),
+      ],
+      isPaused: true,
+    });
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('resume-queue'));
+    });
+
+    expect(screen.getByTestId('queued-count').props.children).toBe(0);
+    expect(screen.getByTestId('queue-paused').props.children).toBe('active');
+    expect(screen.getByTestId('streaming').props.children).toBe('streaming');
+    expect(screen.getByTestId('can-send').props.children).toBe('blocked');
+    expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(3);
+    expect(mockRequest).toHaveBeenLastCalledWith(
+      'chat.send.message',
+      expect.objectContaining({
+        input: 'second',
+        conversation_id: 'conv-1',
+      }),
     );
     warnSpy.mockRestore();
   });

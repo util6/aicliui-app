@@ -43,6 +43,30 @@ describe('QueuedCommandPanel', () => {
     expect(onClear).toHaveBeenCalledTimes(1);
   });
 
+  it('shows paused status and resumes the queue', () => {
+    const onResume = jest.fn();
+    const screen = render(
+      <QueuedCommandPanel
+        items={[
+          {
+            id: 'queue-1',
+            input: 'retry this command',
+            files: [],
+            createdAt: 1,
+          },
+        ]}
+        isPaused
+        onRemove={jest.fn()}
+        onClear={jest.fn()}
+        onResume={onResume}
+      />,
+    );
+
+    expect(screen.getByText('Paused')).toBeTruthy();
+    fireEvent.press(screen.getByText('Resume'));
+    expect(onResume).toHaveBeenCalledTimes(1);
+  });
+
   it('stays hidden when there are no queued commands', () => {
     const screen = render(<QueuedCommandPanel items={[]} onRemove={jest.fn()} onClear={jest.fn()} />);
 

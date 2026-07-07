@@ -8,17 +8,26 @@ import type { QueuedCommand } from '../../context/ChatContext';
 
 type QueuedCommandPanelProps = {
   items: QueuedCommand[];
+  isPaused?: boolean;
   onRemove: (commandId: string) => void;
   onClear: () => void;
+  onResume?: () => void;
 };
 
-export function QueuedCommandPanel({ items, onRemove, onClear }: QueuedCommandPanelProps) {
+export function QueuedCommandPanel({
+  items,
+  isPaused = false,
+  onRemove,
+  onClear,
+  onResume,
+}: QueuedCommandPanelProps) {
   const { t } = useTranslation();
   const surface = useThemeColor({}, 'surface');
   const border = useThemeColor({}, 'border');
   const textSecondary = useThemeColor({}, 'textSecondary');
   const tint = useThemeColor({}, 'tint');
   const error = useThemeColor({}, 'error');
+  const warning = useThemeColor({}, 'warning');
 
   if (items.length === 0) {
     return null;
@@ -35,12 +44,26 @@ export function QueuedCommandPanel({ items, onRemove, onClear }: QueuedCommandPa
           <ThemedText style={[styles.count, { color: textSecondary }]}>
             {t('chat.queuedCommands', { count: items.length, defaultValue: `${items.length} queued` })}
           </ThemedText>
+          {isPaused && (
+            <ThemedText style={[styles.pausedLabel, { color: warning }]}>
+              {t('chat.queuePaused', { defaultValue: 'Paused' })}
+            </ThemedText>
+          )}
         </View>
-        <TouchableOpacity accessibilityRole='button' onPress={onClear} activeOpacity={0.7}>
-          <ThemedText style={[styles.clearText, { color: error }]}>
-            {t('chat.clearQueuedCommands', { defaultValue: 'Clear' })}
-          </ThemedText>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {isPaused && onResume && (
+            <TouchableOpacity accessibilityRole='button' onPress={onResume} activeOpacity={0.7}>
+              <ThemedText style={[styles.resumeText, { color: tint }]}>
+                {t('chat.resumeQueuedCommands', { defaultValue: 'Resume' })}
+              </ThemedText>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity accessibilityRole='button' onPress={onClear} activeOpacity={0.7}>
+            <ThemedText style={[styles.clearText, { color: error }]}>
+              {t('chat.clearQueuedCommands', { defaultValue: 'Clear' })}
+            </ThemedText>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView style={styles.list} contentContainerStyle={styles.listContent} bounces={false}>
@@ -122,6 +145,21 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
   clearText: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
+  pausedLabel: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  resumeText: {
     fontSize: 12,
     lineHeight: 16,
     fontWeight: '700',

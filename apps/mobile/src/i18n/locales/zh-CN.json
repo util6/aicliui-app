@@ -112,6 +112,8 @@
     "queuedCommandFiles": "{{count}} 个文件",
     "removeQueuedCommand": "移除排队命令",
     "clearQueuedCommands": "清空",
+    "queuePaused": "已暂停",
+    "resumeQueuedCommands": "继续",
     "toolSummaryExecuting": "正在执行…",
     "toolSummaryCompleted": "执行了 {{count}} 个步骤",
     "toolSummaryWithErrors": "执行了 {{count}} 个步骤（{{errorCount}} 个失败）"

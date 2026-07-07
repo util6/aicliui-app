@@ -112,6 +112,8 @@
     "queuedCommandFiles": "{{count}} file(s)",
     "removeQueuedCommand": "Remove queued command",
     "clearQueuedCommands": "Clear",
+    "queuePaused": "Paused",
+    "resumeQueuedCommands": "Resume",
     "toolSummaryExecuting": "Executing...",
     "toolSummaryCompleted": "Executed {{count}} steps",
     "toolSummaryWithErrors": "Executed {{count}} steps ({{errorCount}} failed)"
