@@ -1,5 +1,5 @@
 import { renderHook } from '@testing-library/react-native';
-import { useProcessedMessages } from '@/src/hooks/useProcessedMessages';
+import { countErrors, getCurrentStepName, isGroupComplete, useProcessedMessages } from '@/src/hooks/useProcessedMessages';
 import type { TMessage } from '@/src/utils/messageAdapter';
 
 const makeMessage = (overrides: Partial<TMessage>): TMessage => ({
@@ -42,5 +42,40 @@ describe('useProcessedMessages', () => {
       type: 'tool_summary',
       messages: [visibleTool],
     });
+  });
+});
+
+describe('tool summary helpers', () => {
+  it('treats desktop-style completed tool_call status as complete', () => {
+    expect(
+      isGroupComplete([
+        makeMessage({
+          type: 'tool_call',
+          content: { call_id: 'call-1', name: 'Shell', status: 'completed' },
+        }),
+      ]),
+    ).toBe(true);
+  });
+
+  it('counts desktop-style failed tool_call status as an error', () => {
+    expect(
+      countErrors([
+        makeMessage({
+          type: 'tool_call',
+          content: { call_id: 'call-1', name: 'Shell', status: 'failed' },
+        }),
+      ]),
+    ).toBe(1);
+  });
+
+  it('uses desktop-style running tool_call as the current step', () => {
+    expect(
+      getCurrentStepName([
+        makeMessage({
+          type: 'tool_call',
+          content: { call_id: 'call-1', name: 'Shell', status: 'running' },
+        }),
+      ]),
+    ).toBe('Shell');
   });
 });

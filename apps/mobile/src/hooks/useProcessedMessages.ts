@@ -22,7 +22,7 @@ export function isGroupComplete(messages: TMessage[]): boolean {
     }
     if (msg.type === 'tool_call') {
       const s = msg.content?.status;
-      return s === 'success' || s === 'error' || s === 'canceled';
+      return isCompletedStatus(s) || isErrorStatus(s) || isCanceledStatus(s);
     }
     if (msg.type === 'acp_tool_call') {
       const s = msg.content?.update?.status;
@@ -30,7 +30,7 @@ export function isGroupComplete(messages: TMessage[]): boolean {
     }
     if (msg.type === 'codex_tool_call') {
       const s = msg.content?.status;
-      return s === 'success' || s === 'error' || s === 'canceled';
+      return isCompletedStatus(s) || isErrorStatus(s) || isCanceledStatus(s);
     }
     return true;
   });
@@ -54,11 +54,11 @@ export function countErrors(messages: TMessage[]): number {
     if (msg.type === 'tool_group' && Array.isArray(msg.content)) {
       count += msg.content.filter((t: any) => t.status === 'Error').length;
     } else if (msg.type === 'tool_call') {
-      if (msg.content?.status === 'error') count++;
+      if (isErrorStatus(msg.content?.status)) count++;
     } else if (msg.type === 'acp_tool_call') {
       if (msg.content?.update?.status === 'failed') count++;
     } else if (msg.type === 'codex_tool_call') {
-      if (msg.content?.status === 'error') count++;
+      if (isErrorStatus(msg.content?.status)) count++;
     }
   }
   return count;
@@ -73,7 +73,7 @@ export function getCurrentStepName(messages: TMessage[]): string {
         if (t.status === 'Executing') return t.description || t.name || '';
       }
     } else if (msg.type === 'tool_call') {
-      if (msg.content?.status !== 'success' && msg.content?.status !== 'error') {
+      if (!isCompletedStatus(msg.content?.status) && !isErrorStatus(msg.content?.status)) {
         return msg.content?.name || '';
       }
     } else if (msg.type === 'acp_tool_call') {
@@ -81,7 +81,7 @@ export function getCurrentStepName(messages: TMessage[]): string {
         return msg.content?.update?.title || msg.content?.update?.kind || '';
       }
     } else if (msg.type === 'codex_tool_call') {
-      if (msg.content?.status !== 'success' && msg.content?.status !== 'error') {
+      if (!isCompletedStatus(msg.content?.status) && !isErrorStatus(msg.content?.status)) {
         return msg.content?.title || msg.content?.description || '';
       }
     }
@@ -114,4 +114,23 @@ export function useProcessedMessages(messages: TMessage[]): ProcessedItem[] {
 
     return result;
   }, [messages]);
+}
+
+function normalizedStatus(status: string | undefined): string {
+  return typeof status === 'string' ? status.toLowerCase() : '';
+}
+
+function isCompletedStatus(status: string | undefined): boolean {
+  const value = normalizedStatus(status);
+  return value === 'success' || value === 'completed';
+}
+
+function isErrorStatus(status: string | undefined): boolean {
+  const value = normalizedStatus(status);
+  return value === 'error' || value === 'failed';
+}
+
+function isCanceledStatus(status: string | undefined): boolean {
+  const value = normalizedStatus(status);
+  return value === 'canceled' || value === 'cancelled';
 }

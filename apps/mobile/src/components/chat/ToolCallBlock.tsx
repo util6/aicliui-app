@@ -63,7 +63,7 @@ export function ToolCallBlock({ content, type }: ToolCallBlockProps) {
     return (
       <View style={[styles.container, { backgroundColor: surface }]}>
         {content.map((tool: any, i: number) => (
-          <ToolItem key={tool.callId || i} tool={tool} surface={surface} border={border} iconColor={iconColor} />
+          <ToolItem key={tool.callId || tool.call_id || i} tool={tool} surface={surface} border={border} iconColor={iconColor} />
         ))}
       </View>
     );
@@ -75,9 +75,10 @@ export function ToolCallBlock({ content, type }: ToolCallBlockProps) {
         <ToolItem
           tool={{
             name: content.name,
-            description: content.name,
-            status: content.status === 'success' ? 'Success' : content.status === 'error' ? 'Error' : 'Executing',
-            callId: content.callId,
+            description: content.description || content.name,
+            status: normalizeToolItemStatus(content.status),
+            callId: content.callId || content.call_id,
+            resultDisplay: content.resultDisplay || content.result_display || content.output,
           }}
           surface={surface}
           border={border}
@@ -106,6 +107,7 @@ export function ToolCallBlock({ content, type }: ToolCallBlockProps) {
     const acpStatus = mapAcpStatus(update.status || 'pending');
     const title = update.title || update.kind || t('chat.toolCall');
     const info = statusIcons[acpStatus] || statusIcons.pending;
+    const detail = update.description || formatToolValue(update.rawInput ?? update.raw_input);
 
     return (
       <View style={[styles.container, { backgroundColor: surface }]}>
@@ -120,9 +122,9 @@ export function ToolCallBlock({ content, type }: ToolCallBlockProps) {
           </ThemedText>
           <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={iconColor} />
         </TouchableOpacity>
-        {expanded && update.description && (
+        {expanded && detail && (
           <View style={[styles.detail, { backgroundColor: surface }]}>
-            <ThemedText type='caption'>{update.description}</ThemedText>
+            <ThemedText type='caption'>{detail}</ThemedText>
           </View>
         )}
       </View>
@@ -309,8 +311,9 @@ export function ToolItem({
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const statusIcons = useStatusIcons();
-  const status = tool.status || 'Executing';
+  const status = normalizeToolItemStatus(tool.status);
   const info = statusIcons[status as keyof typeof statusIcons] || statusIcons.Pending;
+  const resultDisplay = getToolResultDisplay(tool);
 
   return (
     <View>
@@ -328,15 +331,45 @@ export function ToolItem({
       {expanded && (
         <View style={[styles.detail, { backgroundColor: surface }]}>
           {tool.name && <ThemedText type='caption'>{tool.name}</ThemedText>}
-          {typeof tool.resultDisplay === 'string' && tool.resultDisplay && (
+          {typeof resultDisplay === 'string' && resultDisplay && (
             <ThemedText type='caption' numberOfLines={8}>
-              {tool.resultDisplay}
+              {resultDisplay}
             </ThemedText>
           )}
         </View>
       )}
     </View>
   );
+}
+
+function normalizeToolItemStatus(status: string | undefined): string {
+  if (!status) return 'Executing';
+  const lower = status.toLowerCase();
+  if (lower === 'success' || lower === 'completed') return 'Success';
+  if (lower === 'error' || lower === 'failed') return 'Error';
+  if (lower === 'canceled' || lower === 'cancelled') return 'Canceled';
+  if (lower === 'pending') return 'Pending';
+  return 'Executing';
+}
+
+function getToolResultDisplay(tool: any): string | undefined {
+  const value = tool.resultDisplay ?? tool.result_display ?? tool.output;
+  if (!value) return undefined;
+  if (typeof value === 'string') return value;
+  if (typeof value.file_diff === 'string') return value.file_diff;
+  if (typeof value.relative_path === 'string') return value.relative_path;
+  if (typeof value.img_url === 'string') return value.img_url;
+  return formatToolValue(value);
+}
+
+function formatToolValue(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 const styles = StyleSheet.create({
