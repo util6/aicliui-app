@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { bridge } from '../services/bridge';
 import { consumePendingInitialMessage } from '../services/pendingInitialMessages';
 import { transformMessage, composeMessage, type TMessage, type IResponseMessage } from '../utils/messageAdapter';
@@ -50,6 +51,8 @@ type ChatContextType = {
   confirmAction: (confirmationId: string, callId: string, confirmKey: string) => Promise<void>;
 };
 
+const getQueuedCommandsStorageKey = (conversationId: string) => `chat-command-queue/${conversationId}`;
+
 const ChatContext = createContext<ChatContextType>({
   messages: [],
   isStreaming: false,
@@ -83,6 +86,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const isStreamingRef = useRef(false);
   const canSendMessageRef = useRef(true);
   const queuedCommandsRef = useRef<QueuedCommand[]>([]);
+  const activeConversationIdRef = useRef<string | null>(null);
   const suppressNextQueueDrainRef = useRef(false);
   const turnFinishedRef = useRef(false);
   const activeThinkingRef = useRef<{ msgId: string; startedAt: number } | null>(null);
@@ -99,11 +103,34 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setCanSendMessageState(value);
   }, []);
 
-  const setQueuedCommands = useCallback((next: QueuedCommand[] | ((prev: QueuedCommand[]) => QueuedCommand[])) => {
+  const setQueuedCommands = useCallback((
+    next: QueuedCommand[] | ((prev: QueuedCommand[]) => QueuedCommand[]),
+    options?: { persist?: boolean; conversationId?: string },
+  ) => {
     const resolved = typeof next === 'function' ? next(queuedCommandsRef.current) : next;
     queuedCommandsRef.current = resolved;
     setQueuedCommandsState(resolved);
+
+    const shouldPersist = options?.persist !== false;
+    const targetConversationId = options?.conversationId ?? activeConversationIdRef.current;
+    if (shouldPersist && targetConversationId) {
+      void persistQueuedCommands(targetConversationId, resolved);
+    }
   }, []);
+
+  const restoreQueuedCommands = useCallback(
+    async (id: string, requestId = loadRequestRef.current) => {
+      try {
+        const stored = await AsyncStorage.getItem(getQueuedCommandsStorageKey(id));
+        if (requestId !== loadRequestRef.current) return;
+        const restored = normalizeStoredQueuedCommands(stored);
+        setQueuedCommands(restored, { persist: false, conversationId: id });
+      } catch (e) {
+        console.warn('[Chat] Failed to restore queued commands:', e);
+      }
+    },
+    [setQueuedCommands],
+  );
 
   const executeSend = useCallback(
     (text: string, files?: string[]) => {
@@ -234,9 +261,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   // Load message history
   const loadConversation = useCallback(async (id: string) => {
     const requestId = ++loadRequestRef.current;
+    activeConversationIdRef.current = id;
     setConversationId(id);
     setMessages([]);
-    setQueuedCommands([]);
+    setQueuedCommands([], { persist: false, conversationId: id });
     suppressNextQueueDrainRef.current = false;
     turnFinishedRef.current = false;
     activeThinkingRef.current = null;
@@ -287,7 +315,8 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
     await restorePendingConfirmations(id, requestId);
     await refreshSlashCommands(id, requestId);
-  }, [refreshSlashCommands, restorePendingConfirmations, setCanSendMessage, setStreamingState]);
+    await restoreQueuedCommands(id, requestId);
+  }, [refreshSlashCommands, restorePendingConfirmations, restoreQueuedCommands, setCanSendMessage, setQueuedCommands, setStreamingState]);
 
   // Subscribe to streaming responses
   useEffect(() => {
@@ -642,6 +671,51 @@ function isProcessingConversationStatus(status: unknown): boolean {
 
 function uniqueFiles(files: string[] | undefined): string[] {
   return Array.from(new Set((files ?? []).filter((file) => typeof file === 'string' && file.length > 0)));
+}
+
+async function persistQueuedCommands(conversationId: string, commands: QueuedCommand[]): Promise<void> {
+  try {
+    const key = getQueuedCommandsStorageKey(conversationId);
+    if (commands.length === 0) {
+      await AsyncStorage.removeItem(key);
+      return;
+    }
+
+    await AsyncStorage.setItem(key, JSON.stringify(commands));
+  } catch (e) {
+    console.warn('[Chat] Failed to persist queued commands:', e);
+  }
+}
+
+function normalizeStoredQueuedCommands(value: string | null): QueuedCommand[] {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeStoredQueuedCommand).filter((item): item is QueuedCommand => item !== null);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeStoredQueuedCommand(value: unknown): QueuedCommand | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const command = value as Partial<QueuedCommand>;
+  if (typeof command.id !== 'string' || command.id.length === 0) return null;
+  if (typeof command.input !== 'string') return null;
+  if (!Array.isArray(command.files)) return null;
+  if (typeof command.createdAt !== 'number' || !Number.isFinite(command.createdAt)) return null;
+
+  const input = command.input.trim();
+  if (!input) return null;
+
+  return {
+    id: command.id,
+    input,
+    files: uniqueFiles(command.files),
+    createdAt: command.createdAt,
+  };
 }
 
 function normalizeRuntimeSummary(value: unknown): RuntimeSummary | null {

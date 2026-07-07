@@ -3,6 +3,7 @@ import { Text } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { ChatProvider, useChat } from '@/src/context/ChatContext';
 import { bridge } from '@/src/services/bridge';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 jest.mock('@/src/services/bridge', () => ({
   bridge: {
@@ -12,6 +13,7 @@ jest.mock('@/src/services/bridge', () => ({
 }));
 
 const mockRequest = bridge.request as jest.Mock;
+const mockAsyncStorage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
 
 function Probe() {
   const { loadConversation, slashCommands } = useChat();
@@ -210,6 +212,12 @@ describe('ChatContext runtime state', () => {
   beforeEach(() => {
     listeners.clear();
     mockRequest.mockReset();
+    mockAsyncStorage.getItem.mockReset();
+    mockAsyncStorage.setItem.mockReset();
+    mockAsyncStorage.removeItem.mockReset();
+    mockAsyncStorage.getItem.mockResolvedValue(null);
+    mockAsyncStorage.setItem.mockResolvedValue(undefined);
+    mockAsyncStorage.removeItem.mockResolvedValue(undefined);
     mockRequest.mockImplementation((name: string) => {
       if (name === 'database.get-conversation-messages') return Promise.resolve([]);
       if (name === 'conversation.get') return Promise.resolve(null);
@@ -433,6 +441,77 @@ describe('ChatContext runtime state', () => {
     });
 
     expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(1);
+  });
+
+  it('restores queued commands from local storage for the active conversation', async () => {
+    mockAsyncStorage.getItem.mockImplementation((key: string) => {
+      if (key === 'chat-command-queue/conv-1') {
+        return Promise.resolve(
+          JSON.stringify([
+            {
+              id: 'queued-1',
+              input: 'resume later',
+              files: ['src/App.tsx', 'src/App.tsx', ''],
+              createdAt: 123,
+            },
+            {
+              id: 'invalid-empty',
+              input: '   ',
+              files: [],
+              createdAt: 456,
+            },
+          ]),
+        );
+      }
+      return Promise.resolve(null);
+    });
+
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('queued-count').props.children).toBe(1));
+    expect(screen.getByTestId('queued-items').props.children).toBe('resume later:1');
+    expect(mockAsyncStorage.getItem).toHaveBeenCalledWith('chat-command-queue/conv-1');
+  });
+
+  it('persists queued commands and removes persisted state when the queue is cleared', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('can-send').props.children).toBe('can-send'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('send'));
+      fireEvent.press(screen.getByTestId('send-files'));
+    });
+
+    await waitFor(() =>
+      expect(mockAsyncStorage.setItem).toHaveBeenCalledWith(
+        'chat-command-queue/conv-1',
+        expect.stringContaining('with files'),
+      ),
+    );
+    const persistedPayload = JSON.parse(
+      mockAsyncStorage.setItem.mock.calls.find(([key]) => key === 'chat-command-queue/conv-1')?.[1] ?? '[]',
+    );
+    expect(persistedPayload).toEqual([
+      expect.objectContaining({
+        input: 'with files',
+        files: ['src/App.tsx'],
+      }),
+    ]);
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('clear-queue'));
+    });
+
+    await waitFor(() => expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('chat-command-queue/conv-1'));
   });
 
   it('restores runtime summary gate when a conversation is opened', async () => {
