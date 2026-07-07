@@ -51,7 +51,7 @@ const agents = [
 const server = new WebSocketServer({ host: '127.0.0.1', port });
 
 server.on('connection', (socket, request) => {
-  if (token && request.headers['sec-websocket-protocol'] !== token) {
+  if (token && !isAuthorized(request.headers['sec-websocket-protocol'], token)) {
     socket.close(1008, 'auth_failed');
     return;
   }
@@ -1907,6 +1907,13 @@ async function updateConversation(id, updates) {
 
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isAuthorized(protocolHeader, expected) {
+  if (Array.isArray(protocolHeader)) {
+    return protocolHeader.includes(expected);
+  }
+  return protocolHeader === expected;
 }
 
 function requiredString(value) {

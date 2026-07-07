@@ -28,4 +28,13 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('function redactRuntimeErrorText(text)');
     expect(TERMUX_DAEMON_SOURCE).toContain('[redacted]');
   });
+
+  it('authorizes WebSocket protocol headers with the same helper as the package daemon', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain(
+      "if (token && !isAuthorized(request.headers['sec-websocket-protocol'], token)) {",
+    );
+    expect(TERMUX_DAEMON_SOURCE).toContain('function isAuthorized(protocolHeader, expected)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('Array.isArray(protocolHeader)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('protocolHeader.includes(expected)');
+  });
 });
