@@ -37,6 +37,7 @@ function RuntimeProbe() {
     messages,
     contextUsage,
     confirmations,
+    artifacts,
     sendMessage,
     removeQueuedCommand,
     editQueuedCommand,
@@ -45,6 +46,7 @@ function RuntimeProbe() {
     isQueuePaused,
     resumeQueuedCommands,
     moveQueuedCommand,
+    updateArtifactStatus,
   } = useChat();
 
   useEffect(() => {
@@ -82,6 +84,7 @@ function RuntimeProbe() {
           .join('|')}
       </Text>
       <Text testID='confirmations'>{confirmations.map((confirmation) => confirmation.id).join('|')}</Text>
+      <Text testID='artifacts'>{artifacts.map((artifact) => `${artifact.id}:${artifact.status}`).join('|')}</Text>
       <Text testID='confirmation-titles'>
         {confirmations.map((confirmation) => confirmation.title ?? '').join('|')}
       </Text>
@@ -140,6 +143,15 @@ function RuntimeProbe() {
       </Text>
       <Text testID='resume-queue' onPress={resumeQueuedCommands}>
         resume-queue
+      </Text>
+      <Text
+        testID='dismiss-first-artifact'
+        onPress={() => {
+          const [first] = artifacts;
+          if (first) void updateArtifactStatus(first.id, 'dismissed');
+        }}
+      >
+        dismiss-first-artifact
       </Text>
       <Text
         testID='move-last-up'
@@ -286,8 +298,25 @@ describe('ChatContext runtime state', () => {
       if (name === 'database.get-conversation-messages') return Promise.resolve([]);
       if (name === 'conversation.get') return Promise.resolve(null);
       if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
+      if (name === 'conversation.list-artifacts') return Promise.resolve([]);
       if (name === 'confirmation.list') return Promise.resolve([]);
       if (name === 'chat.send.message') return Promise.resolve({ success: true });
+      if (name === 'conversation.update-artifact') {
+        return Promise.resolve({
+          id: 'artifact-1',
+          conversation_id: 'conv-1',
+          kind: 'skill_suggest',
+          status: 'dismissed',
+          payload: {
+            cron_job_id: 'cron-1',
+            name: 'Review skill',
+            description: 'Review local changes',
+            skill_content: '# Review',
+          },
+          created_at: 1200,
+          updated_at: 1300,
+        });
+      }
       return Promise.reject(new Error(`Unexpected bridge request ${name}`));
     });
     (bridge.on as jest.Mock).mockImplementation((name: string, handler: (data: unknown) => void) => {
@@ -470,6 +499,100 @@ describe('ChatContext runtime state', () => {
     expect(screen.getByTestId('message-count').props.children).toBe(1);
     expect(screen.getByTestId('messages').props.children).toBe('hello');
     expect(screen.getByTestId('message-meta').props.children).toBe(`${sendPayload?.msg_id}:right:finish:4321`);
+  });
+
+  it('loads and updates AionUi conversation artifacts for the active chat', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-conversation-messages') return Promise.resolve([]);
+      if (name === 'conversation.get') return Promise.resolve(null);
+      if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
+      if (name === 'confirmation.list') return Promise.resolve([]);
+      if (name === 'conversation.list-artifacts') {
+        return Promise.resolve([
+          {
+            id: 'artifact-1',
+            conversation_id: 'conv-1',
+            kind: 'skill_suggest',
+            status: 'pending',
+            payload: {
+              cron_job_id: 'cron-1',
+              name: 'Review skill',
+              description: 'Review local changes',
+              skill_content: '# Review',
+            },
+            created_at: 1200,
+            updated_at: 1200,
+          },
+        ]);
+      }
+      if (name === 'conversation.update-artifact') {
+        return Promise.resolve({
+          id: 'artifact-1',
+          conversation_id: 'conv-1',
+          kind: 'skill_suggest',
+          status: 'dismissed',
+          payload: {
+            cron_job_id: 'cron-1',
+            name: 'Review skill',
+            description: 'Review local changes',
+            skill_content: '# Review',
+          },
+          created_at: 1200,
+          updated_at: 1400,
+        });
+      }
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('artifacts').props.children).toBe('artifact-1:pending'));
+    expect(mockRequest).toHaveBeenCalledWith('conversation.list-artifacts', {
+      conversation_id: 'conv-1',
+    });
+
+    await act(async () => {
+      listeners.get('conversation.artifact')?.({
+        id: 'artifact-1',
+        conversation_id: 'conv-1',
+        kind: 'skill_suggest',
+        status: 'saved',
+        payload: {
+          cron_job_id: 'cron-1',
+          name: 'Review skill',
+          description: 'Review local changes',
+          skill_content: '# Review',
+        },
+        created_at: 1200,
+        updated_at: 1300,
+      });
+      listeners.get('conversation.artifact')?.({
+        id: 'artifact-other',
+        conversation_id: 'conv-2',
+        kind: 'skill_suggest',
+        status: 'pending',
+        payload: {},
+        created_at: 1250,
+        updated_at: 1250,
+      });
+    });
+
+    expect(screen.getByTestId('artifacts').props.children).toBe('artifact-1:saved');
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('dismiss-first-artifact'));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('artifacts').props.children).toBe('artifact-1:dismissed'));
+    expect(mockRequest).toHaveBeenCalledWith('conversation.update-artifact', {
+      conversation_id: 'conv-1',
+      artifact_id: 'artifact-1',
+      status: 'dismissed',
+    });
   });
 
   it('removes a queued command before the queue drains', async () => {

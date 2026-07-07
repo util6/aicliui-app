@@ -6,14 +6,23 @@ import {
   isNormalizedToolBatchComplete,
   normalizeToolMessages,
 } from '../utils/normalizeToolCall';
+import { isVisibleConversationArtifact, type ConversationArtifact } from '../utils/artifacts';
 
 export type ToolSummaryVO = {
   type: 'tool_summary';
   id: string;
   messages: TMessage[];
+  created_at: number;
 };
 
-export type ProcessedItem = TMessage | ToolSummaryVO;
+export type ArtifactVO = {
+  type: 'artifact';
+  id: string;
+  artifact: ConversationArtifact;
+  created_at: number;
+};
+
+export type ProcessedItem = TMessage | ToolSummaryVO | ArtifactVO;
 
 const TOOL_CALL_TYPES: Set<TMessageType> = new Set(['tool_call', 'tool_group', 'acp_tool_call', 'codex_tool_call']);
 
@@ -37,7 +46,10 @@ export function getCurrentStepName(messages: TMessage[]): string {
   return getCurrentNormalizedToolName(normalizeToolMessages(messages));
 }
 
-export function useProcessedMessages(messages: TMessage[]): ProcessedItem[] {
+export function useProcessedMessages(
+  messages: TMessage[],
+  artifacts: readonly ConversationArtifact[] = [],
+): ProcessedItem[] {
   return useMemo(() => {
     const result: ProcessedItem[] = [];
     let toolBatch: TMessage[] = [];
@@ -45,7 +57,7 @@ export function useProcessedMessages(messages: TMessage[]): ProcessedItem[] {
     const flushBatch = () => {
       if (toolBatch.length === 0) return;
       const id = toolBatch.map((m) => m.id).join('-');
-      result.push({ type: 'tool_summary', id, messages: toolBatch });
+      result.push({ type: 'tool_summary', id, messages: toolBatch, created_at: getMessageCreatedAt(toolBatch[0]) });
       toolBatch = [];
     };
 
@@ -60,6 +72,26 @@ export function useProcessedMessages(messages: TMessage[]): ProcessedItem[] {
     }
     flushBatch();
 
-    return result;
-  }, [messages]);
+    const visibleArtifacts = artifacts
+      .filter(isVisibleConversationArtifact)
+      .map<ArtifactVO>((artifact) => ({
+        type: 'artifact',
+        id: artifact.id,
+        artifact,
+        created_at: artifact.created_at,
+      }));
+
+    return [...result, ...visibleArtifacts].sort((a, b) => getProcessedItemCreatedAt(a) - getProcessedItemCreatedAt(b));
+  }, [artifacts, messages]);
+}
+
+function getProcessedItemCreatedAt(item: ProcessedItem): number {
+  if ('type' in item && (item.type === 'tool_summary' || item.type === 'artifact')) {
+    return item.created_at;
+  }
+  return getMessageCreatedAt(item);
+}
+
+function getMessageCreatedAt(message: TMessage | undefined): number {
+  return message?.created_at ?? message?.createdAt ?? 0;
 }

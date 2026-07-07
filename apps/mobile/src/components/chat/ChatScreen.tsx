@@ -9,6 +9,7 @@ import { ChatSessionBar } from './ChatSessionBar';
 import { ContextUsageIndicator } from './ContextUsageIndicator';
 import { QueuedCommandPanel } from './QueuedCommandPanel';
 import { FilePickerSheet } from './FilePickerSheet';
+import { ConversationArtifactCard } from './ConversationArtifactCard';
 import { useChat } from '../../context/ChatContext';
 import { useConversations } from '../../context/ConversationContext';
 import { useThemeColor } from '../../hooks/useThemeColor';
@@ -62,6 +63,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     isQueuePaused,
     queuedCommandWarning,
     queuedCommandDraft,
+    artifacts,
     thought,
     contextUsage,
     slashCommands,
@@ -83,7 +85,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   const flatListRef = useRef<FlatList>(null);
   const background = useThemeColor({}, 'background');
   const surface = useThemeColor({}, 'surface');
-  const processedMessages = useProcessedMessages(messages);
+  const processedMessages = useProcessedMessages(messages, artifacts);
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === conversationId),
     [conversations, conversationId],
@@ -144,18 +146,21 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    if (messages.length > 0) {
+    if (processedMessages.length > 0) {
       // Small delay to ensure layout is ready
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
     }
-  }, [messages.length]);
+  }, [processedMessages.length]);
 
   const renderItem = useCallback(
     ({ item }: { item: ProcessedItem }) => {
       if (item.type === 'tool_summary') {
         return <ToolCallSummary messages={item.messages} isStreaming={isStreaming} />;
+      }
+      if (item.type === 'artifact') {
+        return <ConversationArtifactCard artifact={item.artifact} />;
       }
       return <MessageBubble message={item} />;
     },

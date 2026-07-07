@@ -155,6 +155,13 @@ jest.mock('@/src/components/chat/ToolCallSummary', () => ({
   },
 }));
 
+jest.mock('@/src/components/chat/ConversationArtifactCard', () => ({
+  ConversationArtifactCard: ({ artifact }: { artifact: { kind: string; payload?: { name?: string } } }) => {
+    const { Text } = require('react-native');
+    return <Text testID={`conversation-artifact-${artifact.kind}`}>{artifact.payload?.name ?? artifact.kind}</Text>;
+  },
+}));
+
 const mockUseChat = useChat as jest.Mock;
 
 describe('ChatScreen', () => {
@@ -267,6 +274,7 @@ describe('ChatScreen', () => {
       thought: null,
       contextUsage: null,
       slashCommands: [],
+      artifacts: [],
       loadConversation: jest.fn(),
       sendMessage: jest.fn(),
       removeQueuedCommand: jest.fn(),
@@ -276,6 +284,7 @@ describe('ChatScreen', () => {
       clearQueuedCommands: jest.fn(),
       resumeQueuedCommands: jest.fn(),
       stopGeneration: jest.fn(),
+      updateArtifactStatus: jest.fn(),
     });
   });
 
@@ -358,6 +367,46 @@ describe('ChatScreen', () => {
     ]);
     await waitFor(() => {
       expect(screen.getByTestId('chat-input-attachments').props.children).toEqual(['files:', 0]);
+    });
+  });
+
+  it('renders visible AionUi conversation artifacts inside the chat timeline', async () => {
+    mockUseChat.mockReturnValue({
+      ...mockUseChat.mock.results.at(-1)?.value,
+      messages: [
+        {
+          id: 'message-1',
+          msg_id: 'turn-1',
+          conversation_id: 'conv-1',
+          type: 'text',
+          position: 'left',
+          content: { content: 'hello' },
+          createdAt: 1000,
+          created_at: 1000,
+        },
+      ],
+      artifacts: [
+        {
+          id: 'artifact-1',
+          conversation_id: 'conv-1',
+          kind: 'skill_suggest',
+          status: 'pending',
+          payload: {
+            cron_job_id: 'cron-1',
+            name: 'Review skill',
+            description: 'Review local changes',
+            skill_content: '# Review',
+          },
+          created_at: 1200,
+          updated_at: 1200,
+        },
+      ],
+    });
+
+    const screen = render(<ChatScreen conversationId='conv-1' />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('conversation-artifact-skill_suggest').props.children).toBe('Review skill');
     });
   });
 });

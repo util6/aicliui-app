@@ -4,6 +4,14 @@ import { bridge } from '../services/bridge';
 import { consumePendingInitialMessage } from '../services/pendingInitialMessages';
 import { transformMessage, composeMessage, type TMessage, type IResponseMessage } from '../utils/messageAdapter';
 import { mapAvailableCommandsToSlashCommands, type SlashCommandItem } from '../utils/slashCommands';
+import {
+  isArtifactStatus,
+  normalizeConversationArtifact,
+  normalizeConversationArtifacts,
+  upsertConversationArtifacts,
+  type ConversationArtifact,
+  type ConversationArtifactStatus,
+} from '../utils/artifacts';
 import { uuid } from '../utils/uuid';
 import { useConnection } from './ConnectionContext';
 
@@ -82,6 +90,7 @@ type ChatContextType = {
   queuedCommandDraft: ChatInputDraft | null;
   conversationId: string | null;
   confirmations: any[];
+  artifacts: ConversationArtifact[];
   contextUsage: { used: number; size: number } | null;
   slashCommands: SlashCommandItem[];
   thought: ThoughtData;
@@ -95,6 +104,7 @@ type ChatContextType = {
   resumeQueuedCommands: () => void;
   stopGeneration: () => void;
   confirmAction: (confirmationId: string, callId: string, confirmKey: string) => Promise<void>;
+  updateArtifactStatus: (artifactId: string, status: ConversationArtifactStatus) => Promise<void>;
 };
 
 const getQueuedCommandsStorageKey = (conversationId: string) => `chat-command-queue/${conversationId}`;
@@ -109,6 +119,7 @@ const ChatContext = createContext<ChatContextType>({
   queuedCommandDraft: null,
   conversationId: null,
   confirmations: [],
+  artifacts: [],
   contextUsage: null,
   slashCommands: [],
   thought: null,
@@ -122,6 +133,7 @@ const ChatContext = createContext<ChatContextType>({
   resumeQueuedCommands: () => {},
   stopGeneration: () => {},
   confirmAction: () => Promise.resolve(),
+  updateArtifactStatus: () => Promise.resolve(),
 });
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
@@ -134,6 +146,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [queuedCommandDraft, setQueuedCommandDraft] = useState<ChatInputDraft | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [confirmations, setConfirmations] = useState<any[]>([]);
+  const [artifacts, setArtifacts] = useState<ConversationArtifact[]>([]);
   const [contextUsage, setContextUsage] = useState<{ used: number; size: number } | null>(null);
   const [slashCommands, setSlashCommands] = useState<SlashCommandItem[]>([]);
   const [thought, setThought] = useState<ThoughtData>(null);
@@ -332,6 +345,19 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const refreshArtifacts = useCallback(async (id: string, requestId = loadRequestRef.current) => {
+    try {
+      const data = await bridge.request('conversation.list-artifacts', {
+        conversation_id: id,
+      });
+      if (requestId !== loadRequestRef.current) return;
+      setArtifacts(upsertConversationArtifacts([], normalizeConversationArtifacts(data)));
+    } catch (e) {
+      if (isMissingArtifactRouteError(e)) return;
+      console.warn('[Chat] Failed to load conversation artifacts:', e);
+    }
+  }, []);
+
   const restorePendingConfirmations = useCallback(async (id: string, requestId = loadRequestRef.current) => {
     try {
       const list = await bridge.request<PendingConfirmation[]>('confirmation.list', {
@@ -365,6 +391,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setStreamingState(false);
     setCanSendMessage(true);
     setConfirmations([]);
+    setArtifacts([]);
     setContextUsage(null);
     setSlashCommands([]);
     setQueuedCommandWarning(null);
@@ -410,9 +437,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
 
     await restorePendingConfirmations(id, requestId);
+    await refreshArtifacts(id, requestId);
     await refreshSlashCommands(id, requestId);
     await restoreQueuedCommands(id, requestId);
   }, [
+    refreshArtifacts,
     refreshSlashCommands,
     restorePendingConfirmations,
     restoreQueuedCommands,
@@ -558,12 +587,19 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
+    const unsubArtifact = bridge.on('conversation.artifact', (data: unknown) => {
+      const artifact = normalizeConversationArtifact(data);
+      if (!artifact || artifact.conversation_id !== conversationId) return;
+      setArtifacts((prev) => upsertConversationArtifacts(prev, artifact));
+    });
+
     return () => {
       unsub();
       unsubUserCreated();
       unsubConfirmAdd();
       unsubConfirmUpdate();
       unsubConfirmRemove();
+      unsubArtifact();
     };
   }, [
     completeActiveThinking,
@@ -695,6 +731,30 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     [conversationId],
   );
 
+  const updateArtifactStatus = useCallback(
+    async (artifactId: string, status: ConversationArtifactStatus) => {
+      if (!conversationId || !artifactId || !isArtifactStatus(status)) return;
+      const response = await bridge.request('conversation.update-artifact', {
+        conversation_id: conversationId,
+        artifact_id: artifactId,
+        status,
+      });
+      const updated = normalizeConversationArtifact(response);
+      if (updated && updated.conversation_id === conversationId) {
+        setArtifacts((prev) => upsertConversationArtifacts(prev, updated));
+        return;
+      }
+      setArtifacts((prev) =>
+        prev.map((artifact) =>
+          artifact.id === artifactId
+            ? { ...artifact, status, updated_at: Date.now() }
+            : artifact,
+        ),
+      );
+    },
+    [conversationId],
+  );
+
   return (
     <ChatContext.Provider
       value={{
@@ -707,6 +767,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         queuedCommandDraft,
         conversationId,
         confirmations,
+        artifacts,
         contextUsage,
         slashCommands,
         thought,
@@ -720,6 +781,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         resumeQueuedCommands,
         stopGeneration,
         confirmAction,
+        updateArtifactStatus,
       }}
     >
       {children}
@@ -738,6 +800,14 @@ function isErrorStreamMessage(message: IResponseMessage): boolean {
     typeof message.data === 'object' &&
     message.data !== null &&
     (message.data as { type?: unknown }).type === 'error'
+  );
+}
+
+function isMissingArtifactRouteError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return (
+    message.includes('conversation.list-artifacts') &&
+    (message.includes('No bridge handler registered') || message.includes('Unexpected bridge request'))
   );
 }
 

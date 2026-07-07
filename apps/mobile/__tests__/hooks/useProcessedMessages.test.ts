@@ -43,6 +43,55 @@ describe('useProcessedMessages', () => {
       messages: [visibleTool],
     });
   });
+
+  it('inserts visible AionUi conversation artifacts into the chronological chat stream', () => {
+    const user = makeMessage({
+      id: 'user-1',
+      msg_id: 'user-turn',
+      position: 'right',
+      content: { content: 'run schedule' },
+      createdAt: 1000,
+      created_at: 1000,
+    });
+    const assistant = makeMessage({
+      id: 'assistant-1',
+      msg_id: 'assistant-turn',
+      position: 'left',
+      content: { content: 'done' },
+      createdAt: 3000,
+      created_at: 3000,
+    });
+    const skillSuggestion = {
+      id: 'artifact-skill',
+      conversation_id: 'conv-1',
+      kind: 'skill_suggest',
+      status: 'pending',
+      payload: {
+        cron_job_id: 'cron-1',
+        name: 'Review skill',
+        description: 'Review local changes',
+        skill_content: '# Review',
+      },
+      created_at: 2000,
+      updated_at: 2000,
+    } as const;
+    const dismissedSuggestion = {
+      ...skillSuggestion,
+      id: 'artifact-dismissed',
+      status: 'dismissed',
+      created_at: 2500,
+      updated_at: 2500,
+    } as const;
+
+    const { result } = renderHook(() => useProcessedMessages([user, assistant], [dismissedSuggestion, skillSuggestion]));
+
+    expect(result.current.map((item) => item.id)).toEqual(['user-1', 'artifact-skill', 'assistant-1']);
+    expect(result.current[1]).toMatchObject({
+      type: 'artifact',
+      artifact: skillSuggestion,
+      created_at: 2000,
+    });
+  });
 });
 
 describe('tool summary helpers', () => {
