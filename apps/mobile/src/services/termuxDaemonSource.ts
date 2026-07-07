@@ -22,6 +22,15 @@ let openCodeServerPromise = null;
 let saveQueue = Promise.resolve();
 const storeReady = loadStore();
 
+const geminiModels = parseModelOptions(
+  process.env.AICLIUI_GEMINI_MODELS,
+  [
+    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+    { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+  ],
+);
+
 const agents = [
   { backend: 'opencode', name: 'opencode', label: 'OpenCode' },
   { backend: 'gemini', name: 'gemini', label: 'Gemini CLI' },
@@ -83,7 +92,7 @@ async function route(key, data, emit) {
   const params = isRecord(data) ? data : {};
   if (key === 'runtime.get-status') return getRuntimeStatus();
   if (key === 'acp.get-available-agents') return { success: true, data: agents };
-  if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: null } };
+  if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: getModelInfo(params.backend) } };
   if (key === 'database.get-user-conversations') return listConversations(params.page, params.pageSize);
   if (key === 'database.get-conversation-messages') return messages.get(requiredString(params.conversation_id)) || [];
   if (key === 'create-conversation') return await createConversation(params);
@@ -335,6 +344,7 @@ function ensurePathInsideRoot(path, root) {
 async function createConversation(params) {
   const now = Date.now();
   const id = randomId();
+  const extra = isRecord(params.extra) ? params.extra : {};
   const conversation = {
     id,
     name: typeof params.name === 'string' && params.name.trim() ? params.name.trim() : 'New conversation',
@@ -342,8 +352,8 @@ async function createConversation(params) {
     status: 'finished',
     createTime: now,
     modifyTime: now,
-    model: isRecord(params.model) ? params.model : { id: '', useModel: '' },
-    extra: isRecord(params.extra) ? params.extra : {},
+    model: normalizeConversationModel(params.model, extra),
+    extra,
   };
   conversations.set(id, conversation);
   messages.set(id, []);
@@ -355,6 +365,46 @@ function listConversations(page = 0, pageSize = 100) {
   const start = Math.max(0, Number(page) || 0) * Math.max(1, Number(pageSize) || 100);
   const end = start + Math.max(1, Number(pageSize) || 100);
   return Array.from(conversations.values()).sort((a, b) => b.modifyTime - a.modifyTime).slice(start, end);
+}
+
+function getModelInfo(backend) {
+  if (backend !== 'gemini') return null;
+  return {
+    currentModelId: null,
+    currentModelLabel: 'Default Gemini model',
+    availableModels: geminiModels,
+    canSwitch: geminiModels.length > 0,
+    source: 'models',
+  };
+}
+
+function normalizeConversationModel(model, extra) {
+  if (isRecord(model) && (model.id || model.useModel)) {
+    return {
+      id: typeof model.id === 'string' ? model.id : '',
+      useModel: typeof model.useModel === 'string' ? model.useModel : '',
+    };
+  }
+  const currentModelId = typeof extra.currentModelId === 'string' ? extra.currentModelId : '';
+  return currentModelId ? { id: currentModelId, useModel: modelLabel(currentModelId) } : { id: '', useModel: '' };
+}
+
+function modelLabel(modelId) {
+  return geminiModels.find((model) => model.id === modelId)?.label || modelId;
+}
+
+function parseModelOptions(raw, fallback) {
+  if (typeof raw !== 'string' || !raw.trim()) return fallback;
+  const models = raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [id, label] = item.split(':');
+      return { id: id.trim(), label: (label || id).trim() };
+    })
+    .filter((item) => item.id);
+  return models.length ? models : fallback;
 }
 
 async function sendMessage(params, emit) {
