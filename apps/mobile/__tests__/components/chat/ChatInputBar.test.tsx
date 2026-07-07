@@ -124,6 +124,41 @@ describe('ChatInputBar slash commands', () => {
     expect(screen.getByText('Queue is full. Remove a command before adding more.')).toBeTruthy();
   });
 
+  it('shows active attachments, opens the picker, and sends files with the message', () => {
+    const onSend = jest.fn();
+    const onAttachPress = jest.fn();
+    const onRemoveAttachedFile = jest.fn();
+    const onClearAttachedFiles = jest.fn();
+    const screen = render(
+      <ChatInputBar
+        onSend={onSend}
+        attachedFiles={['/tmp/project/src/App.tsx', '/tmp/project/README.md']}
+        onAttachPress={onAttachPress}
+        onRemoveAttachedFile={onRemoveAttachedFile}
+        onClearAttachedFiles={onClearAttachedFiles}
+      />,
+    );
+
+    expect(screen.getByText('App.tsx')).toBeTruthy();
+    expect(screen.getByText('README.md')).toBeTruthy();
+
+    fireEvent.press(screen.getByLabelText('Attach files'));
+    expect(onAttachPress).toHaveBeenCalledTimes(1);
+
+    fireEvent.press(screen.getByLabelText('Remove attached file App.tsx'));
+    expect(onRemoveAttachedFile).toHaveBeenCalledWith('/tmp/project/src/App.tsx');
+
+    const input = screen.getByPlaceholderText('chat.inputPlaceholder');
+    fireEvent.changeText(input, 'inspect attached files');
+    fireEvent.press(screen.getByText('arrow-up-circle'));
+
+    expect(onSend).toHaveBeenCalledWith('inspect attached files', [
+      '/tmp/project/src/App.tsx',
+      '/tmp/project/README.md',
+    ]);
+    expect(onClearAttachedFiles).toHaveBeenCalledTimes(1);
+  });
+
   it('loads an external draft and sends its files', () => {
     const onSend = jest.fn();
     const onDraftConsumed = jest.fn();

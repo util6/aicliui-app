@@ -91,6 +91,8 @@
     "filesSelected": "Выбрано файлов: {{count}}",
     "browseFiles": "Обзор файлов",
     "done": "Готово",
+    "attachFiles": "Прикрепить файлы",
+    "removeAttachedFile": "Удалить прикрепленный файл {{file}}",
     "queuedCommandTitle": "Команды в очереди",
     "queuedCommands": "В очереди: {{count}}",
     "queuedCommandFiles": "Файлов: {{count}}",

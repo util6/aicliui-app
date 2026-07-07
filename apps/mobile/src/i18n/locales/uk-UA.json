@@ -90,6 +90,8 @@
     "filesSelected": "Вибрано файлів: {{count}}",
     "browseFiles": "Огляд файлів",
     "done": "Готово",
+    "attachFiles": "Прикріпити файли",
+    "removeAttachedFile": "Видалити прикріплений файл {{file}}",
     "queuedCommandTitle": "Команди в черзі",
     "queuedCommands": "У черзі: {{count}}",
     "queuedCommandFiles": "Файлів: {{count}}",

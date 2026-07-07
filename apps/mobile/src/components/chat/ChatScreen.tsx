@@ -8,6 +8,7 @@ import { ChatInputBar } from './ChatInputBar';
 import { ChatSessionBar } from './ChatSessionBar';
 import { ContextUsageIndicator } from './ContextUsageIndicator';
 import { QueuedCommandPanel } from './QueuedCommandPanel';
+import { FilePickerSheet } from './FilePickerSheet';
 import { useChat } from '../../context/ChatContext';
 import { useConversations } from '../../context/ConversationContext';
 import { useThemeColor } from '../../hooks/useThemeColor';
@@ -52,6 +53,8 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   } = useChat();
   const { conversations, updateConversationExecutionContext } = useConversations();
   const [modelInfo, setModelInfo] = useState<AcpModelInfo | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
+  const [isFilePickerVisible, setIsFilePickerVisible] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const background = useThemeColor({}, 'background');
   const surface = useThemeColor({}, 'surface');
@@ -61,10 +64,22 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     [conversations, conversationId],
   );
   const activeBackend = activeConversation?.extra.backend;
+  const filePickerRoot = useMemo(
+    () =>
+      activeConversation?.extra.workspace ??
+      conversations.find((conversation) => conversation.extra?.workspace)?.extra?.workspace ??
+      '/',
+    [activeConversation?.extra.workspace, conversations],
+  );
 
   useEffect(() => {
     loadConversation(conversationId);
   }, [conversationId, loadConversation]);
+
+  useEffect(() => {
+    setAttachedFiles([]);
+    setIsFilePickerVisible(false);
+  }, [conversationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,6 +147,15 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     },
     [activeConversation, updateConversationExecutionContext],
   );
+  const handleAttachedFilesSelected = useCallback((files: string[]) => {
+    setAttachedFiles(uniqueFiles(files));
+  }, []);
+  const handleRemoveAttachedFile = useCallback((file: string) => {
+    setAttachedFiles((current) => current.filter((item) => item !== file));
+  }, []);
+  const clearAttachedFiles = useCallback(() => {
+    setAttachedFiles([]);
+  }, []);
 
   return (
     <KeyboardAvoidingView
@@ -184,10 +208,25 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         queueWarning={queuedCommandWarning}
         draft={queuedCommandDraft}
         onDraftConsumed={clearQueuedCommandDraft}
+        attachedFiles={attachedFiles}
+        onAttachPress={() => setIsFilePickerVisible(true)}
+        onRemoveAttachedFile={handleRemoveAttachedFile}
+        onClearAttachedFiles={clearAttachedFiles}
         slashCommands={slashCommands}
+      />
+      <FilePickerSheet
+        visible={isFilePickerVisible}
+        rootDir={filePickerRoot}
+        selectedFiles={attachedFiles}
+        onDone={handleAttachedFilesSelected}
+        onClose={() => setIsFilePickerVisible(false)}
       />
     </KeyboardAvoidingView>
   );
+}
+
+function uniqueFiles(files: string[]): string[] {
+  return Array.from(new Set(files.filter((file) => typeof file === 'string' && file.length > 0)));
 }
 
 const styles = StyleSheet.create({

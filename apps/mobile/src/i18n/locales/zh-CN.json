@@ -104,6 +104,8 @@
     "filesSelected": "已选择 {{count}} 个文件",
     "browseFiles": "浏览文件",
     "done": "完成",
+    "attachFiles": "附加文件",
+    "removeAttachedFile": "移除附件 {{file}}",
     "contextUsed": "上下文已使用",
     "contextUsageHigh": "高",
     "slashCommands": "命令",

@@ -31,18 +31,68 @@ jest.mock('@/src/components/chat/ChatInputBar', () => ({
     queuedCount,
     draft,
     onDraftConsumed,
+    attachedFiles,
+    onAttachPress,
+    onClearAttachedFiles,
+    onSend,
   }: {
     queuedCount?: number;
     draft?: { id: string; text: string; files?: string[] } | null;
     onDraftConsumed?: (draftId: string) => void;
+    attachedFiles?: string[];
+    onAttachPress?: () => void;
+    onClearAttachedFiles?: () => void;
+    onSend: (text: string, files?: string[]) => void;
   }) => {
     const { Text } = require('react-native');
     return (
       <>
         <Text testID='chat-input-queued-count'>queued:{queuedCount ?? 'missing'}</Text>
         <Text testID='chat-input-draft'>{draft ? `${draft.text}:${draft.files?.length ?? 0}` : ''}</Text>
+        <Text testID='chat-input-attachments'>files:{attachedFiles?.length ?? 0}</Text>
+        <Text testID='open-file-picker' onPress={onAttachPress}>
+          open-file-picker
+        </Text>
+        <Text
+          testID='send-with-attachments'
+          onPress={() => {
+            onSend('inspect files', attachedFiles);
+            onClearAttachedFiles?.();
+          }}
+        >
+          send-with-attachments
+        </Text>
         <Text testID='consume-draft' onPress={() => draft && onDraftConsumed?.(draft.id)}>
           consume-draft
+        </Text>
+      </>
+    );
+  },
+}));
+
+jest.mock('@/src/components/chat/FilePickerSheet', () => ({
+  FilePickerSheet: ({
+    visible,
+    rootDir,
+    selectedFiles,
+    onDone,
+  }: {
+    visible: boolean;
+    rootDir: string;
+    selectedFiles: string[];
+    onDone: (files: string[]) => void;
+  }) => {
+    const { Text } = require('react-native');
+    return (
+      <>
+        <Text testID='file-picker-state'>
+          {visible ? `open:${rootDir}:${selectedFiles.length}` : 'closed'}
+        </Text>
+        <Text
+          testID='choose-active-files'
+          onPress={() => onDone(['/tmp/project/README.md', '/tmp/project/src/App.tsx'])}
+        >
+          choose-active-files
         </Text>
       </>
     );
@@ -141,6 +191,7 @@ describe('ChatScreen', () => {
           model: { id: '', useModel: '' },
           extra: {
             backend: 'codex',
+            workspace: '/tmp/project',
             currentModelId: 'gpt-4.1',
             currentModelLabel: 'GPT-4.1',
             sessionMode: 'default',
@@ -221,5 +272,29 @@ describe('ChatScreen', () => {
       sessionMode: 'autoEdit',
     });
     expect(mockBridgeRequest).toHaveBeenCalledWith('acp.probe-model-info', { backend: 'codex' });
+  });
+
+  it('attaches active workspace files to the next mobile send and clears them after send', async () => {
+    const screen = render(<ChatScreen conversationId='conv-1' />);
+    const chat = mockUseChat.mock.results.at(-1)?.value;
+
+    expect(screen.getByTestId('file-picker-state').props.children).toBe('closed');
+
+    fireEvent.press(screen.getByTestId('open-file-picker'));
+    expect(screen.getByTestId('file-picker-state').props.children).toBe('open:/tmp/project:0');
+
+    fireEvent.press(screen.getByTestId('choose-active-files'));
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-input-attachments').props.children).toEqual(['files:', 2]);
+    });
+
+    fireEvent.press(screen.getByTestId('send-with-attachments'));
+    expect(chat.sendMessage).toHaveBeenCalledWith('inspect files', [
+      '/tmp/project/README.md',
+      '/tmp/project/src/App.tsx',
+    ]);
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-input-attachments').props.children).toEqual(['files:', 0]);
+    });
   });
 });

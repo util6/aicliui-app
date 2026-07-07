@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, TextInput, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, TextInput, TouchableOpacity, StyleSheet, Platform, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
@@ -15,6 +15,10 @@ type ChatInputBarProps = {
   queueWarning?: QueueWarningReason | null;
   draft?: ChatInputDraft | null;
   onDraftConsumed?: (draftId: string) => void;
+  attachedFiles?: string[];
+  onAttachPress?: () => void;
+  onRemoveAttachedFile?: (file: string) => void;
+  onClearAttachedFiles?: () => void;
   disabled?: boolean;
   slashCommands?: SlashCommandItem[];
 };
@@ -35,6 +39,10 @@ export function ChatInputBar({
   queueWarning = null,
   draft = null,
   onDraftConsumed,
+  attachedFiles = [],
+  onAttachPress,
+  onRemoveAttachedFile,
+  onClearAttachedFiles,
   disabled,
   slashCommands = [],
 }: ChatInputBarProps) {
@@ -57,6 +65,7 @@ export function ChatInputBar({
   const matchingSlashCommands =
     slashQuery === null ? [] : filterSlashCommands(slashCommands, slashQuery).slice(0, 6);
   const showSlashCommands = canSend && !sendBlocked && matchingSlashCommands.length > 0;
+  const visibleAttachedFiles = uniqueFiles([...attachedFiles, ...draftFiles]);
 
   useEffect(() => {
     if (!draft || draft.id === loadedDraftId) return;
@@ -74,13 +83,14 @@ export function ChatInputBar({
 
     const trimmed = text.trim();
     if (!trimmed) return;
-    if (draftFiles.length > 0) {
-      onSend(trimmed, draftFiles);
+    if (visibleAttachedFiles.length > 0) {
+      onSend(trimmed, visibleAttachedFiles);
     } else {
       onSend(trimmed);
     }
     setText('');
     setDraftFiles([]);
+    onClearAttachedFiles?.();
     if (loadedDraftId) {
       onDraftConsumed?.(loadedDraftId);
     }
@@ -94,6 +104,12 @@ export function ChatInputBar({
   const showQueue = canQueue && text.trim().length > 0;
   const showSend = canSend && !sendBlocked && text.trim().length > 0;
   const showStop = !isDisabled && isStreaming;
+  const handleRemoveAttachedFile = (file: string) => {
+    if (attachedFiles.includes(file)) {
+      onRemoveAttachedFile?.(file);
+    }
+    setDraftFiles((prev) => prev.filter((item) => item !== file));
+  };
 
   return (
     <View style={[styles.container, { borderTopColor: border, backgroundColor: background }]}>
@@ -141,7 +157,51 @@ export function ChatInputBar({
           ))}
         </View>
       )}
+      {visibleAttachedFiles.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.attachmentList}
+          style={styles.attachmentScroll}
+        >
+          {visibleAttachedFiles.map((file) => {
+            const fileName = getFileName(file);
+            return (
+              <View key={file} style={[styles.attachmentChip, { backgroundColor: surface, borderColor: border }]}>
+                <Ionicons name='document-outline' size={13} color={textSecondary} />
+                <ThemedText style={[styles.attachmentText, { color: textSecondary }]} numberOfLines={1}>
+                  {fileName}
+                </ThemedText>
+                <TouchableOpacity
+                  accessibilityRole='button'
+                  accessibilityLabel={t('chat.removeAttachedFile', {
+                    file: fileName,
+                    defaultValue: `Remove attached file ${fileName}`,
+                  })}
+                  onPress={() => handleRemoveAttachedFile(file)}
+                  activeOpacity={0.72}
+                  hitSlop={6}
+                >
+                  <Ionicons name='close-circle' size={15} color={textSecondary} />
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+        </ScrollView>
+      )}
       <View style={[styles.inputRow, { backgroundColor: surface }]}>
+        {onAttachPress && (
+          <TouchableOpacity
+            accessibilityRole='button'
+            accessibilityLabel={t('chat.attachFiles', { defaultValue: 'Attach files' })}
+            style={styles.attachButton}
+            onPress={onAttachPress}
+            disabled={isDisabled}
+            activeOpacity={0.72}
+          >
+            <Ionicons name='attach' size={24} color={isDisabled ? textSecondary : tint} />
+          </TouchableOpacity>
+        )}
         <TextInput
           style={[styles.input, { color: textColor }]}
           value={text}
@@ -193,6 +253,14 @@ function getQueueWarningText(
   };
 
   return t(warningKeyMap[reason], { defaultValue: defaultValueMap[reason] });
+}
+
+function uniqueFiles(files: string[]): string[] {
+  return Array.from(new Set(files.filter((file) => typeof file === 'string' && file.length > 0)));
+}
+
+function getFileName(file: string): string {
+  return file.split('/').filter(Boolean).pop() || file;
 }
 
 const styles = StyleSheet.create({
@@ -268,6 +336,38 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     minHeight: 40,
     maxHeight: 120,
+  },
+  attachmentScroll: {
+    marginBottom: 7,
+  },
+  attachmentList: {
+    gap: 6,
+    paddingHorizontal: 2,
+  },
+  attachmentChip: {
+    maxWidth: 168,
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 14,
+    paddingLeft: 9,
+    paddingRight: 6,
+    paddingVertical: 4,
+  },
+  attachmentText: {
+    flexShrink: 1,
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: '600',
+  },
+  attachButton: {
+    width: 30,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: 2,
   },
   input: {
     flex: 1,

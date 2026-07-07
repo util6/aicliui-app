@@ -104,6 +104,8 @@
     "filesSelected": "{{count}} file(s) selected",
     "browseFiles": "Browse Files",
     "done": "Done",
+    "attachFiles": "Attach files",
+    "removeAttachedFile": "Remove attached file {{file}}",
     "contextUsed": "context used",
     "contextUsageHigh": "High",
     "slashCommands": "Commands",

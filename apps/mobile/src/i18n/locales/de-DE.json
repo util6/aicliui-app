@@ -90,6 +90,8 @@
     "filesSelected": "{{count}} Datei(en) ausgewählt",
     "browseFiles": "Dateien durchsuchen",
     "done": "Fertig",
+    "attachFiles": "Dateien anhängen",
+    "removeAttachedFile": "Angehängte Datei {{file}} entfernen",
     "queuedCommandTitle": "Befehle in Warteschlange",
     "queuedCommands": "{{count}} in Warteschlange",
     "queuedCommandFiles": "{{count}} Datei(en)",
