@@ -92,7 +92,7 @@ async function route(key, data, emit) {
   const params = isRecord(data) ? data : {};
   if (key === 'runtime.get-status') return getRuntimeStatus();
   if (key === 'acp.get-available-agents') return { success: true, data: agents };
-  if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: getModelInfo(params.backend) } };
+  if (key === 'acp.probe-model-info') return { success: true, data: { modelInfo: await getModelInfo(params.backend) } };
   if (key === 'database.get-user-conversations') return listConversations(params.page, params.pageSize);
   if (key === 'database.get-conversation-messages') return messages.get(requiredString(params.conversation_id)) || [];
   if (key === 'create-conversation') return await createConversation(params);
@@ -367,7 +367,8 @@ function listConversations(page = 0, pageSize = 100) {
   return Array.from(conversations.values()).sort((a, b) => b.modifyTime - a.modifyTime).slice(start, end);
 }
 
-function getModelInfo(backend) {
+async function getModelInfo(backend) {
+  if (backend === 'opencode') return await getOpenCodeModelInfo();
   if (backend !== 'gemini') return null;
   return {
     currentModelId: null,
@@ -378,6 +379,33 @@ function getModelInfo(backend) {
   };
 }
 
+async function getOpenCodeModelInfo() {
+  try {
+    const baseUrl = await ensureOpenCodeServer();
+    const response = await requestOpenCodeJson(baseUrl, '/api/model', { method: 'GET' });
+    const availableModels = normalizeOpenCodeModels(Array.isArray(response && response.data) ? response.data : []);
+    return {
+      currentModelId: null,
+      currentModelLabel: 'Default OpenCode model',
+      availableModels,
+      canSwitch: availableModels.length > 0,
+      source: 'models',
+    };
+  } catch (error) {
+    console.warn('OpenCode model probe failed:', error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+function normalizeOpenCodeModels(models) {
+  return models
+    .filter((model) => isRecord(model) && model.enabled !== false && typeof model.id === 'string' && typeof model.providerID === 'string')
+    .map((model) => ({
+      id: model.providerID + '/' + model.id,
+      label: (typeof model.name === 'string' && model.name ? model.name : model.id) + ' (' + model.providerID + ')',
+    }));
+}
+
 function normalizeConversationModel(model, extra) {
   if (isRecord(model) && (model.id || model.useModel)) {
     return {
@@ -386,10 +414,11 @@ function normalizeConversationModel(model, extra) {
     };
   }
   const currentModelId = typeof extra.currentModelId === 'string' ? extra.currentModelId : '';
-  return currentModelId ? { id: currentModelId, useModel: modelLabel(currentModelId) } : { id: '', useModel: '' };
+  return currentModelId ? { id: currentModelId, useModel: modelLabel(currentModelId, extra.backend) } : { id: '', useModel: '' };
 }
 
-function modelLabel(modelId) {
+function modelLabel(modelId, backend) {
+  if (backend === 'opencode' && modelId.includes('/')) return modelId.split('/').slice(1).join('/');
   return geminiModels.find((model) => model.id === modelId)?.label || modelId;
 }
 
@@ -466,6 +495,7 @@ async function sendMessage(params, emit) {
       const result = await sendOpenCodePrompt({
         input,
         workspace,
+        model,
         files: selectedFiles,
         signal: run.signal,
         onContent: emitAssistantContent,
@@ -549,14 +579,16 @@ function stopStream(params) {
   return { success: true, stopped: true };
 }
 
-async function sendOpenCodePrompt({ input, workspace, files, signal, onContent, onTool }) {
+async function sendOpenCodePrompt({ input, workspace, model, files, signal, onContent, onTool }) {
   const baseUrl = await ensureOpenCodeServer();
   const attachments = await buildOpenCodeFileAttachments(files, workspace);
+  const modelRef = parseOpenCodeModelRef(model);
   const session = await requestOpenCodeJson(baseUrl, '/api/session', {
     method: 'POST',
     signal,
     body: JSON.stringify({
       ...(workspace ? { location: { directory: workspace } } : {}),
+      ...(modelRef ? { model: modelRef } : {}),
     }),
   });
   const sessionId = session && session.data && typeof session.data.id === 'string' ? session.data.id : '';
@@ -590,6 +622,14 @@ async function sendOpenCodePrompt({ input, workspace, files, signal, onContent, 
     sessionId,
     text: extractOpenCodeAssistantText(Array.isArray(context && context.data) ? context.data : []),
   };
+}
+
+function parseOpenCodeModelRef(model) {
+  if (typeof model !== 'string' || !model.includes('/')) return null;
+  const index = model.indexOf('/');
+  const providerID = model.slice(0, index).trim();
+  const id = model.slice(index + 1).trim();
+  return providerID && id ? { providerID, id } : null;
 }
 
 function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, handlers) {
