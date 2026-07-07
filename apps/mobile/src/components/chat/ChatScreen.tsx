@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
@@ -12,6 +12,16 @@ import { useChat } from '../../context/ChatContext';
 import { useConversations } from '../../context/ConversationContext';
 import { useThemeColor } from '../../hooks/useThemeColor';
 import { useProcessedMessages, type ProcessedItem } from '../../hooks/useProcessedMessages';
+import { bridge } from '../../services/bridge';
+
+type AcpModelInfo = {
+  currentModelId: string | null;
+  currentModelLabel: string | null;
+  availableModels: Array<{ id: string; label: string }>;
+  canSwitch: boolean;
+  source: 'configOption' | 'models';
+  configOptionId?: string;
+};
 
 type ChatScreenProps = {
   conversationId: string;
@@ -40,7 +50,8 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     resumeQueuedCommands,
     stopGeneration,
   } = useChat();
-  const { conversations } = useConversations();
+  const { conversations, updateConversationExecutionContext } = useConversations();
+  const [modelInfo, setModelInfo] = useState<AcpModelInfo | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const background = useThemeColor({}, 'background');
   const surface = useThemeColor({}, 'surface');
@@ -49,10 +60,37 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     () => conversations.find((conversation) => conversation.id === conversationId),
     [conversations, conversationId],
   );
+  const activeBackend = activeConversation?.extra.backend;
 
   useEffect(() => {
     loadConversation(conversationId);
   }, [conversationId, loadConversation]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setModelInfo(null);
+    if (!activeBackend) return;
+
+    bridge
+      .request<{ success: boolean; data?: { modelInfo: AcpModelInfo | null } }>(
+        'acp.probe-model-info',
+        { backend: activeBackend },
+      )
+      .then((res) => {
+        if (!cancelled && res?.success) {
+          setModelInfo(res.data?.modelInfo ?? null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setModelInfo(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBackend]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -75,6 +113,25 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   );
 
   const keyExtractor = useCallback((item: ProcessedItem) => item.id, []);
+  const handleSessionModelSelect = useCallback(
+    (model: { id: string; label: string }) => {
+      if (!activeConversation) return;
+      void updateConversationExecutionContext(activeConversation.id, {
+        currentModelId: model.id,
+        currentModelLabel: model.label,
+      });
+    },
+    [activeConversation, updateConversationExecutionContext],
+  );
+  const handleSessionModeSelect = useCallback(
+    (mode: string) => {
+      if (!activeConversation) return;
+      void updateConversationExecutionContext(activeConversation.id, {
+        sessionMode: mode,
+      });
+    },
+    [activeConversation, updateConversationExecutionContext],
+  );
 
   return (
     <KeyboardAvoidingView
@@ -82,7 +139,13 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      <ChatSessionBar conversation={activeConversation} />
+      <ChatSessionBar
+        conversation={activeConversation}
+        availableModels={modelInfo?.availableModels ?? []}
+        canSwitchModel={Boolean(modelInfo?.canSwitch && modelInfo.availableModels.length > 0)}
+        onModelSelect={handleSessionModelSelect}
+        onModeSelect={handleSessionModeSelect}
+      />
       <FlatList
         ref={flatListRef}
         data={processedMessages}

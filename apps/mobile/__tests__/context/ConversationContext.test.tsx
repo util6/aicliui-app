@@ -64,6 +64,33 @@ function NewChatProbe() {
   );
 }
 
+function ExecutionContextProbe() {
+  const { conversations, updateConversationExecutionContext } = useConversations();
+  const conversation = conversations.find((item) => item.id === 'conv-1');
+
+  return (
+    <>
+      <Text testID='execution-context'>
+        {conversation
+          ? `${conversation.extra.currentModelLabel ?? ''}|${conversation.extra.sessionMode ?? ''}|${conversation.extra.workspace ?? ''}`
+          : ''}
+      </Text>
+      <Text
+        testID='update-execution-context'
+        onPress={() => {
+          void updateConversationExecutionContext('conv-1', {
+            currentModelId: 'gpt-5-codex',
+            currentModelLabel: 'GPT-5 Codex',
+            sessionMode: 'autoEdit',
+          });
+        }}
+      >
+        update-execution-context
+      </Text>
+    </>
+  );
+}
+
 describe('ConversationContext stream status sync', () => {
   const listeners = new Map<string, (data: unknown) => void>();
 
@@ -319,5 +346,72 @@ describe('ConversationContext new chat context', () => {
         }),
       ),
     );
+  });
+});
+
+describe('ConversationContext execution context updates', () => {
+  beforeEach(() => {
+    mockRequest.mockReset();
+    (bridge.on as jest.Mock).mockImplementation(() => jest.fn());
+  });
+
+  it('persists active conversation model and mode changes without dropping existing extra metadata', async () => {
+    let conversation: Conversation = {
+      id: 'conv-1',
+      name: 'Inspect project',
+      type: 'acp',
+      status: 'finished',
+      createTime: 1000,
+      modifyTime: 1000,
+      model: { id: '', useModel: '' },
+      extra: {
+        backend: 'codex',
+        workspace: '/tmp/project',
+        currentModelId: 'gpt-4.1',
+        currentModelLabel: 'GPT-4.1',
+        sessionMode: 'default',
+      },
+    };
+
+    mockRequest.mockImplementation((name: string, data?: unknown) => {
+      if (name === 'database.get-user-conversations') return Promise.resolve([conversation]);
+      if (name === 'update-conversation') {
+        const updates = (data as { updates?: Partial<Conversation> }).updates ?? {};
+        conversation = {
+          ...conversation,
+          ...updates,
+          extra: {
+            ...conversation.extra,
+            ...(updates.extra ?? {}),
+          },
+        };
+        return Promise.resolve(true);
+      }
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <ExecutionContextProbe />
+      </ConversationProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('execution-context').props.children).toBe('GPT-4.1|default|/tmp/project'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('update-execution-context'));
+    });
+
+    expect(mockRequest).toHaveBeenCalledWith('update-conversation', {
+      id: 'conv-1',
+      updates: {
+        extra: {
+          currentModelId: 'gpt-5-codex',
+          currentModelLabel: 'GPT-5 Codex',
+          sessionMode: 'autoEdit',
+        },
+      },
+    });
+    await waitFor(() => expect(screen.getByTestId('execution-context').props.children).toBe('GPT-5 Codex|autoEdit|/tmp/project'));
   });
 });

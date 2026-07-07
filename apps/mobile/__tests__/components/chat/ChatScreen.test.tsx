@@ -3,14 +3,21 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { ChatScreen } from '@/src/components/chat/ChatScreen';
 import { useChat } from '@/src/context/ChatContext';
 
+const mockUseConversations = jest.fn();
+const mockBridgeRequest = jest.fn();
+
 jest.mock('@/src/context/ChatContext', () => ({
   useChat: jest.fn(),
 }));
 
 jest.mock('@/src/context/ConversationContext', () => ({
-  useConversations: () => ({
-    conversations: [{ id: 'conv-1', name: 'OpenCode', extra: {} }],
-  }),
+  useConversations: () => mockUseConversations(),
+}));
+
+jest.mock('@/src/services/bridge', () => ({
+  bridge: {
+    request: (...args: unknown[]) => mockBridgeRequest(...args),
+  },
 }));
 
 jest.mock('react-i18next', () => ({
@@ -43,9 +50,30 @@ jest.mock('@/src/components/chat/ChatInputBar', () => ({
 }));
 
 jest.mock('@/src/components/chat/ChatSessionBar', () => ({
-  ChatSessionBar: () => {
+  ChatSessionBar: ({
+    availableModels,
+    onModelSelect,
+    onModeSelect,
+  }: {
+    availableModels?: Array<{ id: string; label: string }>;
+    onModelSelect?: (model: { id: string; label: string }) => void;
+    onModeSelect?: (mode: string) => void;
+  }) => {
     const { Text } = require('react-native');
-    return <Text>session-bar</Text>;
+    return (
+      <>
+        <Text testID='session-model-count'>models:{availableModels?.length ?? 0}</Text>
+        <Text testID='select-session-model' onPress={() => {
+          const [model] = availableModels ?? [];
+          if (model) onModelSelect?.(model);
+        }}>
+          select-session-model
+        </Text>
+        <Text testID='select-session-mode' onPress={() => onModeSelect?.('autoEdit')}>
+          select-session-mode
+        </Text>
+      </>
+    );
   },
 }));
 
@@ -83,6 +111,44 @@ describe('ChatScreen', () => {
   beforeEach(() => {
     const editQueuedCommand = jest.fn();
     const clearQueuedCommandDraft = jest.fn();
+    const updateConversationExecutionContext = jest.fn();
+    mockBridgeRequest.mockReset();
+    mockBridgeRequest.mockImplementation((name: string) => {
+      if (name === 'acp.probe-model-info') {
+        return Promise.resolve({
+          success: true,
+          data: {
+            modelInfo: {
+              currentModelId: 'gpt-4.1',
+              currentModelLabel: 'GPT-4.1',
+              availableModels: [{ id: 'gpt-5-codex', label: 'GPT-5 Codex' }],
+              canSwitch: true,
+              source: 'models',
+            },
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+    mockUseConversations.mockReturnValue({
+      conversations: [
+        {
+          id: 'conv-1',
+          name: 'OpenCode',
+          type: 'acp',
+          createTime: 1000,
+          modifyTime: 1000,
+          model: { id: '', useModel: '' },
+          extra: {
+            backend: 'codex',
+            currentModelId: 'gpt-4.1',
+            currentModelLabel: 'GPT-4.1',
+            sessionMode: 'default',
+          },
+        },
+      ],
+      updateConversationExecutionContext,
+    });
     mockUseChat.mockReturnValue({
       messages: [],
       isStreaming: true,
@@ -134,5 +200,26 @@ describe('ChatScreen', () => {
 
     fireEvent.press(screen.getByTestId('consume-draft'));
     expect(chat.clearQueuedCommandDraft).toHaveBeenCalledWith('queue-1');
+  });
+
+  it('probes active backend models and persists session bar model and mode selections', async () => {
+    const screen = render(<ChatScreen conversationId='conv-1' />);
+    const conversations = mockUseConversations.mock.results.at(-1)?.value;
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-model-count').props.children).toEqual(['models:', 1]);
+    });
+
+    fireEvent.press(screen.getByTestId('select-session-model'));
+    expect(conversations.updateConversationExecutionContext).toHaveBeenCalledWith('conv-1', {
+      currentModelId: 'gpt-5-codex',
+      currentModelLabel: 'GPT-5 Codex',
+    });
+
+    fireEvent.press(screen.getByTestId('select-session-mode'));
+    expect(conversations.updateConversationExecutionContext).toHaveBeenCalledWith('conv-1', {
+      sessionMode: 'autoEdit',
+    });
+    expect(mockBridgeRequest).toHaveBeenCalledWith('acp.probe-model-info', { backend: 'codex' });
   });
 });

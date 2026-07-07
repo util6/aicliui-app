@@ -72,6 +72,12 @@ export type CommitNewChatOptions = {
   currentModelLabel?: string;
 };
 
+export type ConversationExecutionContextPatch = {
+  sessionMode?: string;
+  currentModelId?: string;
+  currentModelLabel?: string;
+};
+
 type ConversationContextType = {
   conversations: Conversation[];
   isLoading: boolean;
@@ -85,6 +91,10 @@ type ConversationContextType = {
   refresh: () => Promise<void>;
   fetchAgents: () => Promise<void>;
   createConversation: (params: CreateConversationParams) => Promise<Conversation | null>;
+  updateConversationExecutionContext: (
+    id: string,
+    patch: ConversationExecutionContextPatch,
+  ) => Promise<boolean>;
   deleteConversation: (id: string) => Promise<boolean>;
   renameConversation: (id: string, name: string) => Promise<boolean>;
 };
@@ -108,6 +118,7 @@ const ConversationContext = createContext<ConversationContextType>({
   refresh: async () => {},
   fetchAgents: async () => {},
   createConversation: async () => null,
+  updateConversationExecutionContext: async () => false,
   deleteConversation: async () => false,
   renameConversation: async () => false,
 });
@@ -335,6 +346,36 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
     [refresh, activeConversationId, conversations]
   );
 
+  const updateConversationExecutionContext = useCallback(
+    async (id: string, patch: ConversationExecutionContextPatch) => {
+      try {
+        const extra: Conversation['extra'] = {};
+        if (patch.sessionMode !== undefined) {
+          extra.sessionMode = patch.sessionMode;
+        }
+        if (patch.currentModelId !== undefined) {
+          extra.currentModelId = patch.currentModelId;
+        }
+        if (patch.currentModelLabel !== undefined) {
+          extra.currentModelLabel = patch.currentModelLabel;
+        }
+
+        const success = await bridge.request<boolean>('update-conversation', {
+          id,
+          updates: { extra },
+        });
+        if (success) {
+          await refresh();
+        }
+        return !!success;
+      } catch (e) {
+        console.warn('[Conversations] Failed to update execution context:', e);
+        return false;
+      }
+    },
+    [refresh],
+  );
+
   const renameConversation = useCallback(
     async (id: string, name: string) => {
       try {
@@ -369,6 +410,7 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
         refresh,
         fetchAgents,
         createConversation,
+        updateConversationExecutionContext,
         deleteConversation,
         renameConversation,
       }}

@@ -1,14 +1,25 @@
-import React, { useMemo } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
 import type { Conversation } from '../../context/ConversationContext';
 import { getAgentModes } from '../../constants/agentModes';
 import { useThemeColor } from '../../hooks/useThemeColor';
+import { ModelPickerSheet } from './ModelPickerSheet';
+import { ModePickerSheet } from './ModePickerSheet';
 
 type ChatSessionBarProps = {
   conversation: Conversation | null | undefined;
+  availableModels?: SessionModelOption[];
+  canSwitchModel?: boolean;
+  onModelSelect?: (model: SessionModelOption) => void;
+  onModeSelect?: (mode: string) => void;
+};
+
+export type SessionModelOption = {
+  id: string;
+  label: string;
 };
 
 type SessionChip = {
@@ -17,30 +28,96 @@ type SessionChip = {
   label: string;
 };
 
-export function ChatSessionBar({ conversation }: ChatSessionBarProps) {
+export function ChatSessionBar({
+  conversation,
+  availableModels = [],
+  canSwitchModel = false,
+  onModelSelect,
+  onModeSelect,
+}: ChatSessionBarProps) {
   const { t } = useTranslation();
   const background = useThemeColor({}, 'background');
   const surface = useThemeColor({}, 'surface');
   const border = useThemeColor({}, 'border');
   const iconColor = useThemeColor({}, 'icon');
   const textSecondary = useThemeColor({}, 'textSecondary');
+  const [isModelPickerVisible, setIsModelPickerVisible] = useState(false);
+  const [isModePickerVisible, setIsModePickerVisible] = useState(false);
 
   const chips = useMemo(() => buildSessionChips(conversation, t), [conversation, t]);
+  const modes = useMemo(() => getAgentModes(conversation?.extra.backend), [conversation?.extra.backend]);
+  const canOpenModelPicker = canSwitchModel && availableModels.length > 0 && Boolean(onModelSelect);
+  const canOpenModePicker = modes.length > 0 && Boolean(onModeSelect);
 
   if (chips.length === 0) return null;
 
   return (
     <View style={[styles.container, { backgroundColor: background, borderBottomColor: border }]}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.content}>
-        {chips.map((chip) => (
-          <View key={chip.key} style={[styles.chip, { backgroundColor: surface, borderColor: border }]}>
-            <Ionicons name={chip.icon} size={14} color={iconColor} />
-            <ThemedText style={[styles.chipText, { color: textSecondary }]} numberOfLines={1}>
-              {chip.label}
-            </ThemedText>
-          </View>
-        ))}
+        {chips.map((chip) => {
+          const isInteractive =
+            (chip.key === 'model' && canOpenModelPicker) ||
+            (chip.key === 'mode' && canOpenModePicker);
+          const chipContent = (
+            <>
+              <Ionicons name={chip.icon} size={14} color={iconColor} />
+              <ThemedText style={[styles.chipText, { color: textSecondary }]} numberOfLines={1}>
+                {chip.label}
+              </ThemedText>
+              {isInteractive && <Ionicons name='chevron-down' size={12} color={iconColor} />}
+            </>
+          );
+
+          if (isInteractive) {
+            return (
+              <TouchableOpacity
+                key={chip.key}
+                style={[styles.chip, { backgroundColor: surface, borderColor: border }]}
+                accessibilityRole='button'
+                onPress={() => {
+                  if (chip.key === 'model') {
+                    setIsModelPickerVisible(true);
+                  } else if (chip.key === 'mode') {
+                    setIsModePickerVisible(true);
+                  }
+                }}
+                activeOpacity={0.72}
+              >
+                {chipContent}
+              </TouchableOpacity>
+            );
+          }
+
+          return (
+            <View key={chip.key} style={[styles.chip, { backgroundColor: surface, borderColor: border }]}>
+              {chipContent}
+            </View>
+          );
+        })}
       </ScrollView>
+      {canOpenModelPicker && (
+        <ModelPickerSheet
+          visible={isModelPickerVisible}
+          models={availableModels}
+          currentModelId={conversation?.extra.currentModelId ?? null}
+          onSelect={(modelId) => {
+            const selectedModel = availableModels.find((model) => model.id === modelId);
+            if (selectedModel) {
+              onModelSelect?.(selectedModel);
+            }
+          }}
+          onClose={() => setIsModelPickerVisible(false)}
+        />
+      )}
+      {canOpenModePicker && (
+        <ModePickerSheet
+          visible={isModePickerVisible}
+          modes={modes}
+          currentMode={conversation?.extra.sessionMode ?? modes[0]?.value ?? 'default'}
+          onSelect={(mode) => onModeSelect?.(mode)}
+          onClose={() => setIsModePickerVisible(false)}
+        />
+      )}
     </View>
   );
 }
