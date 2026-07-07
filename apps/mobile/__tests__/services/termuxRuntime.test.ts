@@ -127,6 +127,8 @@ describe('termuxRuntime', () => {
     expect(script).toContain("if (key === 'get-image-base64') return await readImageBase64(requiredString(params.path));");
     expect(script).toContain("if (key === 'confirmation.list') return listConfirmations(requiredString(params.conversation_id));");
     expect(script).toContain("if (key === 'confirmation.confirm') return await confirmPendingPermission(params, emit);");
+    expect(script).toContain("conversation.status = 'running';");
+    expect(script).toContain("conversation.status = 'finished';");
     expect(script).toContain("throw new Error('Path is outside the workspace: ' + path);");
     expect(script).toContain("return 'data:' + imageMimeType(filePath) + ';base64,' + buffer.toString('base64');");
     expect(script).toContain("opencode', ['serve', '--hostname', '127.0.0.1', '--port'");

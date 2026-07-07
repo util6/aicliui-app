@@ -589,6 +589,8 @@ async function sendMessage(params, emit) {
     emit('confirmation.remove', { conversation_id: conversationId, id: confirmationId });
   };
   activeRuns.set(conversationId, run);
+  conversation.status = 'running';
+  conversation.modifyTime = Date.now();
 
   await addTextMessage(conversationId, userMsgId, 'right', input);
   emit('chat.response.stream', { type: 'start', msg_id: assistantMsgId, conversation_id: conversationId, data: null });
@@ -676,7 +678,13 @@ async function sendMessage(params, emit) {
         ? 'Generation stopped.'
         : runtimeDisplayName(backend) + ' runtime failed: ' + formatRuntimeErrorMessage(error);
   } finally {
-    if (activeRuns.get(conversationId) === run) activeRuns.delete(conversationId);
+    const activeRun = activeRuns.get(conversationId);
+    if (activeRun === run) activeRuns.delete(conversationId);
+    if (activeRun === run || activeRun === undefined) {
+      conversation.status = 'finished';
+      conversation.modifyTime = Date.now();
+      await saveStore();
+    }
     clearConfirmationsForConversation(conversationId, emit);
   }
 
@@ -715,6 +723,12 @@ function stopActiveRun(conversationId) {
 function stopStream(params) {
   const conversationId = requiredString(params.conversation_id);
   if (!stopActiveRun(conversationId)) return { success: true, stopped: false };
+  const conversation = conversations.get(conversationId);
+  if (conversation) {
+    conversation.status = 'finished';
+    conversation.modifyTime = Date.now();
+    void saveStore();
+  }
   return { success: true, stopped: true };
 }
 

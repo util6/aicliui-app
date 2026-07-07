@@ -128,10 +128,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      const conversation = await bridge.request<{ extra?: { lastContextUsage?: unknown } } | null>('conversation.get', {
+      const conversation = await bridge.request<{
+        status?: string;
+        extra?: { lastContextUsage?: unknown };
+      } | null>('conversation.get', {
         conversation_id: id,
       });
       if (requestId !== loadRequestRef.current) return;
+      if (conversation?.status === 'running') {
+        turnFinishedRef.current = false;
+        setStreamingState(true);
+      }
       const restoredUsage = normalizeContextUsage(conversation?.extra?.lastContextUsage);
       if (restoredUsage) {
         setContextUsage(restoredUsage);

@@ -95,6 +95,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     stopActiveRun(activeRuns, conversationId);
     const runController = new AbortController();
     activeRuns.set(conversationId, runController);
+    store.updateConversation(conversationId, { status: 'running' });
 
     store.addTextMessage({
       conversationId,
@@ -208,8 +209,12 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
         emitChatStream(context, conversationId, assistantMsgId, 'content', { content: contentChunk });
       }
     } finally {
-      if (activeRuns.get(conversationId) === runController) {
+      const activeRun = activeRuns.get(conversationId);
+      if (activeRun === runController) {
         activeRuns.delete(conversationId);
+      }
+      if (activeRun === runController || activeRun === undefined) {
+        store.updateConversation(conversationId, { status: 'finished' });
       }
     }
 
@@ -230,7 +235,11 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
   });
   router.register('chat.stop.stream', (data) => {
     const conversationId = stringParam(asRecord(data).conversation_id);
-    return { success: true, stopped: stopActiveRun(activeRuns, conversationId) };
+    const stopped = stopActiveRun(activeRuns, conversationId);
+    if (stopped) {
+      store.updateConversation(conversationId, { status: 'finished' });
+    }
+    return { success: true, stopped };
   });
   router.register('confirmation.list', (data) => {
     const params = asRecord(data);

@@ -847,6 +847,12 @@ describe('default bridge routes', () => {
     });
 
     expect(stopResponse.data).toEqual({ success: true, stopped: true });
+    const [stoppedConversation] = await router.handleIncoming({
+      name: 'subscribe-conversation.get',
+      data: { id: 'm_get_stopped', data: { conversation_id: 'stop-id-1' } },
+    });
+    expect(stoppedConversation.data).toMatchObject({ id: 'stop-id-1', status: 'finished' });
+
     await stopped;
 
     const sendMessages = await sendPromise;
@@ -862,5 +868,74 @@ describe('default bridge routes', () => {
       }),
     );
     expect(sendMessages.at(-1)?.data).toMatchObject({ type: 'finish', conversation_id: 'stop-id-1' });
+  });
+
+  it('marks conversations running while an adapter stream is active and finished when it ends', async () => {
+    let nextId = 0;
+    let startedResolve!: () => void;
+    let continueResolve!: () => void;
+    const started = new Promise<void>((resolve) => {
+      startedResolve = resolve;
+    });
+    const shouldContinue = new Promise<void>((resolve) => {
+      continueResolve = resolve;
+    });
+    const store = new InMemoryConversationStore({
+      now: () => 6000 + nextId,
+      id: () => `status-id-${++nextId}`,
+    });
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'opencode',
+          name: 'opencode',
+          label: 'OpenCode',
+          probe: async () => ({ backend: 'opencode', state: 'ready' }),
+          sendMessage: async function* () {
+            startedResolve();
+            await shouldContinue;
+            yield { type: 'content', content: 'done' };
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_status',
+        data: {
+          type: 'acp',
+          name: 'status',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'opencode' },
+        },
+      },
+    });
+
+    const sendPromise = router.handleIncoming({
+      name: 'subscribe-chat.send.message',
+      data: {
+        id: 'm_send_status',
+        data: { conversation_id: 'status-id-1', msg_id: 'user-msg-status', input: 'long running' },
+      },
+    });
+
+    await started;
+    const [running] = await router.handleIncoming({
+      name: 'subscribe-conversation.get',
+      data: { id: 'm_get_running', data: { conversation_id: 'status-id-1' } },
+    });
+    expect(running.data).toMatchObject({ id: 'status-id-1', status: 'running' });
+
+    continueResolve();
+    await sendPromise;
+
+    const [finished] = await router.handleIncoming({
+      name: 'subscribe-conversation.get',
+      data: { id: 'm_get_finished', data: { conversation_id: 'status-id-1' } },
+    });
+    expect(finished.data).toMatchObject({ id: 'status-id-1', status: 'finished' });
   });
 });
