@@ -387,6 +387,15 @@ async function sendMessage(params, emit) {
       data: { content },
     });
   };
+  const emitAssistantTool = (tool) => {
+    if (!tool) return;
+    emit('chat.response.stream', {
+      type: 'tool_group',
+      msg_id: assistantMsgId,
+      conversation_id: conversationId,
+      data: [tool],
+    });
+  };
   activeRuns.set(conversationId, run);
 
   await addTextMessage(conversationId, userMsgId, 'right', input);
@@ -409,6 +418,7 @@ async function sendMessage(params, emit) {
         files: selectedFiles,
         signal: run.signal,
         onContent: emitAssistantContent,
+        onTool: emitAssistantTool,
       });
       emit('chat.response.stream', {
         type: 'thought',
@@ -488,7 +498,7 @@ function stopStream(params) {
   return { success: true, stopped: true };
 }
 
-async function sendOpenCodePrompt({ input, workspace, files, signal, onContent }) {
+async function sendOpenCodePrompt({ input, workspace, files, signal, onContent, onTool }) {
   const baseUrl = await ensureOpenCodeServer();
   const attachments = await buildOpenCodeFileAttachments(files, workspace);
   const session = await requestOpenCodeJson(baseUrl, '/api/session', {
@@ -500,7 +510,7 @@ async function sendOpenCodePrompt({ input, workspace, files, signal, onContent }
   });
   const sessionId = session && session.data && typeof session.data.id === 'string' ? session.data.id : '';
   if (!sessionId) throw new Error('OpenCode session.create returned no session id');
-  const eventStream = subscribeOpenCodeTextDeltas(baseUrl, workspace, sessionId, signal, onContent);
+  const eventStream = subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, { onContent, onTool });
 
   try {
     await eventStream.ready;
@@ -531,7 +541,7 @@ async function sendOpenCodePrompt({ input, workspace, files, signal, onContent }
   };
 }
 
-function subscribeOpenCodeTextDeltas(baseUrl, workspace, sessionId, signal, onContent) {
+function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, handlers) {
   const controller = new AbortController();
   const abortFromParent = () => controller.abort(signal.reason || new Error('OpenCode event stream aborted'));
   if (signal?.aborted) abortFromParent();
@@ -552,9 +562,12 @@ function subscribeOpenCodeTextDeltas(baseUrl, workspace, sessionId, signal, onCo
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       const extractTextDelta = createOpenCodeTextDeltaExtractor(sessionId);
+      const extractToolUpdate = createOpenCodeToolUpdateExtractor(sessionId);
       const parse = createSseParser((event) => {
         const text = extractTextDelta(event);
-        if (text) onContent(text);
+        if (text) handlers.onContent(text);
+        const tool = extractToolUpdate(event);
+        if (tool) handlers.onTool(tool);
       });
       while (true) {
         const next = await reader.read();
@@ -629,6 +642,58 @@ function extractOpenCodeEventTextDelta(event, sessionId, textByPartId) {
   const previous = textByPartId.get(partId) || '';
   textByPartId.set(partId, part.text);
   return part.text.startsWith(previous) ? part.text.slice(previous.length) : '';
+}
+
+function createOpenCodeToolUpdateExtractor(sessionId) {
+  return (event) => extractOpenCodeToolUpdate(event, sessionId);
+}
+
+function extractOpenCodeToolUpdate(event, sessionId) {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'message.part.updated') return null;
+  const part = isRecord(data.part) ? data.part : {};
+  const partSessionId = typeof data.sessionID === 'string' ? data.sessionID : part.sessionID;
+  if (partSessionId !== sessionId || part.type !== 'tool') return null;
+
+  const state = isRecord(part.state) ? part.state : {};
+  const callId = typeof part.callID === 'string' ? part.callID : typeof part.id === 'string' ? part.id : '';
+  if (!callId) return null;
+
+  return {
+    callId,
+    name: typeof part.tool === 'string' && part.tool ? part.tool : 'tool',
+    description: openCodeToolTitle(part, state),
+    status: openCodeToolStatus(state.status),
+    resultDisplay: openCodeToolResultDisplay(state),
+  };
+}
+
+function openCodeToolTitle(part, state) {
+  if (typeof state.title === 'string' && state.title) return state.title;
+  if (isRecord(state.input)) {
+    const values = Object.values(state.input)
+      .filter((value) => typeof value === 'string' && value.trim())
+      .slice(0, 2);
+    if (values.length) return values.join(' ');
+  }
+  return typeof part.tool === 'string' && part.tool ? part.tool : 'tool';
+}
+
+function openCodeToolStatus(status) {
+  if (status === 'completed') return 'Success';
+  if (status === 'error') return 'Error';
+  if (status === 'pending') return 'Pending';
+  return 'Executing';
+}
+
+function openCodeToolResultDisplay(state) {
+  if (typeof state.output === 'string' && state.output) return state.output;
+  if (typeof state.error === 'string' && state.error) return state.error;
+  if (Array.isArray(state.content) && state.content.length) return JSON.stringify(state.content);
+  return '';
 }
 
 function buildGeminiCommandDescription({ input, model, approvalMode }) {
