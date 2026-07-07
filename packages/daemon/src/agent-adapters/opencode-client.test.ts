@@ -612,6 +612,59 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode v2 step usage events as context usage updates', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_usage' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.step.ended',
+              data: {
+                sessionID: 'ses_usage',
+                assistantMessageID: 'msg_usage',
+                finish: 'stop',
+                cost: 0.0042,
+                tokens: {
+                  input: 100,
+                  output: 20,
+                  reasoning: 5,
+                  cache: { read: 7, write: 3 },
+                },
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_usage/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_usage/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_usage/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'usage done' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_usage' },
+      { type: 'context_usage', used: 135, size: 135 },
+      { type: 'content', content: 'usage done' },
+    ]);
+  });
+
   it('falls back to context text when the OpenCode SSE stream is unavailable', async () => {
     const client = createOpenCodeClient({
       baseUrl: 'http://127.0.0.1:4096',

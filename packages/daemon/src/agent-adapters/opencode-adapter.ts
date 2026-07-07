@@ -284,6 +284,13 @@ export function createOpenCodeAdapter(
             status: event.status,
           };
           break;
+        case 'context_usage':
+          yield {
+            type: 'context_usage',
+            used: event.used,
+            size: event.size,
+          };
+          break;
         case 'permission': {
           const confirmation = toOpenCodeConfirmation(event.request);
           if (!confirmation) break;

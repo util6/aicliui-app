@@ -838,6 +838,21 @@ async function sendMessage(params, emit) {
       },
     });
   };
+  const emitAssistantContextUsage = (update) => {
+    if (!update) return;
+    if (!isRecord(conversation.extra)) conversation.extra = {};
+    conversation.extra.lastContextUsage = {
+      used: update.used,
+      size: update.size,
+    };
+    conversation.modifyTime = Date.now();
+    emit('chat.response.stream', {
+      type: 'acp_context_usage',
+      msg_id: assistantMsgId,
+      conversation_id: conversationId,
+      data: { used: update.used, size: update.size },
+    });
+  };
   const emitAssistantCodexTool = (tool) => {
     if (!tool) return;
     upsertCodexToolCallMessage(conversationId, assistantMsgId, tool);
@@ -918,6 +933,7 @@ async function sendMessage(params, emit) {
         onContent: emitAssistantContent,
         onTool: emitAssistantTool,
         onThinking: emitAssistantThinking,
+        onContextUsage: emitAssistantContextUsage,
         onPermission: emitAssistantPermission,
         onPermissionResolved: emitAssistantPermissionResolved,
         onQuestion: emitAssistantQuestion,
@@ -1064,6 +1080,7 @@ async function sendOpenCodePrompt({
   onContent,
   onTool,
   onThinking,
+  onContextUsage,
   onPermission,
   onPermissionResolved,
   onQuestion,
@@ -1079,6 +1096,7 @@ async function sendOpenCodePrompt({
     onContent,
     onTool,
     onThinking,
+    onContextUsage,
     onPermission: (request) => {
       const confirmation = toOpenCodeConfirmation(request, conversationId, msgId, baseUrl);
       if (confirmation) onPermission(confirmation);
@@ -1215,6 +1233,7 @@ function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, h
       const extractTextDelta = createOpenCodeTextDeltaExtractor(sessionId);
       const extractReasoningEvent = createOpenCodeReasoningEventExtractor(sessionId);
       const extractToolUpdate = createOpenCodeToolUpdateExtractor(sessionId);
+      const extractContextUsage = createOpenCodeContextUsageExtractor(sessionId);
       const extractPermissionEvent = createOpenCodePermissionEventExtractor(sessionId);
       const extractQuestionEvent = createOpenCodeQuestionEventExtractor(sessionId);
       const parse = createSseParser((event) => {
@@ -1224,6 +1243,8 @@ function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, h
         if (reasoning) handlers.onThinking(reasoning);
         const tool = extractToolUpdate(event);
         if (tool) handlers.onTool(tool);
+        const contextUsage = extractContextUsage(event);
+        if (contextUsage) handlers.onContextUsage(contextUsage);
         const permissionEvent = extractPermissionEvent(event);
         if (permissionEvent?.type === 'asked') handlers.onPermission(permissionEvent.request);
         if (permissionEvent?.type === 'resolved') handlers.onPermissionResolved(permissionEvent.requestId);
@@ -1323,6 +1344,32 @@ function extractOpenCodeReasoningEvent(event, sessionId) {
     return { content: '', status: 'done' };
   }
   return null;
+}
+
+function createOpenCodeContextUsageExtractor(sessionId) {
+  return (event) => extractOpenCodeContextUsage(event, sessionId);
+}
+
+function extractOpenCodeContextUsage(event, sessionId) {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'session.next.step.ended') return null;
+  if (data.sessionID !== sessionId) return null;
+  const tokens = isRecord(data.tokens) ? data.tokens : null;
+  return tokens ? openCodeContextUsageFromTokens(tokens) : null;
+}
+
+function openCodeContextUsageFromTokens(tokens) {
+  const cache = isRecord(tokens.cache) ? tokens.cache : {};
+  const used =
+    numberValue(tokens.input) +
+    numberValue(tokens.output) +
+    numberValue(tokens.reasoning) +
+    numberValue(cache.read) +
+    numberValue(cache.write);
+  return used > 0 ? { used, size: used } : null;
 }
 
 function createOpenCodeToolUpdateExtractor(sessionId) {
@@ -2529,6 +2576,10 @@ function artifactStatusParam(value) {
 
 function stringValue(value) {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function numberValue(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function safeJsonStringify(value) {

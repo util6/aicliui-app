@@ -84,6 +84,11 @@ export type OpenCodeThinkingUpdate = {
   status: 'thinking' | 'done';
 };
 
+export type OpenCodeContextUsageUpdate = {
+  used: number;
+  size: number;
+};
+
 export type OpenCodeStreamEvent =
   | {
       type: 'session';
@@ -101,6 +106,11 @@ export type OpenCodeStreamEvent =
       type: 'thinking';
       content: string;
       status: 'thinking' | 'done';
+    }
+  | {
+      type: 'context_usage';
+      used: number;
+      size: number;
     }
   | {
       type: 'permission';
@@ -234,6 +244,9 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
         },
         onThinking(update) {
           queue.push({ type: 'thinking', ...update });
+        },
+        onContextUsage(update) {
+          queue.push({ type: 'context_usage', ...update });
         },
         onPermission(request) {
           queue.push({ type: 'permission', request });
@@ -421,6 +434,7 @@ type OpenCodeEventStreamHandlers = {
   onContent(content: string): void;
   onTool(tool: OpenCodeToolUpdate): void;
   onThinking(update: OpenCodeThinkingUpdate): void;
+  onContextUsage(update: OpenCodeContextUsageUpdate): void;
   onPermission(request: OpenCodePermissionRequest): void;
   onPermissionResolved(requestId: string): void;
   onQuestion(request: OpenCodeQuestionRequest): void;
@@ -518,6 +532,7 @@ function subscribeOpenCodeSessionEvents(input: {
       const extractTextDelta = createOpenCodeTextDeltaExtractor(input.sessionId);
       const extractReasoningEvent = createOpenCodeReasoningEventExtractor(input.sessionId);
       const extractToolUpdate = createOpenCodeToolUpdateExtractor(input.sessionId);
+      const extractContextUsage = createOpenCodeContextUsageExtractor(input.sessionId);
       const extractPermissionEvent = createOpenCodePermissionEventExtractor(input.sessionId);
       const extractQuestionEvent = createOpenCodeQuestionEventExtractor(input.sessionId);
       const parse = createSseParser((event) => {
@@ -529,6 +544,9 @@ function subscribeOpenCodeSessionEvents(input: {
 
         const tool = extractToolUpdate(event);
         if (tool) input.handlers.onTool(tool);
+
+        const contextUsage = extractContextUsage(event);
+        if (contextUsage) input.handlers.onContextUsage(contextUsage);
 
         const permissionEvent = extractPermissionEvent(event);
         if (permissionEvent?.type === 'asked') input.handlers.onPermission(permissionEvent.request);
@@ -639,6 +657,32 @@ function extractOpenCodeReasoningEvent(event: unknown, sessionId: string): OpenC
     return { content: '', status: 'done' };
   }
   return null;
+}
+
+function createOpenCodeContextUsageExtractor(sessionId: string): (event: unknown) => OpenCodeContextUsageUpdate | null {
+  return (event) => extractOpenCodeContextUsage(event, sessionId);
+}
+
+function extractOpenCodeContextUsage(event: unknown, sessionId: string): OpenCodeContextUsageUpdate | null {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'session.next.step.ended') return null;
+  if (data.sessionID !== sessionId) return null;
+  const tokens = isRecord(data.tokens) ? data.tokens : null;
+  return tokens ? openCodeContextUsageFromTokens(tokens) : null;
+}
+
+function openCodeContextUsageFromTokens(tokens: Record<string, unknown>): OpenCodeContextUsageUpdate | null {
+  const cache = isRecord(tokens.cache) ? tokens.cache : {};
+  const used =
+    numberValue(tokens.input) +
+    numberValue(tokens.output) +
+    numberValue(tokens.reasoning) +
+    numberValue(cache.read) +
+    numberValue(cache.write);
+  return used > 0 ? { used, size: used } : null;
 }
 
 function createOpenCodeToolUpdateExtractor(sessionId: string): (event: unknown) => OpenCodeToolUpdate | null {
@@ -958,6 +1002,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function jsonDisplay(value: unknown): string {

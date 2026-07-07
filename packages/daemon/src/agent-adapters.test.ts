@@ -845,6 +845,37 @@ describe('agent adapters', () => {
     ]);
   });
 
+  it('forwards OpenCode context usage events to the shared adapter contract', async () => {
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async () => ({ sessionId: 'unused', text: 'unused fallback' }),
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+          streamPrompt: async function* () {
+            yield { type: 'session', sessionId: 'ses_usage' };
+            yield { type: 'context_usage', used: 135, size: 200 };
+            yield { type: 'content', content: 'ready' };
+          },
+        },
+      },
+    );
+
+    const events = [];
+    for await (const event of adapter.sendMessage({ conversationId: 'conv-1', input: 'hello' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_usage' },
+      { type: 'context_usage', used: 135, size: 200 },
+      { type: 'content', content: 'ready' },
+    ]);
+  });
+
   it('sends OpenCode slash input through the command endpoint and reuses the conversation session', async () => {
     const calls: unknown[] = [];
     const adapter = createOpenCodeAdapter(

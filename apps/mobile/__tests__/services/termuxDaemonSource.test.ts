@@ -128,4 +128,12 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.tool.failed'");
     expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeNextToolDisplay(data)');
   });
+
+  it('routes OpenCode v2 step usage events through the local context usage stream', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain('createOpenCodeContextUsageExtractor');
+    expect(TERMUX_DAEMON_SOURCE).toContain('function extractOpenCodeContextUsage(event, sessionId)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("type !== 'session.next.step.ended'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeContextUsageFromTokens(tokens)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("type: 'acp_context_usage'");
+  });
 });
