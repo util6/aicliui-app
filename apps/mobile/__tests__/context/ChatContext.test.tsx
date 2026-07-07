@@ -36,7 +36,16 @@ function RuntimeProbe() {
       <Text testID='thought'>{thought?.subject ?? ''}</Text>
       <Text testID='messages'>{messages.map((message) => message.content?.content ?? '').join('|')}</Text>
       <Text testID='message-types'>{messages.map((message) => message.type).join('|')}</Text>
+      <Text testID='permission-titles'>
+        {messages
+          .filter((message) => message.type === 'acp_permission')
+          .map((message) => message.content?.title ?? '')
+          .join('|')}
+      </Text>
       <Text testID='confirmations'>{confirmations.map((confirmation) => confirmation.id).join('|')}</Text>
+      <Text testID='confirmation-titles'>
+        {confirmations.map((confirmation) => confirmation.title ?? '').join('|')}
+      </Text>
       <Text testID='context-usage'>
         {contextUsage ? `${contextUsage.used}/${contextUsage.size}` : ''}
       </Text>
@@ -405,5 +414,70 @@ describe('ChatContext runtime state', () => {
     expect(mockRequest).toHaveBeenCalledWith('confirmation.list', {
       conversation_id: 'conv-1',
     });
+  });
+
+  it('removes inline confirmation cards when a confirmation is resolved', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('streaming').props.children).toBe('idle'));
+
+    await act(async () => {
+      listeners.get('confirmation.add')?.({
+        id: 'permission-1',
+        msg_id: 'assistant-1',
+        conversation_id: 'conv-1',
+        title: 'OpenCode permission',
+        callId: 'call-1',
+        options: [{ label: 'Allow once', value: 'once' }],
+      });
+    });
+    expect(screen.getByTestId('message-types').props.children).toContain('acp_permission');
+    expect(screen.getByTestId('confirmations').props.children).toBe('permission-1');
+
+    await act(async () => {
+      listeners.get('confirmation.remove')?.({
+        conversation_id: 'conv-1',
+        id: 'permission-1',
+      });
+    });
+
+    expect(screen.getByTestId('message-types').props.children).not.toContain('acp_permission');
+    expect(screen.getByTestId('confirmations').props.children).toBe('');
+  });
+
+  it('updates inline confirmation cards when a confirmation changes', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('streaming').props.children).toBe('idle'));
+
+    await act(async () => {
+      listeners.get('confirmation.add')?.({
+        id: 'permission-1',
+        msg_id: 'assistant-1',
+        conversation_id: 'conv-1',
+        title: 'OpenCode permission',
+        callId: 'call-1',
+        options: [{ label: 'Allow once', value: 'once' }],
+      });
+    });
+
+    await act(async () => {
+      listeners.get('confirmation.update')?.({
+        id: 'permission-1',
+        title: 'Updated permission',
+        description: 'Permission details changed',
+      });
+    });
+
+    expect(screen.getByTestId('confirmation-titles').props.children).toBe('Updated permission');
+    expect(screen.getByTestId('permission-titles').props.children).toBe('Updated permission');
   });
 });

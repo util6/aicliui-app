@@ -272,13 +272,17 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     });
 
     const unsubConfirmUpdate = bridge.on('confirmation.update', (data: unknown) => {
-      const update = data as any;
+      const update = data as PendingConfirmation;
+      if (update.conversation_id && update.conversation_id !== conversationId) return;
       setConfirmations((prev) => prev.map((c) => (c.id === update.id ? { ...c, ...update } : c)));
+      setMessages((prev) => updateConfirmationMessages(prev, update));
     });
 
     const unsubConfirmRemove = bridge.on('confirmation.remove', (data: unknown) => {
-      const removal = data as any;
+      const removal = data as PendingConfirmation;
+      if (removal.conversation_id && removal.conversation_id !== conversationId) return;
       setConfirmations((prev) => prev.filter((c) => c.id !== removal.id));
+      setMessages((prev) => removeConfirmationMessages(prev, removal.id));
     });
 
     return () => {
@@ -468,4 +472,36 @@ function appendConfirmationMessages(
   }
 
   return next;
+}
+
+function updateConfirmationMessages(messages: TMessage[], update: PendingConfirmation): TMessage[] {
+  if (!update.id) return messages;
+  let changed = false;
+  const next = messages.map((message) => {
+    if (!isConfirmationMessage(message)) return message;
+    const content = message.content as PendingConfirmation | undefined;
+    if (content?.id !== update.id) return message;
+    changed = true;
+    return {
+      ...message,
+      content: {
+        ...content,
+        ...update,
+      },
+    };
+  });
+  return changed ? next : messages;
+}
+
+function removeConfirmationMessages(messages: TMessage[], confirmationId: unknown): TMessage[] {
+  if (typeof confirmationId !== 'string' || confirmationId.length === 0) return messages;
+  const next = messages.filter((message) => {
+    if (!isConfirmationMessage(message)) return true;
+    return (message.content as PendingConfirmation | undefined)?.id !== confirmationId;
+  });
+  return next.length === messages.length ? messages : next;
+}
+
+function isConfirmationMessage(message: TMessage): boolean {
+  return message.type === 'acp_permission' || message.type === 'codex_permission';
 }
