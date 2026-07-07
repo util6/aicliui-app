@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildGeminiCommand, parseGeminiStreamJsonLine } from './agent-adapters/gemini-adapter.js';
-import { buildOpenCodeServeCommand } from './agent-adapters/opencode-adapter.js';
+import { buildOpenCodeServeCommand, createOpenCodeAdapter } from './agent-adapters/opencode-adapter.js';
 import { createAgentAdapterRegistry } from './agent-adapters/registry.js';
 import type { CliAgentAdapter } from './agent-adapters/types.js';
 
@@ -41,6 +41,29 @@ describe('agent adapters', () => {
       command: 'opencode',
       args: ['serve', '--hostname', '127.0.0.1', '--port', '4096'],
     });
+  });
+
+  it('streams OpenCode client responses when a local API client is available', async () => {
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async () => ({ sessionId: 'ses_123', text: 'from opencode' }),
+        },
+      },
+    );
+
+    const events = [];
+    for await (const event of adapter.sendMessage({ conversationId: 'conv-1', input: 'hello' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_123' },
+      { type: 'content', content: 'from opencode' },
+    ]);
   });
 });
 

@@ -1,0 +1,83 @@
+import { describe, expect, it } from 'vitest';
+import { createOpenCodeClient, extractOpenCodeAssistantText } from './opencode-client.js';
+
+describe('OpenCode local API client', () => {
+  it('creates a session, prompts it, waits, and returns assistant text from context', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init });
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_123' } });
+        }
+        if (String(url).endsWith('/api/session/ses_123/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_123/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_123/context')) {
+          return jsonResponse({
+            data: [
+              {
+                id: 'msg_user',
+                role: 'user',
+                parts: [{ type: 'text', text: 'hello' }],
+              },
+              {
+                id: 'msg_assistant',
+                role: 'assistant',
+                parts: [{ type: 'text', text: 'world' }],
+              },
+            ],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    await expect(client.sendPrompt({ prompt: 'hello', directory: '/tmp/project' })).resolves.toEqual({
+      sessionId: 'ses_123',
+      text: 'world',
+    });
+
+    expect(calls.map((call) => [call.url, call.init?.method])).toEqual([
+      ['http://127.0.0.1:4096/api/session', 'POST'],
+      ['http://127.0.0.1:4096/api/session/ses_123/prompt', 'POST'],
+      ['http://127.0.0.1:4096/api/session/ses_123/wait', 'POST'],
+      ['http://127.0.0.1:4096/api/session/ses_123/context', 'GET'],
+    ]);
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+      location: { directory: '/tmp/project' },
+    });
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({
+      prompt: { text: 'hello', files: [], agents: [] },
+    });
+  });
+
+  it('extracts assistant text from common context message shapes', () => {
+    expect(
+      extractOpenCodeAssistantText([
+        { role: 'assistant', parts: [{ type: 'text', text: 'from parts' }] },
+      ]),
+    ).toBe('from parts');
+
+    expect(
+      extractOpenCodeAssistantText([
+        { type: 'assistant', content: [{ type: 'text', text: 'from content' }] },
+      ]),
+    ).toBe('from content');
+  });
+});
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function emptyResponse(): Response {
+  return new Response(null, { status: 204 });
+}
