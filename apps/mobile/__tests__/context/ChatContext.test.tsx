@@ -514,6 +514,57 @@ describe('ChatContext runtime state', () => {
     await waitFor(() => expect(mockAsyncStorage.removeItem).toHaveBeenCalledWith('chat-command-queue/conv-1'));
   });
 
+  it('restores a drained queued command when the send request fails', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-conversation-messages') return Promise.resolve([]);
+      if (name === 'conversation.get') return Promise.resolve(null);
+      if (name === 'conversation.get-slash-commands') return Promise.resolve([]);
+      if (name === 'confirmation.list') return Promise.resolve([]);
+      if (name === 'chat.send.message') {
+        const sendCount = mockRequest.mock.calls.filter(([requestName]) => requestName === name).length;
+        return sendCount === 1 ? Promise.resolve({ success: true }) : Promise.reject(new Error('daemon offline'));
+      }
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('can-send').props.children).toBe('can-send'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('send'));
+      fireEvent.press(screen.getByTestId('send-second'));
+    });
+
+    expect(screen.getByTestId('queued-items').props.children).toBe('second:0');
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'finish',
+        msg_id: 'assistant-1',
+        conversation_id: 'conv-1',
+        data: null,
+      });
+    });
+
+    await waitFor(() => expect(screen.getByTestId('queued-items').props.children).toBe('second:0'));
+    expect(screen.getByTestId('streaming').props.children).toBe('idle');
+    expect(screen.getByTestId('can-send').props.children).toBe('can-send');
+    expect(mockRequest.mock.calls.filter(([name]) => name === 'chat.send.message')).toHaveLength(2);
+    await waitFor(() =>
+      expect(mockAsyncStorage.setItem).toHaveBeenLastCalledWith(
+        'chat-command-queue/conv-1',
+        expect.stringContaining('second'),
+      ),
+    );
+    warnSpy.mockRestore();
+  });
+
   it('restores runtime summary gate when a conversation is opened', async () => {
     mockRequest.mockImplementation((name: string) => {
       if (name === 'database.get-conversation-messages') return Promise.resolve([]);

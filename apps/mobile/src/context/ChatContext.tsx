@@ -26,6 +26,10 @@ type RuntimeSummary = {
   turn_id: string | null;
 };
 
+type ExecuteSendOptions = {
+  onSendFailure?: () => void;
+};
+
 export type QueuedCommand = {
   id: string;
   input: string;
@@ -133,7 +137,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   );
 
   const executeSend = useCallback(
-    (text: string, files?: string[]) => {
+    (text: string, files?: string[], options?: ExecuteSendOptions) => {
       const trimmed = text.trim();
       if (!conversationId || !trimmed) return false;
 
@@ -162,6 +166,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         .catch((e) => {
           setStreamingState(false);
           setCanSendMessage(true);
+          options?.onSendFailure?.();
           console.warn('[Chat] send failed:', e);
         });
       return true;
@@ -191,7 +196,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const [next, ...rest] = queuedCommandsRef.current;
     if (!next) return false;
     setQueuedCommands(rest);
-    return executeSend(next.input, next.files);
+    return executeSend(next.input, next.files, {
+      onSendFailure: () => {
+        if (activeConversationIdRef.current !== conversationId) return;
+        setQueuedCommands((current) => restoreQueuedCommand(current, next));
+      },
+    });
   }, [conversationId, executeSend, setQueuedCommands]);
 
   const completeActiveThinking = useCallback(
@@ -671,6 +681,10 @@ function isProcessingConversationStatus(status: unknown): boolean {
 
 function uniqueFiles(files: string[] | undefined): string[] {
   return Array.from(new Set((files ?? []).filter((file) => typeof file === 'string' && file.length > 0)));
+}
+
+function restoreQueuedCommand(commands: QueuedCommand[], failedCommand: QueuedCommand): QueuedCommand[] {
+  return [failedCommand, ...commands.filter((command) => command.id !== failedCommand.id)];
 }
 
 async function persistQueuedCommands(conversationId: string, commands: QueuedCommand[]): Promise<void> {
