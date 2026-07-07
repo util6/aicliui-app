@@ -21,6 +21,9 @@ export type Conversation = {
     customWorkspace?: boolean;
     backend?: string;
     agentName?: string;
+    defaultFiles?: string[];
+    currentModelId?: string;
+    sessionMode?: string;
     pinned?: boolean;
     pinnedAt?: number;
   };

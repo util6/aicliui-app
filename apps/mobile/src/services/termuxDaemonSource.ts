@@ -1,6 +1,7 @@
 export const TERMUX_DAEMON_SOURCE = String.raw`import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 
 const IGNORED_ENTRY_NAMES = new Set(['.git', 'node_modules', '.expo', '.next', 'dist', 'build']);
@@ -293,6 +294,17 @@ function imageMimeType(path) {
   return 'image/png';
 }
 
+function fileMimeType(path) {
+  const ext = path.toLowerCase().split('.').pop() || '';
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif'].includes(ext)) return imageMimeType(path);
+  if (ext === 'json') return 'application/json';
+  if (ext === 'html' || ext === 'htm') return 'text/html';
+  if (ext === 'css') return 'text/css';
+  if (ext === 'csv') return 'text/csv';
+  if (ext === 'md' || ext === 'markdown') return 'text/markdown';
+  return 'text/plain';
+}
+
 function matchesSearch(node, search) {
   if (!search) return true;
   const lower = search.toLowerCase();
@@ -354,6 +366,7 @@ async function sendMessage(params, emit) {
       : process.env.AICLIUI_WORKSPACE || process.env.HOME + '/.aicliui/workspaces/default';
   const model = typeof conversation.extra.currentModelId === 'string' ? conversation.extra.currentModelId : undefined;
   const approvalMode = typeof conversation.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined;
+  const selectedFiles = normalizeSelectedFiles(params.files, conversation.extra.defaultFiles, workspace);
   let assistantContent = '';
 
   await addTextMessage(conversationId, userMsgId, 'right', input);
@@ -370,7 +383,7 @@ async function sendMessage(params, emit) {
         conversation_id: conversationId,
         data: { subject: 'OpenCode', description: 'starting local server on 127.0.0.1:' + openCodePort },
       });
-      const result = await sendOpenCodePrompt({ input, workspace });
+      const result = await sendOpenCodePrompt({ input, workspace, files: selectedFiles });
       emit('chat.response.stream', {
         type: 'thought',
         msg_id: assistantMsgId,
@@ -389,7 +402,7 @@ async function sendMessage(params, emit) {
         data: { subject: 'Gemini CLI', description: buildGeminiCommandDescription({ input, model, approvalMode }) },
       });
       assistantContent =
-        (await sendGeminiPrompt({ input, workspace, model, approvalMode })) ||
+        (await sendGeminiPrompt({ input, workspace, model, approvalMode, files: selectedFiles })) ||
         'Gemini CLI completed, but no assistant text was returned.';
     } else {
       throw new Error("Agent backend '" + backend + "' is not supported by this Termux daemon.");
@@ -411,8 +424,9 @@ async function sendMessage(params, emit) {
   return { success: true };
 }
 
-async function sendOpenCodePrompt({ input, workspace }) {
+async function sendOpenCodePrompt({ input, workspace, files }) {
   const baseUrl = await ensureOpenCodeServer();
+  const attachments = await buildOpenCodeFileAttachments(files, workspace);
   const session = await requestOpenCodeJson(baseUrl, '/api/session', {
     method: 'POST',
     body: JSON.stringify({
@@ -427,7 +441,7 @@ async function sendOpenCodePrompt({ input, workspace }) {
     body: JSON.stringify({
       prompt: {
         text: input,
-        files: [],
+        files: attachments,
         agents: [],
       },
     }),
@@ -461,10 +475,56 @@ function buildGeminiArgs({ input, model, approvalMode }) {
   ];
 }
 
-async function sendGeminiPrompt({ input, workspace, model, approvalMode }) {
-  const args = buildGeminiArgs({ input, model, approvalMode }).slice(1);
+async function sendGeminiPrompt({ input, workspace, model, approvalMode, files }) {
+  const prompt = appendSelectedFilesToPrompt(input, files, workspace);
+  const args = buildGeminiArgs({ input: prompt, model, approvalMode }).slice(1);
   const result = await runProcess('gemini', args, { cwd: workspace || process.env.HOME || process.cwd() });
   return extractGeminiStreamText(result.stdout) || result.stdout.trim();
+}
+
+function normalizeSelectedFiles(primary, fallback, workspace) {
+  const root = resolveLocalPath(workspace);
+  const values = [
+    ...(Array.isArray(fallback) ? fallback : []),
+    ...(Array.isArray(primary) ? primary : []),
+  ].filter((item) => typeof item === 'string' && item.trim());
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const rawPath = value.startsWith('/') || value.startsWith('~') ? value : join(root, value);
+    const filePath = ensurePathInsideRoot(resolveLocalPath(rawPath), root);
+    if (seen.has(filePath)) continue;
+    seen.add(filePath);
+    result.push(filePath);
+  }
+  return result;
+}
+
+async function buildOpenCodeFileAttachments(files, workspace) {
+  const root = resolveLocalPath(workspace);
+  const attachments = [];
+  for (const filePath of files) {
+    try {
+      const stats = await stat(filePath);
+      if (!stats.isFile()) continue;
+      attachments.push({
+        uri: pathToFileURL(filePath).toString(),
+        mime: fileMimeType(filePath),
+        name: basename(filePath),
+        description: normalizeRelativePath(relative(root, filePath)),
+      });
+    } catch {
+      // Ignore files that disappeared between selection and send.
+    }
+  }
+  return attachments;
+}
+
+function appendSelectedFilesToPrompt(input, files, workspace) {
+  if (!files.length) return input;
+  const root = resolveLocalPath(workspace);
+  const fileList = files.map((filePath) => '- ' + normalizeRelativePath(relative(root, filePath))).join('\n');
+  return input + '\n\nSelected files:\n' + fileList;
 }
 
 async function ensureOpenCodeServer() {
