@@ -4,6 +4,7 @@ import type { AgentAdapterRegistry } from './agent-adapters/registry.js';
 import { BridgeRouter } from './bridge-router.js';
 import { InMemoryConversationStore, type CreateConversationInput } from './conversation-store.js';
 import { getFileTreeByDir, getWorkspaceTree, readImageBase64, readTextFile } from './local-files.js';
+import type { CliConfirmation } from './agent-adapters/types.js';
 
 const startedAt = Date.now();
 
@@ -16,6 +17,13 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
   const router = new BridgeRouter();
   const store = options?.store ?? new InMemoryConversationStore();
   const adapters = options?.adapters ?? createDefaultAgentAdapterRegistry();
+  const pendingConfirmations = new Map<
+    string,
+    {
+      backend: string;
+      confirmation: CliConfirmation;
+    }
+  >();
 
   router.register('runtime.get-status', async () => getRuntimeStatus(adapters));
   router.register('acp.get-available-agents', () => ({
@@ -104,23 +112,66 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       sessionMode: typeof conversation?.extra.sessionMode === 'string' ? conversation.extra.sessionMode : undefined,
       ...(files.length ? { files } : {}),
     })) {
-      if (event.type === 'thought') {
-        context.emit('chat.response.stream', {
-          type: 'thought',
-          msg_id: assistantMsgId,
-          conversation_id: conversationId,
-          data: { subject: event.subject, description: event.description },
-        });
-        continue;
+      switch (event.type) {
+        case 'thought':
+          emitChatStream(context, conversationId, assistantMsgId, 'thought', {
+            subject: event.subject,
+            description: event.description,
+          });
+          break;
+        case 'thinking':
+          emitChatStream(context, conversationId, assistantMsgId, 'thinking', {
+            content: event.content,
+            ...(event.subject ? { subject: event.subject } : {}),
+            ...(event.duration !== undefined ? { duration: event.duration } : {}),
+            status: event.status ?? 'thinking',
+          });
+          break;
+        case 'tool_call':
+          emitChatStream(context, conversationId, assistantMsgId, 'tool_call', event.data);
+          break;
+        case 'tool_group':
+          emitChatStream(context, conversationId, assistantMsgId, 'tool_group', event.tools);
+          break;
+        case 'acp_tool_call':
+          emitChatStream(context, conversationId, assistantMsgId, 'acp_tool_call', event.data);
+          break;
+        case 'codex_tool_call':
+          emitChatStream(context, conversationId, assistantMsgId, 'codex_tool_call', event.data);
+          break;
+        case 'plan':
+          emitChatStream(context, conversationId, assistantMsgId, 'plan', event.data);
+          break;
+        case 'context_usage':
+          emitChatStream(context, conversationId, assistantMsgId, 'acp_context_usage', {
+            used: event.used,
+            size: event.size,
+          });
+          break;
+        case 'agent_status':
+          emitChatStream(context, conversationId, assistantMsgId, 'agent_status', event.data);
+          break;
+        case 'available_commands':
+          emitChatStream(context, conversationId, assistantMsgId, 'available_commands', {
+            commands: event.commands,
+          });
+          break;
+        case 'permission': {
+          const confirmation = normalizeConfirmation(event.confirmation, conversationId, assistantMsgId);
+          pendingConfirmations.set(confirmation.id, { backend, confirmation });
+          context.emit('confirmation.add', confirmation);
+          break;
+        }
+        case 'permission_resolved':
+          if (pendingConfirmations.delete(event.confirmationId)) {
+            context.emit('confirmation.remove', { conversation_id: conversationId, id: event.confirmationId });
+          }
+          break;
+        case 'content':
+          assistantContent += event.content;
+          emitChatStream(context, conversationId, assistantMsgId, 'content', { content: event.content });
+          break;
       }
-
-      assistantContent += event.content;
-      context.emit('chat.response.stream', {
-        type: 'content',
-        msg_id: assistantMsgId,
-        conversation_id: conversationId,
-        data: { content: event.content },
-      });
     }
 
     store.addTextMessage({
@@ -139,14 +190,80 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     return { success: true };
   });
   router.register('chat.stop.stream', () => ({ success: true }));
-  router.register('confirmation.list', () => []);
-  router.register('confirmation.confirm', () => ({ success: true }));
+  router.register('confirmation.list', (data) => {
+    const params = asRecord(data);
+    const conversationId = stringParam(params.conversation_id);
+    return [...pendingConfirmations.values()]
+      .map((record) => record.confirmation)
+      .filter((confirmation) => confirmation.conversation_id === conversationId);
+  });
+  router.register('confirmation.confirm', async (data, context) => {
+    const params = asRecord(data);
+    const confirmationId = stringParam(params.msg_id ?? params.id);
+    const record = pendingConfirmations.get(confirmationId);
+    if (!record) {
+      return {
+        success: false,
+        error: { code: 'CONFIRMATION_NOT_FOUND', message: `Confirmation not found: ${confirmationId}` },
+      };
+    }
+
+    const adapter = adapters.get(record.backend);
+    const callId =
+      typeof params.callId === 'string'
+        ? params.callId
+        : typeof params.call_id === 'string'
+          ? params.call_id
+          : record.confirmation.callId ?? record.confirmation.call_id;
+    const result = await adapter?.confirm?.({
+      conversationId: stringParam(record.confirmation.conversation_id),
+      confirmationId,
+      ...(callId ? { callId } : {}),
+      data: params.data,
+    });
+
+    pendingConfirmations.delete(confirmationId);
+    context.emit('confirmation.remove', {
+      conversation_id: record.confirmation.conversation_id,
+      id: confirmationId,
+    });
+    return result ?? { success: true };
+  });
   router.register('conversation.get-workspace', async (data) => await getWorkspaceTree(asRecord(data)));
   router.register('get-file-by-dir', async (data) => await getFileTreeByDir(asRecord(data)));
   router.register('read-file', async (data) => await readTextFile(stringParam(asRecord(data).path)));
   router.register('get-image-base64', async (data) => await readImageBase64(stringParam(asRecord(data).path)));
 
   return router;
+}
+
+function emitChatStream(
+  context: { emit: (name: string, data?: unknown) => void },
+  conversationId: string,
+  msgId: string,
+  type: string,
+  data: unknown,
+): void {
+  context.emit('chat.response.stream', {
+    type,
+    msg_id: msgId,
+    conversation_id: conversationId,
+    data,
+  });
+}
+
+function normalizeConfirmation(
+  confirmation: CliConfirmation,
+  conversationId: string,
+  msgId: string,
+): CliConfirmation {
+  const callId = confirmation.callId ?? confirmation.call_id;
+  return {
+    ...confirmation,
+    msg_id: confirmation.msg_id ?? msgId,
+    conversation_id: confirmation.conversation_id ?? conversationId,
+    ...(callId ? { callId, call_id: confirmation.call_id ?? callId } : {}),
+  };
 }
 
 export function getAvailableAgents(): AgentInfo[] {

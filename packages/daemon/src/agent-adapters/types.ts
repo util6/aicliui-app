@@ -9,7 +9,80 @@ export type CliAgentEvent =
       type: 'thought';
       subject: string;
       description: string;
+    }
+  | {
+      type: 'thinking';
+      content: string;
+      subject?: string;
+      duration?: number;
+      status?: 'thinking' | 'done';
+    }
+  | {
+      type: 'tool_call';
+      data: unknown;
+    }
+  | {
+      type: 'tool_group';
+      tools: unknown[];
+    }
+  | {
+      type: 'acp_tool_call';
+      data: unknown;
+    }
+  | {
+      type: 'codex_tool_call';
+      data: unknown;
+    }
+  | {
+      type: 'plan';
+      data: unknown;
+    }
+  | {
+      type: 'context_usage';
+      used: number;
+      size: number;
+    }
+  | {
+      type: 'agent_status';
+      data: unknown;
+    }
+  | {
+      type: 'available_commands';
+      commands: SlashCommandInfo[];
+    }
+  | {
+      type: 'permission';
+      confirmation: CliConfirmation;
+    }
+  | {
+      type: 'permission_resolved';
+      confirmationId: string;
     };
+
+export type CliConfirmation = {
+  id: string;
+  msg_id?: string;
+  conversation_id?: string;
+  title?: string;
+  action?: string;
+  description: string;
+  call_id?: string;
+  callId?: string;
+  options: Array<{
+    label: string;
+    value: unknown;
+    params?: Record<string, string>;
+  }>;
+  command_type?: string;
+  [key: string]: unknown;
+};
+
+export type ConfirmActionInput = {
+  conversationId: string;
+  confirmationId: string;
+  callId?: string;
+  data: unknown;
+};
 
 export type SendMessageInput = {
   conversationId: string;
@@ -49,4 +122,5 @@ export type CliAgentAdapter = {
   probe(): Promise<AgentHealth>;
   sendMessage(input: SendMessageInput): AsyncIterable<CliAgentEvent>;
   getSlashCommands?(input: GetSlashCommandsInput): Promise<SlashCommandInfo[]>;
+  confirm?(input: ConfirmActionInput): Promise<unknown> | unknown;
 };

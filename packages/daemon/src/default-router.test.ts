@@ -238,6 +238,236 @@ describe('default bridge routes', () => {
     ]);
   });
 
+  it('forwards AionUi client stream event types from backend adapters', async () => {
+    let nextId = 0;
+    const store = new InMemoryConversationStore({
+      now: () => 3200 + nextId,
+      id: () => `stream-id-${++nextId}`,
+    });
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'opencode',
+          name: 'opencode',
+          label: 'OpenCode',
+          probe: async () => ({ backend: 'opencode', state: 'ready' }),
+          sendMessage: async function* () {
+            yield {
+              type: 'thinking',
+              content: 'Inspecting workspace',
+              subject: 'OpenCode',
+              status: 'thinking',
+            };
+            yield {
+              type: 'tool_group',
+              tools: [
+                {
+                  callId: 'tool-1',
+                  call_id: 'tool-1',
+                  name: 'read',
+                  description: 'README.md',
+                  status: 'Executing',
+                  resultDisplay: '',
+                },
+              ],
+            };
+            yield {
+              type: 'acp_tool_call',
+              data: {
+                update: {
+                  tool_call_id: 'acp-tool-1',
+                  title: 'Read file',
+                  kind: 'read',
+                  status: 'in_progress',
+                  raw_input: { path: 'README.md' },
+                },
+              },
+            };
+            yield { type: 'context_usage', used: 12, size: 100 };
+            yield {
+              type: 'plan',
+              data: {
+                session_id: 'plan-1',
+                entries: [{ title: 'Inspect files', status: 'completed' }],
+              },
+            };
+            yield { type: 'content', content: 'adapter response' };
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_stream',
+        data: {
+          type: 'acp',
+          name: 'hello',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'opencode' },
+        },
+      },
+    });
+
+    const messages = await router.handleIncoming({
+      name: 'subscribe-chat.send.message',
+      data: {
+        id: 'm_send_stream',
+        data: { conversation_id: 'stream-id-1', msg_id: 'user-msg-stream', input: 'use tools' },
+      },
+    });
+
+    expect(messages.map((message) => message.name)).toEqual([
+      'subscribe.callback-chat.send.messagem_send_stream',
+      'chat.response.stream',
+      'chat.response.stream',
+      'chat.response.stream',
+      'chat.response.stream',
+      'chat.response.stream',
+      'chat.response.stream',
+      'chat.response.stream',
+      'chat.response.stream',
+    ]);
+    expect(messages[2].data).toMatchObject({
+      type: 'thinking',
+      conversation_id: 'stream-id-1',
+      data: { content: 'Inspecting workspace', subject: 'OpenCode', status: 'thinking' },
+    });
+    expect(messages[3].data).toMatchObject({
+      type: 'tool_group',
+      conversation_id: 'stream-id-1',
+      data: [expect.objectContaining({ callId: 'tool-1', call_id: 'tool-1', name: 'read' })],
+    });
+    expect(messages[4].data).toMatchObject({
+      type: 'acp_tool_call',
+      conversation_id: 'stream-id-1',
+      data: { update: { tool_call_id: 'acp-tool-1', status: 'in_progress' } },
+    });
+    expect(messages[5].data).toMatchObject({
+      type: 'acp_context_usage',
+      conversation_id: 'stream-id-1',
+      data: { used: 12, size: 100 },
+    });
+    expect(messages[6].data).toMatchObject({
+      type: 'plan',
+      conversation_id: 'stream-id-1',
+      data: { session_id: 'plan-1' },
+    });
+  });
+
+  it('tracks adapter confirmations for the mobile permission UI', async () => {
+    let nextId = 0;
+    const confirmed: unknown[] = [];
+    const store = new InMemoryConversationStore({
+      now: () => 3300 + nextId,
+      id: () => `confirm-id-${++nextId}`,
+    });
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'opencode',
+          name: 'opencode',
+          label: 'OpenCode',
+          probe: async () => ({ backend: 'opencode', state: 'ready' }),
+          sendMessage: async function* () {
+            yield {
+              type: 'permission',
+              confirmation: {
+                id: 'permission-1',
+                title: 'OpenCode permission',
+                action: 'execute',
+                description: 'Run command: npm test',
+                call_id: 'call-1',
+                callId: 'call-1',
+                options: [
+                  { label: 'Allow once', value: 'once' },
+                  { label: 'Reject', value: 'reject' },
+                ],
+              },
+            };
+            yield { type: 'content', content: 'waiting for permission' };
+          },
+          confirm: async (input) => {
+            confirmed.push(input);
+            return { success: true };
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_confirm',
+        data: {
+          type: 'acp',
+          name: 'hello',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'opencode' },
+        },
+      },
+    });
+
+    const sendMessages = await router.handleIncoming({
+      name: 'subscribe-chat.send.message',
+      data: {
+        id: 'm_send_confirm',
+        data: { conversation_id: 'confirm-id-1', msg_id: 'user-msg-confirm', input: 'needs permission' },
+      },
+    });
+
+    expect(sendMessages.map((message) => message.name)).toContain('confirmation.add');
+    expect(sendMessages.find((message) => message.name === 'confirmation.add')?.data).toMatchObject({
+      id: 'permission-1',
+      msg_id: 'assistant_user-msg-confirm',
+      conversation_id: 'confirm-id-1',
+      call_id: 'call-1',
+      callId: 'call-1',
+    });
+
+    const [pending] = await router.handleIncoming({
+      name: 'subscribe-confirmation.list',
+      data: { id: 'm_list_confirm', data: { conversation_id: 'confirm-id-1' } },
+    });
+    expect(pending.data).toEqual([
+      expect.objectContaining({
+        id: 'permission-1',
+        conversation_id: 'confirm-id-1',
+      }),
+    ]);
+
+    const confirmMessages = await router.handleIncoming({
+      name: 'subscribe-confirmation.confirm',
+      data: {
+        id: 'm_confirm',
+        data: {
+          conversation_id: 'confirm-id-1',
+          msg_id: 'permission-1',
+          callId: 'call-1',
+          data: 'once',
+        },
+      },
+    });
+
+    expect(confirmMessages.map((message) => message.name)).toEqual([
+      'subscribe.callback-confirmation.confirmm_confirm',
+      'confirmation.remove',
+    ]);
+    expect(confirmMessages[0].data).toEqual({ success: true });
+    expect(confirmMessages[1].data).toEqual({ conversation_id: 'confirm-id-1', id: 'permission-1' });
+    expect(confirmed).toEqual([
+      {
+        conversationId: 'confirm-id-1',
+        confirmationId: 'permission-1',
+        callId: 'call-1',
+        data: 'once',
+      },
+    ]);
+  });
+
   it('passes selected files from chat sends to the backend adapter', async () => {
     let nextId = 0;
     const store = new InMemoryConversationStore({
