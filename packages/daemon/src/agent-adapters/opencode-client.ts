@@ -10,6 +10,7 @@ export type OpenCodePromptInput = {
   workspace?: string;
   model?: string;
   agent?: string;
+  files?: OpenCodePromptFile[];
   signal?: AbortSignal;
 };
 
@@ -31,6 +32,13 @@ export type OpenCodeCommandPart = {
   mime: string;
   filename?: string;
   url: string;
+};
+
+export type OpenCodePromptFile = {
+  uri: string;
+  mime: string;
+  name?: string;
+  description?: string;
 };
 
 export type OpenCodeCommandListInput = {
@@ -246,7 +254,7 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
         body: JSON.stringify({
           prompt: {
             text: input.prompt,
-            files: [],
+            files: input.files ?? [],
             agents: [],
           },
         }),
@@ -293,7 +301,7 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
           body: JSON.stringify({
             prompt: {
               text: input.prompt,
-              files: [],
+              files: input.files ?? [],
               agents: [],
             },
           }),

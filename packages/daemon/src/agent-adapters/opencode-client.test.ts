@@ -104,6 +104,63 @@ describe('OpenCode local API client', () => {
     });
   });
 
+  it('sends selected files with prompt requests', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init });
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_files' } });
+        }
+        if (String(url).endsWith('/api/session/ses_files/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_files/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_files/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'file response' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    await expect(
+      client.sendPrompt({
+        prompt: 'review',
+        files: [
+          {
+            uri: 'file:///tmp/project/README.md',
+            mime: 'text/markdown',
+            name: 'README.md',
+            description: 'README.md',
+          },
+        ],
+      }),
+    ).resolves.toEqual({
+      sessionId: 'ses_files',
+      text: 'file response',
+    });
+
+    expect(JSON.parse(String(calls[1].init?.body))).toEqual({
+      prompt: {
+        text: 'review',
+        files: [
+          {
+            uri: 'file:///tmp/project/README.md',
+            mime: 'text/markdown',
+            name: 'README.md',
+            description: 'README.md',
+          },
+        ],
+        agents: [],
+      },
+    });
+  });
+
   it('sends slash commands through the OpenCode command endpoint', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const client = createOpenCodeClient({

@@ -78,10 +78,10 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     const params = asRecord(data);
     const conversationId = stringParam(params.conversation_id);
     const input = stringParam(params.input);
-    const files = stringArrayParam(params.files);
     const userMsgId = typeof params.msg_id === 'string' ? params.msg_id : undefined;
     const assistantMsgId = `assistant_${userMsgId || Date.now().toString(36)}`;
     const conversation = store.getConversation(conversationId);
+    const files = mergeFiles(conversation?.extra.defaultFiles, params.files);
     const backend = conversation?.extra.backend || 'opencode';
     const adapter = adapters.get(backend);
     if (!adapter) {
@@ -314,6 +314,17 @@ function numberParam(value: unknown, fallback: number): number {
 
 function stringArrayParam(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function mergeFiles(fallback: unknown, primary: unknown): string[] {
+  const seen = new Set<string>();
+  const files: string[] = [];
+  for (const filePath of [...stringArrayParam(fallback), ...stringArrayParam(primary)]) {
+    if (seen.has(filePath)) continue;
+    seen.add(filePath);
+    files.push(filePath);
+  }
+  return files;
 }
 
 function isModel(value: unknown): value is { id: string; useModel: string } {

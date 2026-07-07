@@ -439,6 +439,62 @@ describe('agent adapters', () => {
     ]);
   });
 
+  it('passes selected files to OpenCode prompt sessions as attachments', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'aicliui-opencode-prompt-'));
+    try {
+      const filePath = join(tempDir, 'README.md');
+      const missingPath = join(tempDir, 'missing.md');
+      await writeFile(filePath, '# hello', 'utf8');
+      const calls: unknown[] = [];
+      const adapter = createOpenCodeAdapter(
+        {
+          commandExists: async () => true,
+        },
+        {
+          client: {
+            sendPrompt: async (input) => {
+              calls.push(input);
+              return { sessionId: 'ses_files', text: 'from selected files' };
+            },
+            sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+            listCommands: async () => [],
+          },
+        },
+      );
+
+      const events = [];
+      for await (const event of adapter.sendMessage({
+        conversationId: 'conv-1',
+        input: 'review selected file',
+        workspace: tempDir,
+        files: [filePath, missingPath],
+      })) {
+        events.push(event);
+      }
+
+      expect(events).toEqual([
+        { type: 'thought', subject: 'OpenCode', description: 'session ses_files' },
+        { type: 'content', content: 'from selected files' },
+      ]);
+      expect(calls).toEqual([
+        expect.objectContaining({
+          prompt: 'review selected file',
+          directory: tempDir,
+          files: [
+            {
+              uri: expect.stringMatching(/README\.md$/),
+              mime: 'text/markdown',
+              name: 'README.md',
+              description: 'README.md',
+            },
+          ],
+        }),
+      ]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('exposes OpenCode model info from the local API client', async () => {
     const adapter = createOpenCodeAdapter(
       {

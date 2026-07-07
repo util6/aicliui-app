@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { basename, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { AgentHealth } from '@aicliui/shared';
 import type {
@@ -15,6 +15,7 @@ import type {
   OpenCodeCommandPart,
   OpenCodePermissionRequest,
   OpenCodePermissionReply,
+  OpenCodePromptFile,
   OpenCodeSessionClient,
   OpenCodeStreamEvent,
 } from './opencode-client.js';
@@ -110,6 +111,7 @@ export function createOpenCodeAdapter(
           return;
         }
 
+        const promptFiles = await buildOpenCodePromptFiles(input.files, input.workspace);
         if (activeClient.streamPrompt) {
           yield* streamOpenCodeEvents(
             activeClient.streamPrompt({
@@ -118,6 +120,7 @@ export function createOpenCodeAdapter(
               directory: input.workspace,
               ...(input.model ? { model: input.model } : {}),
               ...(input.sessionMode ? { agent: input.sessionMode } : {}),
+              ...(promptFiles.length ? { files: promptFiles } : {}),
             }),
             input.conversationId,
           );
@@ -130,6 +133,7 @@ export function createOpenCodeAdapter(
           directory: input.workspace,
           ...(input.model ? { model: input.model } : {}),
           ...(input.sessionMode ? { agent: input.sessionMode } : {}),
+          ...(promptFiles.length ? { files: promptFiles } : {}),
         });
         sessionByConversationId.set(input.conversationId, result.sessionId);
         yield {
@@ -249,6 +253,28 @@ export function createOpenCodeAdapter(
   }
 }
 
+async function buildOpenCodePromptFiles(
+  files: string[] = [],
+  workspace?: string,
+): Promise<OpenCodePromptFile[]> {
+  const attachments: OpenCodePromptFile[] = [];
+  for (const filePath of files) {
+    try {
+      const fileStats = await stat(filePath);
+      if (!fileStats.isFile()) continue;
+      attachments.push({
+        uri: pathToFileURL(filePath).toString(),
+        mime: fileMimeType(filePath),
+        name: basename(filePath),
+        description: workspace ? normalizeRelativePath(relative(workspace, filePath)) : basename(filePath),
+      });
+    } catch {
+      // Ignore files that disappeared between selection and send.
+    }
+  }
+  return attachments;
+}
+
 async function isKnownOpenCodeCommand(
   client: OpenCodeSessionClient,
   command: string,
@@ -295,6 +321,10 @@ function fileMimeType(path: string): string {
   if (ext === 'csv') return 'text/csv';
   if (ext === 'md' || ext === 'markdown') return 'text/markdown';
   return 'text/plain';
+}
+
+function normalizeRelativePath(path: string): string {
+  return path.replace(/\\/g, '/');
 }
 
 export function parseOpenCodeSlashCommand(input: string): { command: string; arguments: string } | null {
