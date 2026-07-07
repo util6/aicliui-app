@@ -395,6 +395,50 @@ describe('agent adapters', () => {
     ]);
   });
 
+  it('passes selected model and mode to OpenCode prompt sessions', async () => {
+    const calls: unknown[] = [];
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async (input) => {
+            calls.push(input);
+            return { sessionId: 'ses_model', text: 'from selected model' };
+          },
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+        },
+      },
+    );
+
+    const events = [];
+    for await (const event of adapter.sendMessage({
+      conversationId: 'conv-1',
+      input: 'hello',
+      workspace: '/tmp/project',
+      model: 'anthropic/claude-sonnet-4',
+      sessionMode: 'plan',
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_model' },
+      { type: 'content', content: 'from selected model' },
+    ]);
+    expect(calls).toEqual([
+      {
+        prompt: 'hello',
+        directory: '/tmp/project',
+        sessionId: undefined,
+        model: 'anthropic/claude-sonnet-4',
+        agent: 'plan',
+      },
+    ]);
+  });
+
   it('exposes OpenCode model info from the local API client', async () => {
     const adapter = createOpenCodeAdapter(
       {

@@ -8,6 +8,8 @@ export type OpenCodePromptInput = {
   sessionId?: string;
   directory?: string;
   workspace?: string;
+  model?: string;
+  agent?: string;
   signal?: AbortSignal;
 };
 
@@ -126,15 +128,23 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
     return (await response.json()) as T;
   }
 
-  async function createSession(input: { directory?: string; workspace?: string }): Promise<string> {
+  async function createSession(input: {
+    directory?: string;
+    workspace?: string;
+    model?: string;
+    agent?: string;
+  }): Promise<string> {
     const location = {
       ...(input.directory ? { directory: input.directory } : {}),
       ...(input.workspace ? { workspace: input.workspace } : {}),
     };
+    const model = parseOpenCodeModelRef(input.model);
     const response = await requestJson<{ data?: { id?: unknown } }>('/api/session', {
       method: 'POST',
       body: JSON.stringify({
         ...(Object.keys(location).length ? { location } : {}),
+        ...(model ? { model } : {}),
+        ...(input.agent ? { agent: input.agent } : {}),
       }),
     });
     const id = response.data?.id;
@@ -145,7 +155,14 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
   }
 
   async function* streamTurn(
-    input: { sessionId?: string; directory?: string; workspace?: string; signal?: AbortSignal },
+    input: {
+      sessionId?: string;
+      directory?: string;
+      workspace?: string;
+      model?: string;
+      agent?: string;
+      signal?: AbortSignal;
+    },
     submitTurn: (sessionId: string) => Promise<void>,
   ): AsyncIterable<OpenCodeStreamEvent> {
     const sessionId = input.sessionId ?? (await createSession(input));
@@ -629,6 +646,14 @@ function commandListLegacyPath(input: OpenCodeCommandListInput): string {
   if (input.workspace) params.set('workspace', input.workspace);
   const query = params.toString();
   return query ? `/command?${query}` : '/command';
+}
+
+function parseOpenCodeModelRef(model: string | undefined): { providerID: string; id: string } | null {
+  if (typeof model !== 'string' || !model.includes('/')) return null;
+  const index = model.indexOf('/');
+  const providerID = model.slice(0, index).trim();
+  const id = model.slice(index + 1).trim();
+  return providerID && id ? { providerID, id } : null;
 }
 
 export function extractOpenCodeAssistantText(messages: unknown[]): string {

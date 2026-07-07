@@ -61,6 +61,49 @@ describe('OpenCode local API client', () => {
     });
   });
 
+  it('creates prompt sessions with selected OpenCode model and agent', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init });
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_model' } });
+        }
+        if (String(url).endsWith('/api/session/ses_model/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_model/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_model/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'model response' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    await expect(
+      client.sendPrompt({
+        prompt: 'hello',
+        directory: '/tmp/project',
+        model: 'anthropic/claude-sonnet-4',
+        agent: 'plan',
+      }),
+    ).resolves.toEqual({
+      sessionId: 'ses_model',
+      text: 'model response',
+    });
+
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+      location: { directory: '/tmp/project' },
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+      agent: 'plan',
+    });
+  });
+
   it('sends slash commands through the OpenCode command endpoint', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const client = createOpenCodeClient({

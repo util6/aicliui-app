@@ -116,6 +116,8 @@ export function createOpenCodeAdapter(
               prompt: input.input,
               sessionId: cachedSessionId,
               directory: input.workspace,
+              ...(input.model ? { model: input.model } : {}),
+              ...(input.sessionMode ? { agent: input.sessionMode } : {}),
             }),
             input.conversationId,
           );
@@ -126,6 +128,8 @@ export function createOpenCodeAdapter(
           prompt: input.input,
           sessionId: cachedSessionId,
           directory: input.workspace,
+          ...(input.model ? { model: input.model } : {}),
+          ...(input.sessionMode ? { agent: input.sessionMode } : {}),
         });
         sessionByConversationId.set(input.conversationId, result.sessionId);
         yield {
