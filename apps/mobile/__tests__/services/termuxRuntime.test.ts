@@ -151,6 +151,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain("item.type === 'command_execution'");
     expect(script).toContain("item.type === 'web_search'");
     expect(script).toContain("item.type === 'file_change'");
+    expect(script).toContain("item.type === 'mcp_tool_call'");
     expect(script).toContain("item.type !== 'todo_list'");
     expect(script).toContain("type: 'plan'");
     expect(script).toContain('data: plan');
@@ -167,6 +168,15 @@ describe('termuxRuntime', () => {
     expect(script).toContain('function codexFileChangeTool(type, item)');
     expect(script).toContain("kind: 'file_change'");
     expect(script).toContain('description: codexFileChangeDescription(item)');
+    expect(script).toContain('function codexMcpToolCallTool(type, item)');
+    expect(script).toContain("kind: 'mcp_tool_call'");
+    expect(script).toContain("title: [server, tool].filter(Boolean).join('/') || 'MCP tool call'");
+    expect(script).toContain('description: codexMcpToolDescription(item)');
+    expect(script).toContain('data: { server, tool, arguments: item.arguments, result: item.result, error: item.error }');
+    expect(script).toContain('function codexMcpToolDescription(item)');
+    expect(script).toContain("if (isRecord(item.error) && typeof item.error.message === 'string')");
+    expect(script).toContain("parts.push('Error: ' + item.error.message);");
+    expect(script).toContain("parts.push('Result: ' + safeJsonStringify(item.result));");
     expect(script).toContain("type: 'codex_tool_call'");
     expect(script).toContain('data: tool');
     expect(script).toContain('upsertCodexToolCallMessage(conversationId, assistantMsgId, tool);');

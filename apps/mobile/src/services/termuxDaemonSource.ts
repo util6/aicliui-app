@@ -1397,6 +1397,7 @@ function extractCodexToolUpdate(value) {
   if (item.type === 'command_execution') return codexCommandExecutionTool(type, item);
   if (item.type === 'web_search') return codexWebSearchTool(type, item);
   if (item.type === 'file_change') return codexFileChangeTool(type, item);
+  if (item.type === 'mcp_tool_call') return codexMcpToolCallTool(type, item);
   return codexGenericTool(type, item);
 }
 
@@ -1466,6 +1467,21 @@ function codexFileChangeTool(type, item) {
   };
 }
 
+function codexMcpToolCallTool(type, item) {
+  const toolCallId = stringValue(item.id);
+  if (!toolCallId) return null;
+  const server = stringValue(item.server) || '';
+  const tool = stringValue(item.tool) || '';
+  return {
+    toolCallId,
+    kind: 'mcp_tool_call',
+    title: [server, tool].filter(Boolean).join('/') || 'MCP tool call',
+    description: codexMcpToolDescription(item),
+    status: codexToolStatus(type, item),
+    data: { server, tool, arguments: item.arguments, result: item.result, error: item.error },
+  };
+}
+
 function codexGenericTool(type, item) {
   const toolCallId = stringValue(item.id);
   if (!toolCallId) return null;
@@ -1493,6 +1509,22 @@ function codexFileChangeLabel(change) {
   const path = stringValue(change.path);
   const kind = stringValue(change.kind);
   return [kind, path].filter(Boolean).join(' ');
+}
+
+function codexMcpToolDescription(item) {
+  const parts = [];
+  if (item.arguments !== undefined) {
+    parts.push('Arguments: ' + safeJsonStringify(item.arguments));
+  }
+  if (item.result !== undefined) {
+    parts.push('Result: ' + safeJsonStringify(item.result));
+  }
+  if (isRecord(item.error) && typeof item.error.message === 'string') {
+    parts.push('Error: ' + item.error.message);
+  } else if (typeof item.error === 'string') {
+    parts.push('Error: ' + item.error);
+  }
+  return parts.join('\n\n');
 }
 
 function codexToolStatus(type, item) {
@@ -1724,6 +1756,15 @@ function requiredString(value) {
 
 function stringValue(value) {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function safeJsonStringify(value) {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 function randomId() {
