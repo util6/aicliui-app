@@ -430,21 +430,23 @@ async function getSlashCommands(params) {
   try {
     const baseUrl = await ensureOpenCodeServer();
     const workspace = typeof conversation.extra.workspace === 'string' ? conversation.extra.workspace : undefined;
-    const response = await requestOpenCodeJson(baseUrl, openCodeCommandListPath(workspace), { method: 'GET' });
+    return await fetchOpenCodeCommands(baseUrl, workspace);
+  } catch (fallbackError) {
+    console.warn(
+      'OpenCode command probe failed:',
+      fallbackError instanceof Error ? fallbackError.message : fallbackError,
+    );
+    return [];
+  }
+}
+
+async function fetchOpenCodeCommands(baseUrl, workspace, signal) {
+  try {
+    const response = await requestOpenCodeJson(baseUrl, openCodeCommandListPath(workspace), { method: 'GET', signal });
     return extractOpenCodeCommands(response);
   } catch {
-    try {
-      const baseUrl = await ensureOpenCodeServer();
-      const workspace = typeof conversation.extra.workspace === 'string' ? conversation.extra.workspace : undefined;
-      const response = await requestOpenCodeJson(baseUrl, legacyOpenCodeCommandListPath(workspace), { method: 'GET' });
-      return extractOpenCodeCommands(response);
-    } catch (fallbackError) {
-      console.warn(
-        'OpenCode command probe failed:',
-        fallbackError instanceof Error ? fallbackError.message : fallbackError,
-      );
-      return [];
-    }
+    const response = await requestOpenCodeJson(baseUrl, legacyOpenCodeCommandListPath(workspace), { method: 'GET', signal });
+    return extractOpenCodeCommands(response);
   }
 }
 
@@ -735,7 +737,7 @@ async function sendOpenCodePrompt({
   const modelRef = parseOpenCodeModelRef(model);
   const agentId = parseOpenCodeAgent(agent);
   const sessionId = await ensureOpenCodeSession({ conversationId, workspace, modelRef, agentId, signal });
-  const slashCommand = parseOpenCodeSlashCommand(input);
+  const slashCommand = await findOpenCodeSlashCommand(baseUrl, workspace, input, signal);
   const eventStream = subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, {
     onContent,
     onTool,
@@ -810,6 +812,17 @@ async function ensureOpenCodeSession({ conversationId, workspace, modelRef, agen
 function openCodeCommandSendPath(sessionId, workspace) {
   const path = '/session/' + encodeURIComponent(sessionId) + '/command';
   return workspace ? path + '?directory=' + encodeURIComponent(workspace) : path;
+}
+
+async function findOpenCodeSlashCommand(baseUrl, workspace, input, signal) {
+  const slashCommand = parseOpenCodeSlashCommand(input);
+  if (!slashCommand) return null;
+  try {
+    const commands = await fetchOpenCodeCommands(baseUrl, workspace, signal);
+    return commands.some((command) => command.command === slashCommand.command) ? slashCommand : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseOpenCodeSlashCommand(input) {
