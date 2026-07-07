@@ -61,12 +61,23 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     case 'agent_status': {
       const status = message.content.status;
       const agentName = message.content.agentName || message.content.backend;
+      const detail =
+        typeof message.content.message === 'string'
+          ? message.content.message
+          : typeof message.content.detail === 'string'
+            ? message.content.detail
+            : '';
       return (
         <View style={styles.tipRow}>
           <View style={[styles.statusBubble, { backgroundColor: surface }]}>
             <ThemedText type='caption'>
               {agentName}: {status}
             </ThemedText>
+            {detail ? (
+              <ThemedText type='caption' style={styles.statusDetail}>
+                {detail}
+              </ThemedText>
+            ) : null}
           </View>
         </View>
       );
@@ -203,6 +214,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 12,
+    maxWidth: '90%',
+    gap: 2,
+  },
+  statusDetail: {
+    opacity: 0.72,
   },
   confirmContainer: {
     maxWidth: '90%',

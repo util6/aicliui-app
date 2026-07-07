@@ -291,6 +291,12 @@ export function createOpenCodeAdapter(
             size: event.size,
           };
           break;
+        case 'agent_status':
+          yield {
+            type: 'agent_status',
+            data: event.data,
+          };
+          break;
         case 'permission': {
           const confirmation = toOpenCodeConfirmation(event.request);
           if (!confirmation) break;

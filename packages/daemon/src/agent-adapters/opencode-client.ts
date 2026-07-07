@@ -89,6 +89,10 @@ export type OpenCodeContextUsageUpdate = {
   size: number;
 };
 
+export type OpenCodeAgentStatusUpdate = {
+  data: Record<string, unknown>;
+};
+
 export type OpenCodeStreamEvent =
   | {
       type: 'session';
@@ -111,6 +115,10 @@ export type OpenCodeStreamEvent =
       type: 'context_usage';
       used: number;
       size: number;
+    }
+  | {
+      type: 'agent_status';
+      data: Record<string, unknown>;
     }
   | {
       type: 'permission';
@@ -247,6 +255,9 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
         },
         onContextUsage(update) {
           queue.push({ type: 'context_usage', ...update });
+        },
+        onAgentStatus(update) {
+          queue.push({ type: 'agent_status', data: update.data });
         },
         onPermission(request) {
           queue.push({ type: 'permission', request });
@@ -435,6 +446,7 @@ type OpenCodeEventStreamHandlers = {
   onTool(tool: OpenCodeToolUpdate): void;
   onThinking(update: OpenCodeThinkingUpdate): void;
   onContextUsage(update: OpenCodeContextUsageUpdate): void;
+  onAgentStatus(update: OpenCodeAgentStatusUpdate): void;
   onPermission(request: OpenCodePermissionRequest): void;
   onPermissionResolved(requestId: string): void;
   onQuestion(request: OpenCodeQuestionRequest): void;
@@ -533,6 +545,7 @@ function subscribeOpenCodeSessionEvents(input: {
       const extractReasoningEvent = createOpenCodeReasoningEventExtractor(input.sessionId);
       const extractToolUpdate = createOpenCodeToolUpdateExtractor(input.sessionId);
       const extractContextUsage = createOpenCodeContextUsageExtractor(input.sessionId);
+      const extractAgentStatus = createOpenCodeAgentStatusExtractor(input.sessionId);
       const extractPermissionEvent = createOpenCodePermissionEventExtractor(input.sessionId);
       const extractQuestionEvent = createOpenCodeQuestionEventExtractor(input.sessionId);
       const parse = createSseParser((event) => {
@@ -547,6 +560,9 @@ function subscribeOpenCodeSessionEvents(input: {
 
         const contextUsage = extractContextUsage(event);
         if (contextUsage) input.handlers.onContextUsage(contextUsage);
+
+        const agentStatus = extractAgentStatus(event);
+        if (agentStatus) input.handlers.onAgentStatus(agentStatus);
 
         const permissionEvent = extractPermissionEvent(event);
         if (permissionEvent?.type === 'asked') input.handlers.onPermission(permissionEvent.request);
@@ -683,6 +699,67 @@ function openCodeContextUsageFromTokens(tokens: Record<string, unknown>): OpenCo
     numberValue(cache.read) +
     numberValue(cache.write);
   return used > 0 ? { used, size: used } : null;
+}
+
+function createOpenCodeAgentStatusExtractor(sessionId: string): (event: unknown) => OpenCodeAgentStatusUpdate | null {
+  return (event) => extractOpenCodeAgentStatus(event, sessionId);
+}
+
+function extractOpenCodeAgentStatus(event: unknown, sessionId: string): OpenCodeAgentStatusUpdate | null {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (data.sessionID !== sessionId) return null;
+  if (type === 'session.next.step.started') return openCodeStepStartedStatus(data, sessionId);
+  if (type === 'session.next.step.failed') return openCodeStepFailedStatus(data, sessionId);
+  return null;
+}
+
+function openCodeStepStartedStatus(data: Record<string, unknown>, sessionId: string): OpenCodeAgentStatusUpdate {
+  const messageId = stringValue(data.assistantMessageID);
+  const agent = stringValue(data.agent);
+  const model = openCodeModelRef(data.model);
+  return {
+    data: {
+      ...openCodeAgentStatusBase('session_active', sessionId),
+      ...(messageId ? { messageId } : {}),
+      ...(agent ? { agent } : {}),
+      ...(model ? { model } : {}),
+    },
+  };
+}
+
+function openCodeStepFailedStatus(data: Record<string, unknown>, sessionId: string): OpenCodeAgentStatusUpdate {
+  const messageId = stringValue(data.assistantMessageID);
+  const error = isRecord(data.error) ? data.error : {};
+  const message = stringValue(error.message) ?? 'OpenCode step failed';
+  return {
+    data: {
+      ...openCodeAgentStatusBase('error', sessionId),
+      ...(messageId ? { messageId } : {}),
+      message,
+      detail: message,
+    },
+  };
+}
+
+function openCodeAgentStatusBase(status: string, sessionId: string): Record<string, unknown> {
+  return {
+    backend: 'opencode',
+    agentName: 'OpenCode',
+    agent_name: 'OpenCode',
+    status,
+    sessionId,
+  };
+}
+
+function openCodeModelRef(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (!isRecord(value)) return undefined;
+  const providerId = stringValue(value.providerID) ?? stringValue(value.providerId) ?? stringValue(value.provider);
+  const id = stringValue(value.id);
+  return providerId && id ? `${providerId}/${id}` : id;
 }
 
 function createOpenCodeToolUpdateExtractor(sessionId: string): (event: unknown) => OpenCodeToolUpdate | null {

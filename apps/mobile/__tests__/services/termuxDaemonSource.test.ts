@@ -136,4 +136,13 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeContextUsageFromTokens(tokens)');
     expect(TERMUX_DAEMON_SOURCE).toContain("type: 'acp_context_usage'");
   });
+
+  it('routes OpenCode v2 step lifecycle events through the local agent status stream', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain('onAgentStatus: emitAssistantAgentStatus');
+    expect(TERMUX_DAEMON_SOURCE).toContain('createOpenCodeAgentStatusExtractor');
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.step.started'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.step.failed'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeStepFailedStatus(data, sessionId)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("type: 'agent_status'");
+  });
 });

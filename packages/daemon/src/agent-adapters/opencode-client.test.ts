@@ -612,6 +612,86 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode v2 step lifecycle events as agent status updates', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_status' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.step.started',
+              data: {
+                sessionID: 'ses_status',
+                assistantMessageID: 'msg_status',
+                agent: 'build',
+                model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+              },
+            },
+            {
+              type: 'session.next.step.failed',
+              data: {
+                sessionID: 'ses_status',
+                assistantMessageID: 'msg_status',
+                error: { type: 'unknown', message: 'provider rejected the request' },
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_status/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_status/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_status/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'status done' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_status' },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          agent_name: 'OpenCode',
+          status: 'session_active',
+          sessionId: 'ses_status',
+          messageId: 'msg_status',
+          agent: 'build',
+          model: 'anthropic/claude-sonnet-4',
+        },
+      },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          agent_name: 'OpenCode',
+          status: 'error',
+          sessionId: 'ses_status',
+          messageId: 'msg_status',
+          message: 'provider rejected the request',
+          detail: 'provider rejected the request',
+        },
+      },
+      { type: 'content', content: 'status done' },
+    ]);
+  });
+
   it('streams OpenCode v2 step usage events as context usage updates', async () => {
     const client = createOpenCodeClient({
       baseUrl: 'http://127.0.0.1:4096',

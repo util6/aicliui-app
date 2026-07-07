@@ -876,6 +876,53 @@ describe('agent adapters', () => {
     ]);
   });
 
+  it('forwards OpenCode agent status events to the shared adapter contract', async () => {
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async () => ({ sessionId: 'unused', text: 'unused fallback' }),
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+          streamPrompt: async function* () {
+            yield { type: 'session', sessionId: 'ses_status' };
+            yield {
+              type: 'agent_status',
+              data: {
+                backend: 'opencode',
+                agentName: 'OpenCode',
+                status: 'error',
+                message: 'provider rejected the request',
+              },
+            };
+            yield { type: 'content', content: 'ready' };
+          },
+        },
+      },
+    );
+
+    const events = [];
+    for await (const event of adapter.sendMessage({ conversationId: 'conv-1', input: 'hello' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_status' },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          status: 'error',
+          message: 'provider rejected the request',
+        },
+      },
+      { type: 'content', content: 'ready' },
+    ]);
+  });
+
   it('sends OpenCode slash input through the command endpoint and reuses the conversation session', async () => {
     const calls: unknown[] = [];
     const adapter = createOpenCodeAdapter(
