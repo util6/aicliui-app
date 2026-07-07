@@ -35,6 +35,12 @@ function RuntimeProbe() {
       <Text testID='streaming'>{isStreaming ? 'streaming' : 'idle'}</Text>
       <Text testID='thought'>{thought?.subject ?? ''}</Text>
       <Text testID='messages'>{messages.map((message) => message.content?.content ?? '').join('|')}</Text>
+      <Text testID='thinking-status'>
+        {messages.filter((message) => message.type === 'thinking').map((message) => message.content?.status).join('|')}
+      </Text>
+      <Text testID='thinking-duration'>
+        {messages.filter((message) => message.type === 'thinking').map((message) => message.content?.duration ?? '').join('|')}
+      </Text>
       <Text testID='send' onPress={() => sendMessage('hello')}>
         send
       </Text>
@@ -239,5 +245,69 @@ describe('ChatContext runtime state', () => {
 
     expect(screen.getByTestId('streaming').props.children).toBe('streaming');
     expect(screen.getByTestId('thought').props.children).toBe('planning');
+  });
+
+  it('marks active thinking done when content arrives', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('streaming').props.children).toBe('idle'));
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'thinking',
+        msg_id: 'assistant-1-thinking',
+        conversation_id: 'conv-1',
+        created_at: 1000,
+        data: { content: 'Reading files', subject: 'Inspecting', status: 'thinking' },
+      });
+    });
+    expect(screen.getByTestId('thinking-status').props.children).toBe('thinking');
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'content',
+        msg_id: 'assistant-1',
+        conversation_id: 'conv-1',
+        created_at: 2500,
+        data: { content: 'Done.' },
+      });
+    });
+
+    expect(screen.getByTestId('thinking-status').props.children).toBe('done');
+    expect(screen.getByTestId('thinking-duration').props.children).toBe('1500');
+  });
+
+  it('marks active thinking done when finish arrives without content', async () => {
+    const screen = render(
+      <ChatProvider>
+        <RuntimeProbe />
+      </ChatProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('streaming').props.children).toBe('idle'));
+
+    await act(async () => {
+      listeners.get('chat.response.stream')?.({
+        type: 'thinking',
+        msg_id: 'assistant-1-thinking',
+        conversation_id: 'conv-1',
+        created_at: 1000,
+        data: { content: 'Planning', subject: 'Plan', status: 'thinking' },
+      });
+      listeners.get('chat.response.stream')?.({
+        type: 'finish',
+        msg_id: 'assistant-1',
+        conversation_id: 'conv-1',
+        created_at: 1800,
+        data: null,
+      });
+    });
+
+    expect(screen.getByTestId('thinking-status').props.children).toBe('done');
+    expect(screen.getByTestId('thinking-duration').props.children).toBe('800');
   });
 });

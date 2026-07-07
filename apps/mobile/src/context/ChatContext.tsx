@@ -48,6 +48,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const loadRequestRef = useRef(0);
   const isStreamingRef = useRef(false);
   const turnFinishedRef = useRef(false);
+  const activeThinkingRef = useRef<{ msgId: string; startedAt: number } | null>(null);
   const { connectionState } = useConnection();
   const prevConnectionStateRef = useRef(connectionState);
 
@@ -55,6 +56,34 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     isStreamingRef.current = value;
     setIsStreaming(value);
   }, []);
+
+  const completeActiveThinking = useCallback(
+    (boundary: Pick<IResponseMessage, 'conversation_id' | 'createdAt' | 'created_at'>, duration?: number) => {
+      const activeThinking = activeThinkingRef.current;
+      if (!activeThinking) return;
+
+      const endTime = boundary.createdAt ?? boundary.created_at ?? Date.now();
+      const elapsed = duration ?? Math.max(0, endTime - activeThinking.startedAt);
+      const doneMessage: TMessage = {
+        id: `${activeThinking.msgId}-thinking-done`,
+        type: 'thinking',
+        msg_id: activeThinking.msgId,
+        conversation_id: boundary.conversation_id,
+        position: 'left',
+        createdAt: endTime,
+        created_at: endTime,
+        content: {
+          content: '',
+          duration: elapsed,
+          status: 'done',
+        },
+      };
+
+      setMessages((prev) => composeMessage(doneMessage, prev));
+      activeThinkingRef.current = null;
+    },
+    [],
+  );
 
   // Keep ref in sync
   useEffect(() => {
@@ -79,6 +108,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     setConversationId(id);
     setMessages([]);
     turnFinishedRef.current = false;
+    activeThinkingRef.current = null;
     setStreamingState(false);
     setConfirmations([]);
     setContextUsage(null);
@@ -115,6 +145,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       if (raw.type === 'finish') {
+        completeActiveThinking(raw);
         turnFinishedRef.current = true;
         setStreamingState(false);
         setThought(null);
@@ -122,6 +153,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (isErrorStreamMessage(raw)) {
+        completeActiveThinking(raw);
         turnFinishedRef.current = true;
         setStreamingState(false);
         setThought(null);
@@ -130,6 +162,21 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           setMessages((prev) => composeMessage(msg, prev));
         }
         return;
+      }
+
+      if (raw.type === 'thinking') {
+        const thinkingData = raw.data as { status?: string; duration?: number; duration_ms?: number };
+        if (thinkingData?.status === 'done') {
+          activeThinkingRef.current = null;
+        } else {
+          if (!turnFinishedRef.current && !isStreamingRef.current) {
+            setStreamingState(true);
+          }
+          activeThinkingRef.current = {
+            msgId: raw.msg_id,
+            startedAt: raw.createdAt ?? raw.created_at ?? Date.now(),
+          };
+        }
       }
 
       // Ephemeral thought — update state, don't add to message list
@@ -145,6 +192,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
       // Clear thought when content arrives
       if (raw.type === 'content') {
+        completeActiveThinking(raw);
         if (!turnFinishedRef.current && !isStreamingRef.current) {
           setStreamingState(true);
         }
@@ -207,7 +255,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       unsubConfirmUpdate();
       unsubConfirmRemove();
     };
-  }, [conversationId, refreshSlashCommands, setStreamingState]);
+  }, [completeActiveThinking, conversationId, refreshSlashCommands, setStreamingState]);
 
   // Restore pending confirmations on reconnect (Issue 2)
   useEffect(() => {
@@ -289,6 +337,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const stopGeneration = useCallback(() => {
     if (!conversationId) return;
     turnFinishedRef.current = true;
+    activeThinkingRef.current = null;
     setStreamingState(false);
     setThought(null);
     bridge
