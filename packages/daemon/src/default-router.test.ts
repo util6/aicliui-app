@@ -279,6 +279,75 @@ describe('default bridge routes', () => {
     ]);
   });
 
+  it('streams adapter runtime failures as assistant content and finishes the turn', async () => {
+    let nextId = 0;
+    const store = new InMemoryConversationStore({
+      now: () => 3100 + nextId,
+      id: () => `failure-id-${++nextId}`,
+    });
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'codex',
+          name: 'codex',
+          label: 'Codex CLI',
+          probe: async () => ({ backend: 'codex', state: 'ready' }),
+          sendMessage: async function* () {
+            throw new Error('codex failed apiKey=local-value');
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_failure',
+        data: {
+          type: 'codex',
+          name: 'hello',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'codex' },
+        },
+      },
+    });
+
+    const messages = await router.handleIncoming({
+      name: 'subscribe-chat.send.message',
+      data: {
+        id: 'm_send_failure',
+        data: { conversation_id: 'failure-id-1', msg_id: 'user-msg-failure', input: 'use codex' },
+      },
+    });
+
+    expect(messages.map((message) => message.name)).toEqual([
+      'subscribe.callback-chat.send.messagem_send_failure',
+      'chat.response.stream',
+      'chat.response.stream',
+      'chat.response.stream',
+    ]);
+    expect(messages[0].data).toEqual({ success: true });
+    expect(messages[1].data).toMatchObject({ type: 'start', conversation_id: 'failure-id-1' });
+    expect(messages[2].data).toMatchObject({
+      type: 'content',
+      conversation_id: 'failure-id-1',
+      data: { content: 'Codex CLI runtime failed: codex failed apiKey=[redacted]' },
+    });
+    expect(messages[3].data).toMatchObject({ type: 'finish', conversation_id: 'failure-id-1' });
+    expect(JSON.stringify(messages)).not.toContain('local-value');
+
+    const [history] = await router.handleIncoming({
+      name: 'subscribe-database.get-conversation-messages',
+      data: { id: 'm_history_failure', data: { conversation_id: 'failure-id-1' } },
+    });
+    expect(history.data).toMatchObject([
+      { position: 'right', content: { content: 'use codex' } },
+      { position: 'left', content: { content: 'Codex CLI runtime failed: codex failed apiKey=[redacted]' } },
+    ]);
+    expect(JSON.stringify(history.data)).not.toContain('local-value');
+  });
+
   it('forwards AionUi client stream event types from backend adapters', async () => {
     let nextId = 0;
     const store = new InMemoryConversationStore({

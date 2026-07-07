@@ -184,12 +184,16 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
         emitChatStream(context, conversationId, assistantMsgId, 'content', { content: assistantContent });
       }
     } catch (error) {
-      if (!runController.signal.aborted && !isAbortError(error)) {
-        throw error;
-      }
-      if (!assistantContent) {
-        assistantContent = 'Generation stopped.';
-        emitChatStream(context, conversationId, assistantMsgId, 'content', { content: assistantContent });
+      if (runController.signal.aborted || isAbortError(error)) {
+        if (!assistantContent) {
+          assistantContent = 'Generation stopped.';
+          emitChatStream(context, conversationId, assistantMsgId, 'content', { content: assistantContent });
+        }
+      } else {
+        const failureContent = formatRuntimeFailureContent(backend, error);
+        const contentChunk = assistantContent ? `\n\n${failureContent}` : failureContent;
+        assistantContent += contentChunk;
+        emitChatStream(context, conversationId, assistantMsgId, 'content', { content: contentChunk });
       }
     } finally {
       if (activeRuns.get(conversationId) === runController) {
@@ -276,6 +280,41 @@ function isAbortError(error: unknown): boolean {
     (error instanceof Error && error.name === 'AbortError') ||
     (error instanceof Error && error.message.toLowerCase().includes('aborted'))
   );
+}
+
+function formatRuntimeFailureContent(backend: string, error: unknown): string {
+  return `${runtimeDisplayName(backend)} runtime failed: ${runtimeErrorMessage(error)}`;
+}
+
+function runtimeDisplayName(backend: string): string {
+  if (backend === 'opencode') return 'OpenCode';
+  if (backend === 'gemini') return 'Gemini CLI';
+  if (backend === 'codex') return 'Codex CLI';
+  return 'Agent';
+}
+
+function runtimeErrorMessage(error: unknown): string {
+  const rawMessage =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : 'Unknown runtime error';
+  const message = redactRuntimeErrorText(rawMessage).trim();
+  return message.length ? truncateRuntimeErrorText(message) : 'Unknown runtime error';
+}
+
+function redactRuntimeErrorText(text: string): string {
+  return text
+    .replace(/\b(authorization\s*:\s*bearer\s+)[^\s,;]+/gi, '$1[redacted]')
+    .replace(/\b([A-Z0-9_]*(?:api[_-]?key|token|secret|password)[A-Z0-9_]*\s*[=:]\s*)[^\s,;]+/gi, '$1[redacted]')
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, '[redacted]');
+}
+
+function truncateRuntimeErrorText(text: string): string {
+  const maxLength = 600;
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
 }
 
 function emitChatStream(
