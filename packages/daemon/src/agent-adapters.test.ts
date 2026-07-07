@@ -84,7 +84,10 @@ describe('agent adapters', () => {
             calls.push({ type: 'command', input });
             return { sessionId: 'ses_reuse', text: 'command response' };
           },
-          listCommands: async () => [],
+          listCommands: async (input) => {
+            calls.push({ type: 'listCommands', input });
+            return [{ command: 'review', description: 'Review code' }];
+          },
         },
       },
     );
@@ -116,6 +119,12 @@ describe('agent adapters', () => {
         },
       },
       {
+        type: 'listCommands',
+        input: {
+          directory: '/tmp/project',
+        },
+      },
+      {
         type: 'command',
         input: {
           command: 'review',
@@ -124,6 +133,61 @@ describe('agent adapters', () => {
           sessionId: 'ses_reuse',
           model: undefined,
           agent: undefined,
+        },
+      },
+    ]);
+  });
+
+  it('falls back to an OpenCode prompt when slash input is not a known command', async () => {
+    const calls: unknown[] = [];
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async (input) => {
+            calls.push({ type: 'prompt', input });
+            return { sessionId: 'ses_reuse', text: 'prompt response' };
+          },
+          sendCommand: async (input) => {
+            calls.push({ type: 'command', input });
+            return { sessionId: 'ses_reuse', text: 'command response' };
+          },
+          listCommands: async (input) => {
+            calls.push({ type: 'listCommands', input });
+            return [{ command: 'review', description: 'Review code' }];
+          },
+        },
+      },
+    );
+
+    const events = [];
+    for await (const event of adapter.sendMessage({
+      conversationId: 'conv-1',
+      input: '/unknown do not execute',
+      workspace: '/tmp/project',
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_reuse' },
+      { type: 'content', content: 'prompt response' },
+    ]);
+    expect(calls).toEqual([
+      {
+        type: 'listCommands',
+        input: {
+          directory: '/tmp/project',
+        },
+      },
+      {
+        type: 'prompt',
+        input: {
+          prompt: '/unknown do not execute',
+          directory: '/tmp/project',
+          sessionId: undefined,
         },
       },
     ]);

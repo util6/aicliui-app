@@ -41,20 +41,23 @@ export function createOpenCodeAdapter(
       if (activeClient) {
         const cachedSessionId = sessionByConversationId.get(input.conversationId);
         const slashCommand = parseOpenCodeSlashCommand(input.input);
-        const result = slashCommand
-          ? await activeClient.sendCommand({
-              command: slashCommand.command,
-              arguments: slashCommand.arguments,
-              sessionId: cachedSessionId,
-              directory: input.workspace,
-              model: input.model,
-              agent: input.sessionMode,
-            })
-          : await activeClient.sendPrompt({
-              prompt: input.input,
-              sessionId: cachedSessionId,
-              directory: input.workspace,
-            });
+        let result;
+        if (slashCommand && (await isKnownOpenCodeCommand(activeClient, slashCommand.command, input.workspace))) {
+          result = await activeClient.sendCommand({
+            command: slashCommand.command,
+            arguments: slashCommand.arguments,
+            sessionId: cachedSessionId,
+            directory: input.workspace,
+            model: input.model,
+            agent: input.sessionMode,
+          });
+        } else {
+          result = await activeClient.sendPrompt({
+            prompt: input.input,
+            sessionId: cachedSessionId,
+            directory: input.workspace,
+          });
+        }
         sessionByConversationId.set(input.conversationId, result.sessionId);
         yield {
           type: 'thought',
@@ -85,6 +88,19 @@ export function createOpenCodeAdapter(
       return activeClient.listCommands({ directory: input.workspace });
     },
   };
+}
+
+async function isKnownOpenCodeCommand(
+  client: OpenCodeSessionClient,
+  command: string,
+  directory?: string,
+): Promise<boolean> {
+  try {
+    const commands = await client.listCommands({ directory });
+    return commands.some((item) => item.command === command);
+  } catch {
+    return false;
+  }
 }
 
 export function parseOpenCodeSlashCommand(input: string): { command: string; arguments: string } | null {
