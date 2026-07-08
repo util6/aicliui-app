@@ -1,5 +1,27 @@
 import { TERMUX_DAEMON_SOURCE } from '@/src/services/termuxDaemonSource';
 
+function loadEmbeddedFunction<T extends (...args: any[]) => any>(name: string): T {
+  const marker = `function ${name}`;
+  const start = TERMUX_DAEMON_SOURCE.indexOf(marker);
+  if (start === -1) throw new Error(`Embedded function ${name} was not found`);
+
+  const bodyStart = TERMUX_DAEMON_SOURCE.indexOf('{', start);
+  if (bodyStart === -1) throw new Error(`Embedded function ${name} has no body`);
+
+  let depth = 0;
+  for (let index = bodyStart; index < TERMUX_DAEMON_SOURCE.length; index += 1) {
+    const char = TERMUX_DAEMON_SOURCE[index];
+    if (char === '{') depth += 1;
+    if (char === '}') depth -= 1;
+    if (depth === 0) {
+      const source = TERMUX_DAEMON_SOURCE.slice(start, index + 1);
+      return new Function(`${source}; return ${name};`)() as T;
+    }
+  }
+
+  throw new Error(`Embedded function ${name} body was not closed`);
+}
+
 describe('Termux daemon OpenCode slash commands', () => {
   it('checks the OpenCode command list before dispatching a slash command', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain(
@@ -177,5 +199,14 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeMovedStatus(data, sessionId)');
     expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeContextUpdatedStatus(data, sessionId)');
     expect(TERMUX_DAEMON_SOURCE).toContain("openCodeAgentStatusBase('workspace_moved', sessionId)");
+  });
+
+  it('parses OpenCode serve listening URLs like the package daemon', () => {
+    const parseOpenCodeServeUrl = loadEmbeddedFunction<(line: string) => string | null>('parseOpenCodeServeUrl');
+
+    expect(parseOpenCodeServeUrl('server listening on http://127.0.0.1:4096')).toBe('http://127.0.0.1:4096');
+    expect(parseOpenCodeServeUrl('server listening on 127.0.0.1:4096')).toBe('http://127.0.0.1:4096');
+    expect(parseOpenCodeServeUrl('server listening on [::1]:4096')).toBe('http://[::1]:4096');
+    expect(parseOpenCodeServeUrl('waiting for server')).toBeNull();
   });
 });

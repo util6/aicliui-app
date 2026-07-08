@@ -2165,6 +2165,16 @@ async function ensureOpenCodeServer() {
   return openCodeServerPromise;
 }
 
+function parseOpenCodeServeUrl(line) {
+  const match = line.match(/server listening on\s+(\S+)/i);
+  if (!match) return null;
+  const value = match[1];
+  if (/^https?:\/\//i.test(value)) return value;
+  if (/^\[.+\]:\d+$/.test(value)) return 'http://' + value;
+  if (/^[\w.-]+:\d+$/.test(value)) return 'http://' + value;
+  return null;
+}
+
 function startOpenCodeServer() {
   return new Promise((resolve, reject) => {
     const child = spawn('opencode', ['serve', '--hostname', '127.0.0.1', '--port', String(openCodePort)], {
@@ -2184,11 +2194,11 @@ function startOpenCodeServer() {
 
     const handleOutput = (chunk) => {
       output += chunk.toString();
-      const match = output.match(/server listening on\s+(https?:\/\/[^\s]+)/i);
-      if (!match || resolved) return;
+      const url = parseOpenCodeServeUrl(output);
+      if (!url || resolved) return;
       resolved = true;
       clearTimeout(timeout);
-      resolve(match[1].replace(/\/+$/, ''));
+      resolve(url.replace(/\/+$/, ''));
     };
 
     child.stdout.on('data', handleOutput);
