@@ -1422,9 +1422,74 @@ function extractOpenCodeAgentStatus(event, sessionId) {
   const type = typeof payload.type === 'string' ? payload.type : '';
   const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
   if (data.sessionID !== sessionId) return null;
+  if (type === 'session.next.agent.switched') return openCodeAgentSwitchedStatus(data, sessionId);
+  if (type === 'session.next.model.switched') return openCodeModelSwitchedStatus(data, sessionId);
+  if (type === 'session.next.moved') return openCodeMovedStatus(data, sessionId);
+  if (type === 'session.next.context.updated') return openCodeContextUpdatedStatus(data, sessionId);
   if (type === 'session.next.step.started') return openCodeStepStartedStatus(data, sessionId);
   if (type === 'session.next.step.failed') return openCodeStepFailedStatus(data, sessionId);
   return null;
+}
+
+function openCodeAgentSwitchedStatus(data, sessionId) {
+  const messageId = stringValue(data.messageID);
+  const agent = stringValue(data.agent);
+  const message = agent ? 'Agent switched to ' + agent : 'Agent switched';
+  return {
+    data: {
+      ...openCodeAgentStatusBase('agent_switched', sessionId),
+      ...(messageId ? { messageId } : {}),
+      ...(agent ? { agent } : {}),
+      message,
+      detail: message,
+    },
+  };
+}
+
+function openCodeModelSwitchedStatus(data, sessionId) {
+  const messageId = stringValue(data.messageID);
+  const model = openCodeModelRef(data.model);
+  const message = model ? 'Model switched to ' + model : 'Model switched';
+  return {
+    data: {
+      ...openCodeAgentStatusBase('model_switched', sessionId),
+      ...(messageId ? { messageId } : {}),
+      ...(model ? { model } : {}),
+      message,
+      detail: message,
+    },
+  };
+}
+
+function openCodeMovedStatus(data, sessionId) {
+  const location = isRecord(data.location) ? data.location : undefined;
+  const directory = location ? stringValue(location.directory) : undefined;
+  const subdirectory = stringValue(data.subdirectory);
+  const target = openCodeMovedTarget(directory, subdirectory);
+  const message = target ? 'Workspace moved to ' + target : 'Workspace moved';
+  return {
+    data: {
+      ...openCodeAgentStatusBase('workspace_moved', sessionId),
+      ...(location ? { location } : {}),
+      ...(directory ? { directory } : {}),
+      ...(subdirectory ? { subdirectory } : {}),
+      message,
+      detail: message,
+    },
+  };
+}
+
+function openCodeContextUpdatedStatus(data, sessionId) {
+  const messageId = stringValue(data.messageID);
+  const message = stringValue(data.text) || 'Context updated';
+  return {
+    data: {
+      ...openCodeAgentStatusBase('context_updated', sessionId),
+      ...(messageId ? { messageId } : {}),
+      message,
+      detail: message,
+    },
+  };
 }
 
 function openCodeStepStartedStatus(data, sessionId) {
@@ -1463,6 +1528,12 @@ function openCodeAgentStatusBase(status, sessionId) {
     status,
     sessionId,
   };
+}
+
+function openCodeMovedTarget(directory, subdirectory) {
+  if (!directory) return subdirectory || '';
+  if (!subdirectory) return directory;
+  return directory.replace(/\/+$/, '') + '/' + subdirectory.replace(/^\/+/, '');
 }
 
 function openCodeModelRef(value) {

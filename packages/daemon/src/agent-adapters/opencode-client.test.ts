@@ -881,6 +881,127 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode v2 session metadata events as agent status updates', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_metadata' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.agent.switched',
+              data: { sessionID: 'ses_metadata', messageID: 'msg_agent', agent: 'plan' },
+            },
+            {
+              type: 'session.next.model.switched',
+              data: {
+                sessionID: 'ses_metadata',
+                messageID: 'msg_model',
+                model: { providerID: 'anthropic', id: 'claude-sonnet-4' },
+              },
+            },
+            {
+              type: 'session.next.moved',
+              data: {
+                sessionID: 'ses_metadata',
+                location: { directory: '/tmp/project', workspaceID: 'workspace-1' },
+                subdirectory: 'apps/mobile',
+              },
+            },
+            {
+              type: 'session.next.context.updated',
+              data: {
+                sessionID: 'ses_metadata',
+                messageID: 'msg_context',
+                text: 'Loaded repo instructions',
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_metadata/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_metadata/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_metadata/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'metadata done' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_metadata' },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          agent_name: 'OpenCode',
+          status: 'agent_switched',
+          sessionId: 'ses_metadata',
+          messageId: 'msg_agent',
+          agent: 'plan',
+          message: 'Agent switched to plan',
+          detail: 'Agent switched to plan',
+        },
+      },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          agent_name: 'OpenCode',
+          status: 'model_switched',
+          sessionId: 'ses_metadata',
+          messageId: 'msg_model',
+          model: 'anthropic/claude-sonnet-4',
+          message: 'Model switched to anthropic/claude-sonnet-4',
+          detail: 'Model switched to anthropic/claude-sonnet-4',
+        },
+      },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          agent_name: 'OpenCode',
+          status: 'workspace_moved',
+          sessionId: 'ses_metadata',
+          location: { directory: '/tmp/project', workspaceID: 'workspace-1' },
+          directory: '/tmp/project',
+          subdirectory: 'apps/mobile',
+          message: 'Workspace moved to /tmp/project/apps/mobile',
+          detail: 'Workspace moved to /tmp/project/apps/mobile',
+        },
+      },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          agent_name: 'OpenCode',
+          status: 'context_updated',
+          sessionId: 'ses_metadata',
+          messageId: 'msg_context',
+          message: 'Loaded repo instructions',
+          detail: 'Loaded repo instructions',
+        },
+      },
+      { type: 'content', content: 'metadata done' },
+    ]);
+  });
+
   it('falls back to context text when the OpenCode SSE stream is unavailable', async () => {
     const client = createOpenCodeClient({
       baseUrl: 'http://127.0.0.1:4096',

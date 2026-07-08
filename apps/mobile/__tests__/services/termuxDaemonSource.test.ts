@@ -166,4 +166,16 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeStepFailedStatus(data, sessionId)');
     expect(TERMUX_DAEMON_SOURCE).toContain("type: 'agent_status'");
   });
+
+  it('routes OpenCode v2 session metadata events through the local agent status stream', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.agent.switched'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.model.switched'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.moved'");
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.context.updated'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeAgentSwitchedStatus(data, sessionId)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeModelSwitchedStatus(data, sessionId)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeMovedStatus(data, sessionId)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeContextUpdatedStatus(data, sessionId)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("openCodeAgentStatusBase('workspace_moved', sessionId)");
+  });
 });
