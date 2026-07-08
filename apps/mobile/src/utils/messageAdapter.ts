@@ -343,10 +343,13 @@ export function composeMessage(message: TMessage | undefined, list: TMessage[]):
   }
 
   if (message.type === 'thinking') {
+    const incomingSubject = getThinkingSubject(message);
+
     if (message.content.status === 'done') {
       for (let i = list.length - 1; i >= 0; i--) {
         const msg = list[i];
         if (msg.type !== 'thinking' || msg.msg_id !== message.msg_id) continue;
+        if (incomingSubject && getThinkingSubject(msg) !== incomingSubject) continue;
         const updated = [...list];
         updated[i] = {
           ...msg,
@@ -354,14 +357,20 @@ export function composeMessage(message: TMessage | undefined, list: TMessage[]):
             ...msg.content,
             status: 'done',
             ...(message.content.duration !== undefined ? { duration: message.content.duration } : {}),
-            ...(message.content.subject ? { subject: message.content.subject } : {}),
+            ...(incomingSubject ? { subject: incomingSubject } : {}),
           },
         };
         return updated;
       }
+      return list;
     }
 
-    if (last.type === 'thinking' && last.msg_id === message.msg_id) {
+    if (
+      last.type === 'thinking' &&
+      last.msg_id === message.msg_id &&
+      last.content.status !== 'done' &&
+      thinkingSubjectsCanMerge(getThinkingSubject(last), incomingSubject)
+    ) {
       const updated = [...list];
       updated[updated.length - 1] = {
         ...last,
@@ -425,6 +434,15 @@ function getToolGroupCallId(tool: unknown): string | undefined {
   if (!isRecord(tool)) return undefined;
   const value = tool.callId ?? tool.call_id;
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function getThinkingSubject(message: TMessage): string | undefined {
+  const value = message.content?.subject;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function thinkingSubjectsCanMerge(existingSubject: string | undefined, incomingSubject: string | undefined): boolean {
+  return !existingSubject || !incomingSubject || existingSubject === incomingSubject;
 }
 
 function normalizeErrorPayload(value: unknown): { message: string; error?: Record<string, unknown> } {

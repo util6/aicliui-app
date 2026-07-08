@@ -503,5 +503,86 @@ describe('composeMessage', () => {
         duration: 2500,
       });
     });
+
+    it('keeps different thinking subjects in separate messages', () => {
+      const existing = makeMsg({
+        type: 'thinking',
+        content: { content: 'Reading files', subject: 'OpenCode reasoning', status: 'thinking' },
+      });
+      const incoming = makeMsg({
+        id: 'id-2',
+        type: 'thinking',
+        content: { content: 'Compacting context', subject: 'OpenCode compaction', status: 'thinking' },
+      });
+
+      const result = composeMessage(incoming, [existing]);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].content).toEqual({
+        content: 'Reading files',
+        subject: 'OpenCode reasoning',
+        status: 'thinking',
+      });
+      expect(result[1].content).toEqual({
+        content: 'Compacting context',
+        subject: 'OpenCode compaction',
+        status: 'thinking',
+      });
+    });
+
+    it('starts a new thinking message after the previous one is done', () => {
+      const existing = makeMsg({
+        type: 'thinking',
+        content: { content: 'Reading files', subject: 'OpenCode reasoning', status: 'done' },
+      });
+      const incoming = makeMsg({
+        id: 'id-2',
+        type: 'thinking',
+        content: { content: 'Checking context', subject: 'OpenCode reasoning', status: 'thinking' },
+      });
+
+      const result = composeMessage(incoming, [existing]);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].content.status).toBe('done');
+      expect(result[1].content).toEqual({
+        content: 'Checking context',
+        subject: 'OpenCode reasoning',
+        status: 'thinking',
+      });
+    });
+
+    it('marks the matching thinking subject done when multiple blocks share a msg_id', () => {
+      const reasoning = makeMsg({
+        id: 'reasoning',
+        type: 'thinking',
+        content: { content: 'Reading files', subject: 'OpenCode reasoning', status: 'thinking' },
+      });
+      const compaction = makeMsg({
+        id: 'compaction',
+        type: 'thinking',
+        content: { content: 'Compacting context', subject: 'OpenCode compaction', status: 'thinking' },
+      });
+      const incoming = makeMsg({
+        id: 'id-2',
+        type: 'thinking',
+        content: { content: '', subject: 'OpenCode reasoning', status: 'done', duration: 1200 },
+      });
+
+      const result = composeMessage(incoming, [reasoning, compaction]);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].content).toEqual({
+        content: 'Reading files',
+        subject: 'OpenCode reasoning',
+        status: 'done',
+        duration: 1200,
+      });
+      expect(result[1].content).toEqual({
+        content: 'Compacting context',
+        subject: 'OpenCode compaction',
+        status: 'thinking',
+      });
+    });
   });
 });
