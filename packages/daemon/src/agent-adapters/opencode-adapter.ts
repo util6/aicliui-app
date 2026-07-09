@@ -306,6 +306,19 @@ export function createOpenCodeAdapter(
             data: event.data,
           };
           break;
+        case 'todo':
+          yield {
+            type: 'plan',
+            data: {
+              sessionId: event.sessionId,
+              entries: event.todos.map((todo) => ({
+                title: todo.content,
+                status: todo.status,
+                ...(todo.priority ? { priority: todo.priority } : {}),
+              })),
+            },
+          };
+          break;
         case 'permission': {
           const confirmation = toOpenCodeConfirmation(event.request);
           if (!confirmation) break;

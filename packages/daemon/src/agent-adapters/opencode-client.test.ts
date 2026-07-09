@@ -1148,6 +1148,61 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode todo updates as plan events', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_todo' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'todo.updated',
+              data: {
+                sessionID: 'ses_todo',
+                todos: [
+                  { content: 'Inspect AionUi client', status: 'completed', priority: 'high' },
+                  { content: 'Implement Android proxy', status: 'in_progress', priority: 'medium' },
+                ],
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_todo/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_todo/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_todo/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'todo done' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_todo' },
+      {
+        type: 'todo',
+        sessionId: 'ses_todo',
+        todos: [
+          { content: 'Inspect AionUi client', status: 'completed', priority: 'high' },
+          { content: 'Implement Android proxy', status: 'in_progress', priority: 'medium' },
+        ],
+      },
+      { type: 'content', content: 'todo done' },
+    ]);
+  });
+
   it('streams OpenCode v2 session metadata events as agent status updates', async () => {
     const client = createOpenCodeClient({
       baseUrl: 'http://127.0.0.1:4096',

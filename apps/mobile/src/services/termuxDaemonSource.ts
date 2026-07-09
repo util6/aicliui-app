@@ -953,6 +953,7 @@ async function sendMessage(params, emit) {
         onThinking: emitAssistantThinking,
         onContextUsage: emitAssistantContextUsage,
         onAgentStatus: emitAssistantAgentStatus,
+        onPlan: emitAssistantPlan,
         onPermission: emitAssistantPermission,
         onPermissionResolved: emitAssistantPermissionResolved,
         onQuestion: emitAssistantQuestion,
@@ -1116,6 +1117,7 @@ async function sendOpenCodePrompt({
   onThinking,
   onContextUsage,
   onAgentStatus,
+  onPlan,
   onPermission,
   onPermissionResolved,
   onQuestion,
@@ -1135,6 +1137,7 @@ async function sendOpenCodePrompt({
     onThinking,
     onContextUsage,
     onAgentStatus,
+    onPlan,
     onPermission: (request) => {
       const confirmation = toOpenCodeConfirmation(request, conversationId, msgId, baseUrl);
       if (confirmation) onPermission(confirmation);
@@ -1274,6 +1277,7 @@ function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, h
       const extractToolUpdate = createOpenCodeToolUpdateExtractor(sessionId);
       const extractContextUsage = createOpenCodeContextUsageExtractor(sessionId);
       const extractAgentStatus = createOpenCodeAgentStatusExtractor(sessionId);
+      const extractTodoEvent = createOpenCodeTodoEventExtractor(sessionId);
       const extractPermissionEvent = createOpenCodePermissionEventExtractor(sessionId);
       const extractQuestionEvent = createOpenCodeQuestionEventExtractor(sessionId);
       const parse = createSseParser((event) => {
@@ -1290,6 +1294,8 @@ function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, h
         if (contextUsage) handlers.onContextUsage(contextUsage);
         const agentStatus = extractAgentStatus(event);
         if (agentStatus) handlers.onAgentStatus(agentStatus);
+        const todoEvent = extractTodoEvent(event);
+        if (todoEvent) handlers.onPlan(todoEvent);
         const permissionEvent = extractPermissionEvent(event);
         if (permissionEvent?.type === 'asked') handlers.onPermission(permissionEvent.request);
         if (permissionEvent?.type === 'resolved') handlers.onPermissionResolved(permissionEvent.requestId);
@@ -1465,6 +1471,40 @@ function openCodeContextUsageFromTokens(tokens) {
     numberValue(cache.read) +
     numberValue(cache.write);
   return used > 0 ? { used, size: used } : null;
+}
+
+function createOpenCodeTodoEventExtractor(sessionId) {
+  return (event) => extractOpenCodeTodoEvent(event, sessionId);
+}
+
+function extractOpenCodeTodoEvent(event, sessionId) {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'todo.updated') return null;
+  return openCodeTodoPlan(data, sessionId);
+}
+
+function openCodeTodoPlan(data, sessionId) {
+  if (data.sessionID !== sessionId) return null;
+  const todos = Array.isArray(data.todos) ? data.todos.filter(isRecord) : [];
+  return {
+    sessionId,
+    entries: todos
+      .map((todo) => {
+        const content = stringValue(todo.content);
+        const status = stringValue(todo.status);
+        if (!content || !status) return null;
+        const priority = stringValue(todo.priority);
+        return {
+          title: content,
+          status,
+          ...(priority ? { priority } : {}),
+        };
+      })
+      .filter(Boolean),
+  };
 }
 
 function createOpenCodeAgentStatusExtractor(sessionId) {

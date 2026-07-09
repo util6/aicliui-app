@@ -912,6 +912,53 @@ describe('agent adapters', () => {
     ]);
   });
 
+  it('forwards OpenCode todo updates as shared plan events', async () => {
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async () => ({ sessionId: 'unused', text: 'unused fallback' }),
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+          streamPrompt: async function* () {
+            yield { type: 'session', sessionId: 'ses_todo' };
+            yield {
+              type: 'todo',
+              sessionId: 'ses_todo',
+              todos: [
+                { content: 'Inspect AionUi client', status: 'completed', priority: 'high' },
+                { content: 'Implement Android proxy', status: 'in_progress', priority: 'medium' },
+              ],
+            };
+            yield { type: 'content', content: 'ready' };
+          },
+        },
+      },
+    );
+
+    const events = [];
+    for await (const event of adapter.sendMessage({ conversationId: 'conv-1', input: 'hello' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'thought', subject: 'OpenCode', description: 'session ses_todo' },
+      {
+        type: 'plan',
+        data: {
+          sessionId: 'ses_todo',
+          entries: [
+            { title: 'Inspect AionUi client', status: 'completed', priority: 'high' },
+            { title: 'Implement Android proxy', status: 'in_progress', priority: 'medium' },
+          ],
+        },
+      },
+      { type: 'content', content: 'ready' },
+    ]);
+  });
+
   it('forwards OpenCode agent status events to the shared adapter contract', async () => {
     const adapter = createOpenCodeAdapter(
       {

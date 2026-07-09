@@ -94,6 +94,11 @@ export type OpenCodeAgentStatusUpdate = {
   data: Record<string, unknown>;
 };
 
+export type OpenCodeTodoUpdate = {
+  sessionId: string;
+  todos: Array<{ content: string; status: string; priority?: string }>;
+};
+
 export type OpenCodeStreamEvent =
   | {
       type: 'session';
@@ -121,6 +126,11 @@ export type OpenCodeStreamEvent =
   | {
       type: 'agent_status';
       data: Record<string, unknown>;
+    }
+  | {
+      type: 'todo';
+      sessionId: string;
+      todos: Array<{ content: string; status: string; priority?: string }>;
     }
   | {
       type: 'permission';
@@ -265,6 +275,9 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
         },
         onAgentStatus(update) {
           queue.push({ type: 'agent_status', data: update.data });
+        },
+        onTodo(update) {
+          queue.push({ type: 'todo', ...update });
         },
         onPermission(request) {
           queue.push({ type: 'permission', request });
@@ -458,6 +471,7 @@ type OpenCodeEventStreamHandlers = {
   onThinking(update: OpenCodeThinkingUpdate): void;
   onContextUsage(update: OpenCodeContextUsageUpdate): void;
   onAgentStatus(update: OpenCodeAgentStatusUpdate): void;
+  onTodo(update: OpenCodeTodoUpdate): void;
   onPermission(request: OpenCodePermissionRequest): void;
   onPermissionResolved(requestId: string): void;
   onQuestion(request: OpenCodeQuestionRequest): void;
@@ -558,6 +572,7 @@ function subscribeOpenCodeSessionEvents(input: {
       const extractToolUpdate = createOpenCodeToolUpdateExtractor(input.sessionId);
       const extractContextUsage = createOpenCodeContextUsageExtractor(input.sessionId);
       const extractAgentStatus = createOpenCodeAgentStatusExtractor(input.sessionId);
+      const extractTodoEvent = createOpenCodeTodoEventExtractor(input.sessionId);
       const extractPermissionEvent = createOpenCodePermissionEventExtractor(input.sessionId);
       const extractQuestionEvent = createOpenCodeQuestionEventExtractor(input.sessionId);
       const parse = createSseParser((event) => {
@@ -579,6 +594,9 @@ function subscribeOpenCodeSessionEvents(input: {
 
         const agentStatus = extractAgentStatus(event);
         if (agentStatus) input.handlers.onAgentStatus(agentStatus);
+
+        const todoEvent = extractTodoEvent(event);
+        if (todoEvent) input.handlers.onTodo(todoEvent);
 
         const permissionEvent = extractPermissionEvent(event);
         if (permissionEvent?.type === 'asked') input.handlers.onPermission(permissionEvent.request);
@@ -769,6 +787,40 @@ function openCodeContextUsageFromTokens(tokens: Record<string, unknown>): OpenCo
     numberValue(cache.read) +
     numberValue(cache.write);
   return used > 0 ? { used, size: used } : null;
+}
+
+function createOpenCodeTodoEventExtractor(sessionId: string): (event: unknown) => OpenCodeTodoUpdate | null {
+  return (event) => extractOpenCodeTodoEvent(event, sessionId);
+}
+
+function extractOpenCodeTodoEvent(event: unknown, sessionId: string): OpenCodeTodoUpdate | null {
+  if (!isRecord(event)) return null;
+  const payload = isRecord(event.payload) ? event.payload : event;
+  const type = typeof payload.type === 'string' ? payload.type : '';
+  const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
+  if (type !== 'todo.updated') return null;
+  return openCodeTodoPlan(data, sessionId);
+}
+
+function openCodeTodoPlan(data: Record<string, unknown>, sessionId: string): OpenCodeTodoUpdate | null {
+  if (data.sessionID !== sessionId) return null;
+  const todos = Array.isArray(data.todos) ? data.todos.filter(isRecord) : [];
+  return {
+    sessionId,
+    todos: todos
+      .map((todo) => {
+        const content = stringValue(todo.content);
+        const status = stringValue(todo.status);
+        if (!content || !status) return null;
+        const priority = stringValue(todo.priority);
+        return {
+          content,
+          status,
+          ...(priority ? { priority } : {}),
+        };
+      })
+      .filter((todo): todo is { content: string; status: string; priority?: string } => Boolean(todo)),
+  };
 }
 
 function createOpenCodeAgentStatusExtractor(sessionId: string): (event: unknown) => OpenCodeAgentStatusUpdate | null {
