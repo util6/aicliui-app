@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { View, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet, Alert, TextInput } from 'react-native';
+import { View, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet, Alert, TextInput, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useTranslation } from 'react-i18next';
@@ -51,6 +51,7 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
   const [renameTarget, setRenameTarget] = useState<FlatItem | null>(null);
   const [renameText, setRenameText] = useState('');
   const [searchText, setSearchText] = useState('');
+  const [actionTarget, setActionTarget] = useState<FlatItem | null>(null);
 
   const fetchFiles = useCallback(async (searchValue: string) => {
     if (!activeConversationId || !currentWorkspace) return;
@@ -141,23 +142,42 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
     return flatten(rootChildren, 0);
   }, [tree, expanded, searchText]);
 
-  const handleFileSelect = (fullPath: string) => {
-    openTab(fullPath);
-    navigation.closeDrawer();
-  };
+  const handleFileSelect = useCallback(
+    (fullPath: string) => {
+      openTab(fullPath);
+      navigation.closeDrawer();
+    },
+    [navigation, openTab],
+  );
+  const closeActionSheet = useCallback(() => {
+    setActionTarget(null);
+  }, []);
+  const handleOpenEntry = useCallback(
+    (item: FlatItem) => {
+      closeActionSheet();
+      if (item.isDir) {
+        toggleExpand(item);
+        return;
+      }
+      handleFileSelect(item.fullPath);
+    },
+    [closeActionSheet, handleFileSelect, toggleExpand],
+  );
   const handleAddToChat = useCallback(
     (item: FlatItem) => {
       if (!activeConversationId) return;
+      closeActionSheet();
       addPendingFiles(activeConversationId, [item.fullPath]);
       Alert.alert(
         t('files.addedToChat', { defaultValue: 'Added to chat' }),
         item.relativePath || item.name,
       );
     },
-    [activeConversationId, addPendingFiles, t],
+    [activeConversationId, addPendingFiles, closeActionSheet, t],
   );
   const handleCopyPath = useCallback(
     async (item: FlatItem) => {
+      closeActionSheet();
       try {
         await Clipboard.setStringAsync(item.fullPath);
         Alert.alert(t('common.copied', { defaultValue: 'Copied' }), item.relativePath || item.name);
@@ -165,11 +185,12 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
         Alert.alert(t('common.error'), t('files.copyPathFailed', { defaultValue: 'Failed to copy path' }));
       }
     },
-    [t],
+    [closeActionSheet, t],
   );
   const handleDeleteEntry = useCallback(
     (item: FlatItem) => {
       if (!currentWorkspace) return;
+      closeActionSheet();
       Alert.alert(
         item.isDir
           ? t('files.deleteFolderTitle', { defaultValue: 'Delete folder?' })
@@ -193,12 +214,13 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
         ],
       );
     },
-    [currentWorkspace, fetchFiles, searchText, t],
+    [closeActionSheet, currentWorkspace, fetchFiles, searchText, t],
   );
   const handleStartRename = useCallback((item: FlatItem) => {
+    closeActionSheet();
     setRenameTarget(item);
     setRenameText(item.name);
-  }, []);
+  }, [closeActionSheet]);
   const handleCancelRename = useCallback(() => {
     setRenameTarget(null);
     setRenameText('');
@@ -244,85 +266,45 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
     const isRenaming = renameTarget?.fullPath === item.fullPath;
     return (
       <View>
-        <TouchableOpacity
-          style={[styles.item, { paddingLeft: 16 + 16 * item.depth }]}
-          onPress={() => (item.isDir ? toggleExpand(item) : handleFileSelect(item.fullPath))}
-          activeOpacity={0.6}
-        >
-          {item.isDir && (
+        <View style={[styles.item, { paddingLeft: 16 + 16 * item.depth }]}>
+          <TouchableOpacity
+            style={styles.itemMain}
+            onPress={() => (item.isDir ? toggleExpand(item) : handleFileSelect(item.fullPath))}
+            activeOpacity={0.6}
+          >
+            {item.isDir && (
+              <Ionicons
+                name={item.isExpanded ? 'chevron-down' : 'chevron-forward'}
+                size={14}
+                color={iconColor}
+                style={styles.chevron}
+              />
+            )}
             <Ionicons
-              name={item.isExpanded ? 'chevron-down' : 'chevron-forward'}
-              size={14}
-              color={iconColor}
-              style={styles.chevron}
+              name={item.isDir ? (item.isExpanded ? 'folder-open' : 'folder') : 'document-outline'}
+              size={18}
+              color={item.isDir ? tint : iconColor}
+              style={styles.icon}
             />
-          )}
-          <Ionicons
-            name={item.isDir ? (item.isExpanded ? 'folder-open' : 'folder') : 'document-outline'}
-            size={18}
-            color={item.isDir ? tint : iconColor}
-            style={styles.icon}
-          />
-          <ThemedText style={styles.itemName} numberOfLines={1}>
-            {item.name}
-          </ThemedText>
-          <TouchableOpacity
-            accessibilityRole='button'
-            accessibilityLabel={t('files.addToChat', {
-              file: item.name,
-              defaultValue: `Add ${item.name} to chat`,
-            })}
-            testID={`add-file-to-chat-${item.relativePath}`}
-            style={styles.addButton}
-            onPress={() => handleAddToChat(item)}
-            activeOpacity={0.72}
-            hitSlop={6}
-          >
-            <Ionicons name='add-circle-outline' size={20} color={tint} />
+            <ThemedText style={styles.itemName} numberOfLines={1}>
+              {item.name}
+            </ThemedText>
           </TouchableOpacity>
           <TouchableOpacity
             accessibilityRole='button'
-            accessibilityLabel={t('files.renameEntry', {
+            accessibilityLabel={t('files.openActionsForEntry', {
               file: item.name,
-              defaultValue: `Rename ${item.name}`,
+              defaultValue: `Open actions for ${item.name}`,
             })}
-            testID={`rename-workspace-entry-${item.relativePath}`}
+            testID={`workspace-entry-actions-${item.relativePath}`}
             style={styles.actionButton}
-            onPress={() => handleStartRename(item)}
+            onPress={() => setActionTarget(item)}
             activeOpacity={0.72}
             hitSlop={6}
           >
-            <Ionicons name='create-outline' size={19} color={iconColor} />
+            <Ionicons name='ellipsis-horizontal' size={20} color={iconColor} />
           </TouchableOpacity>
-          <TouchableOpacity
-            accessibilityRole='button'
-            accessibilityLabel={t('files.copyPath', {
-              file: item.name,
-              defaultValue: `Copy path for ${item.name}`,
-            })}
-            testID={`copy-workspace-entry-path-${item.relativePath}`}
-            style={styles.actionButton}
-            onPress={() => void handleCopyPath(item)}
-            activeOpacity={0.72}
-            hitSlop={6}
-          >
-            <Ionicons name='copy-outline' size={18} color={iconColor} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            accessibilityRole='button'
-            accessibilityLabel={t('files.deleteEntry', {
-              file: item.name,
-              defaultValue: `Delete ${item.name}`,
-            })}
-            testID={`delete-workspace-entry-${item.relativePath}`}
-            style={styles.actionButton}
-            onPress={() => handleDeleteEntry(item)}
-            activeOpacity={0.72}
-            hitSlop={6}
-          >
-            <Ionicons name='trash-outline' size={19} color={iconColor} />
-          </TouchableOpacity>
-        </TouchableOpacity>
+        </View>
         {isRenaming && (
           <View style={[styles.renameRow, { paddingLeft: 16 + 16 * item.depth }]}>
             <TextInput
@@ -427,7 +409,95 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
           }
         />
       )}
+      <Modal visible={Boolean(actionTarget)} animationType='slide' transparent onRequestClose={closeActionSheet}>
+        <View style={styles.sheetOverlay} testID='workspace-entry-actions-sheet'>
+          <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={closeActionSheet} />
+          {actionTarget && (
+            <View style={[styles.actionSheet, { backgroundColor: background }]}>
+              <View style={[styles.sheetHandle, { backgroundColor: border }]} />
+              <View style={styles.sheetHeader}>
+                <Ionicons
+                  name={actionTarget.isDir ? 'folder-outline' : 'document-outline'}
+                  size={18}
+                  color={actionTarget.isDir ? tint : iconColor}
+                />
+                <View style={styles.sheetTitleText}>
+                  <ThemedText style={styles.sheetTitle} numberOfLines={1}>
+                    {actionTarget.name}
+                  </ThemedText>
+                  <ThemedText type='caption' numberOfLines={1}>
+                    {actionTarget.relativePath || actionTarget.fullPath}
+                  </ThemedText>
+                </View>
+              </View>
+              <ActionSheetRow
+                icon={actionTarget.isDir ? 'folder-open-outline' : 'eye-outline'}
+                title={actionTarget.isDir ? t('files.openFolder', { defaultValue: 'Open folder' }) : t('files.preview', { defaultValue: 'Preview' })}
+                testID={`workspace-entry-action-open-${actionTarget.relativePath}`}
+                onPress={() => handleOpenEntry(actionTarget)}
+                iconColor={tint}
+              />
+              <ActionSheetRow
+                icon='add-circle-outline'
+                title={t('files.addToChatShort', { defaultValue: 'Add to chat' })}
+                testID={`workspace-entry-action-add-${actionTarget.relativePath}`}
+                onPress={() => handleAddToChat(actionTarget)}
+                iconColor={tint}
+              />
+              <ActionSheetRow
+                icon='create-outline'
+                title={t('files.rename', { defaultValue: 'Rename' })}
+                testID={`workspace-entry-action-rename-${actionTarget.relativePath}`}
+                onPress={() => handleStartRename(actionTarget)}
+                iconColor={iconColor}
+              />
+              <ActionSheetRow
+                icon='copy-outline'
+                title={t('files.copyPath', { defaultValue: 'Copy Path' })}
+                testID={`workspace-entry-action-copy-${actionTarget.relativePath}`}
+                onPress={() => void handleCopyPath(actionTarget)}
+                iconColor={iconColor}
+              />
+              <ActionSheetRow
+                icon='trash-outline'
+                title={t('common.delete', { defaultValue: 'Delete' })}
+                testID={`workspace-entry-action-delete-${actionTarget.relativePath}`}
+                onPress={() => handleDeleteEntry(actionTarget)}
+                iconColor={iconColor}
+                destructive
+              />
+            </View>
+          )}
+        </View>
+      </Modal>
     </View>
+  );
+}
+
+type ActionSheetRowProps = {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  testID: string;
+  onPress: () => void;
+  iconColor: string;
+  destructive?: boolean;
+};
+
+function ActionSheetRow({ icon, title, testID, onPress, iconColor, destructive }: ActionSheetRowProps) {
+  const error = useThemeColor({}, 'error');
+  const textColor = destructive ? error : iconColor;
+  return (
+    <TouchableOpacity
+      accessibilityRole='button'
+      accessibilityLabel={title}
+      testID={testID}
+      style={styles.sheetActionRow}
+      onPress={onPress}
+      activeOpacity={0.72}
+    >
+      <Ionicons name={icon} size={20} color={textColor} style={styles.sheetActionIcon} />
+      <ThemedText style={[styles.sheetActionText, { color: textColor }]}>{title}</ThemedText>
+    </TouchableOpacity>
   );
 }
 
@@ -484,6 +554,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingRight: 16,
   },
+  itemMain: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   chevron: {
     marginRight: 4,
     width: 14,
@@ -494,12 +570,6 @@ const styles = StyleSheet.create({
   itemName: {
     fontSize: 14,
     flex: 1,
-  },
-  addButton: {
-    minWidth: 32,
-    minHeight: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   actionButton: {
     minWidth: 32,
@@ -535,5 +605,55 @@ const styles = StyleSheet.create({
   emptyList: {
     padding: 40,
     alignItems: 'center',
+  },
+  sheetOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.32)',
+  },
+  actionSheet: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 24,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    marginBottom: 14,
+    opacity: 0.8,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingBottom: 10,
+  },
+  sheetTitleText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sheetTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  sheetActionRow: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  sheetActionIcon: {
+    width: 22,
+  },
+  sheetActionText: {
+    fontSize: 15,
+    fontWeight: '500',
   },
 });

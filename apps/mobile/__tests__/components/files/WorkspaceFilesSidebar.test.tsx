@@ -90,11 +90,30 @@ describe('WorkspaceFilesSidebar', () => {
     await waitFor(() => {
       expect(screen.getByText('README.md')).toBeTruthy();
     });
-    fireEvent.press(screen.getByTestId('add-file-to-chat-README.md'));
+    fireEvent.press(screen.getByTestId('workspace-entry-actions-README.md'));
+    fireEvent.press(screen.getByTestId('workspace-entry-action-add-README.md'));
 
     expect(addPendingFiles).toHaveBeenCalledWith('conv-1', ['/tmp/project/README.md']);
     expect(alertSpy).toHaveBeenCalledWith('Added to chat', 'README.md');
     alertSpy.mockRestore();
+  });
+
+  it('keeps secondary workspace actions behind a compact row actions sheet', async () => {
+    const screen = render(<WorkspaceFilesSidebar navigation={{ closeDrawer: jest.fn(), openDrawer: jest.fn() }} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('README.md')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('copy-workspace-entry-path-README.md')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('workspace-entry-actions-README.md'));
+
+    expect(screen.getByTestId('workspace-entry-actions-sheet')).toBeTruthy();
+    expect(screen.getByTestId('workspace-entry-action-open-README.md')).toBeTruthy();
+    expect(screen.getByTestId('workspace-entry-action-add-README.md')).toBeTruthy();
+    expect(screen.getByTestId('workspace-entry-action-rename-README.md')).toBeTruthy();
+    expect(screen.getByTestId('workspace-entry-action-copy-README.md')).toBeTruthy();
+    expect(screen.getByTestId('workspace-entry-action-delete-README.md')).toBeTruthy();
   });
 
   it('adds a workspace folder to the active chat attachments', async () => {
@@ -126,7 +145,8 @@ describe('WorkspaceFilesSidebar', () => {
     await waitFor(() => {
       expect(screen.getByText('src')).toBeTruthy();
     });
-    fireEvent.press(screen.getByTestId('add-file-to-chat-src'));
+    fireEvent.press(screen.getByTestId('workspace-entry-actions-src'));
+    fireEvent.press(screen.getByTestId('workspace-entry-action-add-src'));
 
     expect(addPendingFiles).toHaveBeenCalledWith('conv-1', ['/tmp/project/src']);
     expect(alertSpy).toHaveBeenCalledWith('Added to chat', 'src');
@@ -141,7 +161,8 @@ describe('WorkspaceFilesSidebar', () => {
     await waitFor(() => {
       expect(screen.getByText('README.md')).toBeTruthy();
     });
-    fireEvent.press(screen.getByTestId('copy-workspace-entry-path-README.md'));
+    fireEvent.press(screen.getByTestId('workspace-entry-actions-README.md'));
+    fireEvent.press(screen.getByTestId('workspace-entry-action-copy-README.md'));
 
     await waitFor(() => {
       expect(mockSetStringAsync).toHaveBeenCalledWith('/tmp/project/README.md');
@@ -336,7 +357,8 @@ describe('WorkspaceFilesSidebar', () => {
     await waitFor(() => {
       expect(screen.getByText('README.md')).toBeTruthy();
     });
-    fireEvent.press(screen.getByTestId('delete-workspace-entry-README.md'));
+    fireEvent.press(screen.getByTestId('workspace-entry-actions-README.md'));
+    fireEvent.press(screen.getByTestId('workspace-entry-action-delete-README.md'));
 
     await waitFor(() => {
       expect(mockBridgeRequest).toHaveBeenCalledWith('workspace.removeEntry', {
@@ -400,7 +422,8 @@ describe('WorkspaceFilesSidebar', () => {
     await waitFor(() => {
       expect(screen.getByText('README.md')).toBeTruthy();
     });
-    fireEvent.press(screen.getByTestId('rename-workspace-entry-README.md'));
+    fireEvent.press(screen.getByTestId('workspace-entry-actions-README.md'));
+    fireEvent.press(screen.getByTestId('workspace-entry-action-rename-README.md'));
     fireEvent.changeText(screen.getByTestId('rename-workspace-entry-input-README.md'), 'NOTES.md');
     fireEvent.press(screen.getByTestId('save-workspace-entry-rename-README.md'));
 
