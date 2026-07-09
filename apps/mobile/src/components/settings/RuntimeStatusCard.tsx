@@ -162,7 +162,8 @@ function daemonLabel(status: RuntimeStatus): string {
 
 function agentLabel(agent: RuntimeAgentHealth, t: (key: string) => string): string {
   const state = t(getAgentStateLabelKey(agent.state));
-  return agent.version ? `${state} · ${agent.version}` : state;
+  const details = [agent.version, agent.detail].filter((item): item is string => Boolean(item));
+  return details.length > 0 ? `${state} · ${details.join(' · ')}` : state;
 }
 
 function agentTone(state: RuntimeAgentHealth['state']): RuntimeTone {

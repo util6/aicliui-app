@@ -57,7 +57,7 @@ describe('RuntimeStatusCard', () => {
       termux: { runCommandPermission: 'granted', allowExternalApps: 'enabled' },
       agents: [
         { backend: 'codex', state: 'ready', version: '0.2.0' },
-        { backend: 'opencode', state: 'missing' },
+        { backend: 'opencode', state: 'missing', detail: 'opencode command not found' },
       ],
     });
 
@@ -72,7 +72,7 @@ describe('RuntimeStatusCard', () => {
     expect(screen.getByText('Codex CLI')).toBeTruthy();
     expect(screen.getByText('Ready · 0.2.0')).toBeTruthy();
     expect(screen.getByText('OpenCode')).toBeTruthy();
-    expect(screen.getByText('Missing')).toBeTruthy();
+    expect(screen.getByText('Missing · opencode command not found')).toBeTruthy();
   });
 
   it('shows an error state and retries through the refresh action', async () => {
