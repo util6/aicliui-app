@@ -381,6 +381,51 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode synthetic text events as assistant content', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_synthetic' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.synthetic',
+              data: {
+                sessionID: 'ses_synthetic',
+                messageID: 'msg_synthetic',
+                text: 'Synthetic assistant note.',
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_synthetic/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_synthetic/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_synthetic/context')) {
+          return jsonResponse({
+            data: [],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_synthetic' },
+      { type: 'content', content: 'Synthetic assistant note.' },
+    ]);
+  });
+
   it('streams OpenCode v2 tool lifecycle events while prompting', async () => {
     const client = createOpenCodeClient({
       baseUrl: 'http://127.0.0.1:4096',

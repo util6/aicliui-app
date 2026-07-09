@@ -1352,6 +1352,9 @@ function extractOpenCodeEventTextDelta(event, sessionId, textByPartId) {
     textByPartId.set(textId, data.text);
     return data.text.startsWith(previous) ? data.text.slice(previous.length) : data.text;
   }
+  if (type === 'session.next.synthetic' && data.sessionID === sessionId && typeof data.text === 'string') {
+    return data.text;
+  }
   if (type !== 'message.part.updated') return '';
   const part = isRecord(data.part) ? data.part : {};
   const partSessionId = typeof data.sessionID === 'string' ? data.sessionID : part.sessionID;
