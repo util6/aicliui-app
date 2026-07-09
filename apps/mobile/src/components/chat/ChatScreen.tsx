@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -361,6 +362,35 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
       .then(() => refreshWorkspaceChangeSummary(workspace))
       .catch(() => null);
   }, [activeConversation?.extra.workspace, refreshWorkspaceChangeSummary]);
+  const handleDiscardWorkspaceFile = useCallback(
+    (change: WorkspaceFileChange) => {
+      const workspace = activeConversation?.extra.workspace;
+      if (!workspace) return;
+
+      Alert.alert(
+        'Discard changes?',
+        `This will permanently discard local changes in ${change.relativePath}.`,
+        [
+          { text: t('common.cancel', { defaultValue: 'Cancel' }), style: 'cancel' },
+          {
+            text: 'Discard',
+            style: 'destructive',
+            onPress: () => {
+              bridge
+                .request('fileSnapshot.discardFile', {
+                  workspace,
+                  relativePath: change.relativePath,
+                  operation: change.operation,
+                })
+                .then(() => refreshWorkspaceChangeSummary(workspace))
+                .catch(() => null);
+            },
+          },
+        ],
+      );
+    },
+    [activeConversation?.extra.workspace, refreshWorkspaceChangeSummary, t],
+  );
 
   return (
     <KeyboardAvoidingView
@@ -387,6 +417,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
               onOpenDiff={handleOpenWorkspaceDiff}
               onStageFile={handleStageWorkspaceFile}
               onUnstageFile={handleUnstageWorkspaceFile}
+              onDiscardFile={handleDiscardWorkspaceFile}
               onStageAll={handleStageAllWorkspaceFiles}
               onUnstageAll={handleUnstageAllWorkspaceFiles}
             />

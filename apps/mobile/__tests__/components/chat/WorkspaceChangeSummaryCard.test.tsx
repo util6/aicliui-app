@@ -235,4 +235,46 @@ describe('WorkspaceChangeSummaryCard', () => {
     expect(onStageAll).toHaveBeenCalledTimes(1);
     expect(onUnstageAll).toHaveBeenCalledTimes(1);
   });
+
+  it('requests discarding an unstaged changed file only', () => {
+    const onDiscardFile = jest.fn();
+    const screen = render(
+      <WorkspaceChangeSummaryCard
+        onDiscardFile={onDiscardFile}
+        summary={{
+          mode: 'git-repo',
+          branch: null,
+          staged: [
+            {
+              file_path: '/tmp/project/README.md',
+              relativePath: 'README.md',
+              operation: 'modify',
+              additions: 2,
+              deletions: 1,
+            },
+          ],
+          unstaged: [
+            {
+              file_path: '/tmp/project/src/App.tsx',
+              relativePath: 'src/App.tsx',
+              operation: 'modify',
+              additions: 3,
+              deletions: 1,
+            },
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.press(screen.getByTestId('discard-file-src/App.tsx'));
+
+    expect(screen.queryByTestId('discard-file-README.md')).toBeNull();
+    expect(onDiscardFile).toHaveBeenCalledWith({
+      file_path: '/tmp/project/src/App.tsx',
+      relativePath: 'src/App.tsx',
+      operation: 'modify',
+      additions: 3,
+      deletions: 1,
+    });
+  });
 });

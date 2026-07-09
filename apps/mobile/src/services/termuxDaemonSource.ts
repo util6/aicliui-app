@@ -1,4 +1,4 @@
-export const TERMUX_DAEMON_SOURCE = String.raw`import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+export const TERMUX_DAEMON_SOURCE = String.raw`import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -146,6 +146,7 @@ async function route(key, data, emit) {
   if (key === 'fileSnapshot.stageAll') return await stageWorkspace(params);
   if (key === 'fileSnapshot.unstageFile') return await unstageWorkspaceFile(params);
   if (key === 'fileSnapshot.unstageAll') return await unstageWorkspace(params);
+  if (key === 'fileSnapshot.discardFile') return await discardWorkspaceFile(params);
   if (key === 'get-file-by-dir') return await getFileTreeByDir(params);
   if (key === 'read-file') return await readTextFile(requiredString(params.path));
   if (key === 'get-image-base64') return await readImageBase64(requiredString(params.path));
@@ -433,6 +434,19 @@ async function unstageWorkspace(params) {
   const workspace = resolveLocalPath(requiredString(params.workspace));
   if (!(await isGitWorkspace(workspace))) return;
   await runProcess('git', ['restore', '--staged', '--', '.'], { cwd: workspace });
+}
+
+async function discardWorkspaceFile(params) {
+  const { workspace, relativePath } = workspaceChangePathParams(params);
+  const operation = params.operation === 'create' ? 'create' : params.operation === 'delete' ? 'delete' : 'modify';
+  if (!(await isGitWorkspace(workspace))) return;
+
+  if (operation === 'create') {
+    await rm(ensurePathInsideRoot(resolve(join(workspace, relativePath)), workspace), { recursive: true, force: true });
+    return;
+  }
+
+  await runProcess('git', ['restore', '--', relativePath], { cwd: workspace });
 }
 
 async function isGitWorkspace(workspace) {

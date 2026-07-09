@@ -90,7 +90,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain("import { WebSocketServer } from 'ws';");
     expect(script).toContain("import { spawn } from 'node:child_process';");
     expect(script).toContain("import { pathToFileURL } from 'node:url';");
-    expect(script).toContain("import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';");
+    expect(script).toContain("import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';");
     expect(script).toContain("const storePath = process.env.AICLIUI_STORE_PATH || dataRoot + '/daemon/store.json';");
     expect(script).toContain("const bootstrapStatusPath = process.env.AICLIUI_BOOTSTRAP_STATUS || dataRoot + '/daemon/bootstrap.status';");
     expect(script).toContain('const storeReady = loadStore();');
@@ -164,6 +164,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain("if (key === 'fileSnapshot.stageAll') return await stageWorkspace(params);");
     expect(script).toContain("if (key === 'fileSnapshot.unstageFile') return await unstageWorkspaceFile(params);");
     expect(script).toContain("if (key === 'fileSnapshot.unstageAll') return await unstageWorkspace(params);");
+    expect(script).toContain("if (key === 'fileSnapshot.discardFile') return await discardWorkspaceFile(params);");
     expect(script).toContain("if (key === 'get-file-by-dir') return await getFileTreeByDir(params);");
     expect(script).toContain("if (key === 'read-file') return await readTextFile(requiredString(params.path));");
     expect(script).toContain("if (key === 'get-image-base64') return await readImageBase64(requiredString(params.path));");

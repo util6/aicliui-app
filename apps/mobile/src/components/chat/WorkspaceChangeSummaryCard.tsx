@@ -25,6 +25,7 @@ type WorkspaceChangeSummaryCardProps = {
   onOpenDiff?: (change: WorkspaceFileChange, source: 'staged' | 'unstaged') => void;
   onStageFile?: (change: WorkspaceFileChange) => void;
   onUnstageFile?: (change: WorkspaceFileChange) => void;
+  onDiscardFile?: (change: WorkspaceFileChange) => void;
   onStageAll?: () => void;
   onUnstageAll?: () => void;
 };
@@ -35,6 +36,7 @@ export function WorkspaceChangeSummaryCard({
   onOpenDiff,
   onStageFile,
   onUnstageFile,
+  onDiscardFile,
   onStageAll,
   onUnstageAll,
 }: WorkspaceChangeSummaryCardProps) {
@@ -130,6 +132,7 @@ export function WorkspaceChangeSummaryCard({
                 onOpenFile={onOpenFile}
                 onOpenDiff={onOpenDiff}
                 onStageFile={onStageFile}
+                onDiscardFile={onDiscardFile}
               />
             ))}
           </View>
@@ -177,6 +180,7 @@ function ChangeRow({
   onOpenDiff,
   onStageFile,
   onUnstageFile,
+  onDiscardFile,
 }: {
   change: WorkspaceFileChange;
   label: string;
@@ -185,6 +189,7 @@ function ChangeRow({
   onOpenDiff?: (change: WorkspaceFileChange, source: 'staged' | 'unstaged') => void;
   onStageFile?: (change: WorkspaceFileChange) => void;
   onUnstageFile?: (change: WorkspaceFileChange) => void;
+  onDiscardFile?: (change: WorkspaceFileChange) => void;
 }) {
   const success = useThemeColor({}, 'success');
   const warning = useThemeColor({}, 'warning');
@@ -244,6 +249,20 @@ function ChangeRow({
             <Ionicons name='add-circle-outline' size={14} color={textSecondary} />
             <ThemedText type='caption' style={[styles.diffText, { color: textSecondary }]}>
               Stage
+            </ThemedText>
+          </TouchableOpacity>
+        ) : null}
+        {source === 'unstaged' && onDiscardFile ? (
+          <TouchableOpacity
+            accessibilityRole='button'
+            testID={`discard-file-${change.relativePath}`}
+            style={styles.diffButton}
+            onPress={() => onDiscardFile(change)}
+            activeOpacity={0.72}
+          >
+            <Ionicons name='trash-outline' size={14} color={textSecondary} />
+            <ThemedText type='caption' style={[styles.diffText, { color: textSecondary }]}>
+              Discard
             </ThemedText>
           </TouchableOpacity>
         ) : null}

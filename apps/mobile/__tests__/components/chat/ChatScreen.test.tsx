@@ -1,4 +1,5 @@
 import React from 'react';
+import { Alert } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { ChatScreen } from '@/src/components/chat/ChatScreen';
 import { useChat } from '@/src/context/ChatContext';
@@ -185,6 +186,7 @@ jest.mock('@/src/components/chat/WorkspaceChangeSummaryCard', () => ({
     onUnstageFile,
     onStageAll,
     onUnstageAll,
+    onDiscardFile,
   }: {
     summary: {
       staged: Array<{ file_path: string; relativePath: string }>;
@@ -196,6 +198,7 @@ jest.mock('@/src/components/chat/WorkspaceChangeSummaryCard', () => ({
     onUnstageFile?: (change: { file_path: string; relativePath: string }) => void;
     onStageAll?: () => void;
     onUnstageAll?: () => void;
+    onDiscardFile?: (change: { file_path: string; relativePath: string; operation?: string }) => void;
   }) => {
     const { Text } = require('react-native');
     const [firstChange] = [...summary.staged, ...summary.unstaged];
@@ -228,6 +231,11 @@ jest.mock('@/src/components/chat/WorkspaceChangeSummaryCard', () => ({
         {summary.unstaged.length > 0 ? (
           <Text testID='stage-all-workspace-files' onPress={() => onStageAll?.()}>
             stage-all
+          </Text>
+        ) : null}
+        {firstUnstaged ? (
+          <Text testID='discard-workspace-file' onPress={() => onDiscardFile?.(firstUnstaged)}>
+            discard
           </Text>
         ) : null}
         {summary.staged.length > 0 ? (
@@ -803,5 +811,64 @@ describe('ChatScreen', () => {
       expect(mockBridgeRequest).toHaveBeenCalledWith('fileSnapshot.unstageAll', { workspace: '/tmp/project' });
       expect(compareCount).toBeGreaterThan(1);
     });
+  });
+
+  it('confirms before discarding an unstaged workspace file from the chat summary', async () => {
+    mockUseChat.mockReturnValue({
+      ...mockUseChat.mock.results.at(-1)?.value,
+      isStreaming: false,
+    });
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+      buttons?.find((button) => button.style === 'destructive')?.onPress?.();
+    });
+    let compareCount = 0;
+    mockBridgeRequest.mockImplementation((name: string, data?: Record<string, unknown>) => {
+      if (name === 'conversation.ensure-runtime') {
+        return Promise.resolve({ recovered: false, runtime: null, config_options: [] });
+      }
+      if (name === 'fileSnapshot.compare') {
+        compareCount += 1;
+        return Promise.resolve({
+          mode: 'git-repo',
+          branch: 'main',
+          staged: [],
+          unstaged:
+            compareCount > 1
+              ? []
+              : [
+                  {
+                    file_path: '/tmp/project/src/App.tsx',
+                    relativePath: 'src/App.tsx',
+                    operation: 'modify',
+                    additions: 2,
+                    deletions: 1,
+                  },
+                ],
+        });
+      }
+      if (name === 'fileSnapshot.discardFile') {
+        expect(data).toEqual({ workspace: '/tmp/project', relativePath: 'src/App.tsx', operation: 'modify' });
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(null);
+    });
+
+    const screen = render(<ChatScreen conversationId='conv-1' />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('discard-workspace-file')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('discard-workspace-file'));
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalled();
+      expect(mockBridgeRequest).toHaveBeenCalledWith('fileSnapshot.discardFile', {
+        workspace: '/tmp/project',
+        relativePath: 'src/App.tsx',
+        operation: 'modify',
+      });
+      expect(compareCount).toBeGreaterThan(1);
+    });
+    alertSpy.mockRestore();
   });
 });

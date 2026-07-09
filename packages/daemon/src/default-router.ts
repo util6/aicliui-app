@@ -21,6 +21,7 @@ import { BridgeRouter } from './bridge-router.js';
 import { InMemoryConversationStore, type CreateConversationInput, type StoredMessage } from './conversation-store.js';
 import {
   compareWorkspaceChanges,
+  discardWorkspaceFile,
   getFileTreeByDir,
   getWorkspaceTree,
   readImageBase64,
@@ -463,6 +464,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
   router.register('fileSnapshot.stageAll', async (data) => await stageWorkspace(asRecord(data)));
   router.register('fileSnapshot.unstageFile', async (data) => await unstageWorkspaceFile(asRecord(data)));
   router.register('fileSnapshot.unstageAll', async (data) => await unstageWorkspace(asRecord(data)));
+  router.register('fileSnapshot.discardFile', async (data) => await discardWorkspaceFile(asRecord(data)));
   router.register('get-file-by-dir', async (data) => await getFileTreeByDir(asRecord(data)));
   router.register('read-file', async (data) => await readTextFile(stringParam(asRecord(data).path)));
   router.register('get-image-base64', async (data) => await readImageBase64(stringParam(asRecord(data).path)));

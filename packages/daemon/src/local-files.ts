@@ -1,6 +1,6 @@
 import type { Dirent } from 'node:fs';
 import { execFile } from 'node:child_process';
-import { lstat, readFile, readdir } from 'node:fs/promises';
+import { lstat, readFile, readdir, rm } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -146,6 +146,19 @@ export async function unstageWorkspace(params: Record<string, unknown>): Promise
   const workspace = resolveLocalPath(requiredString(params.workspace));
   if (!(await isGitWorkspace(workspace))) return;
   await runGit(workspace, ['restore', '--staged', '--', '.']);
+}
+
+export async function discardWorkspaceFile(params: Record<string, unknown>): Promise<void> {
+  const { workspace, relativePath } = workspaceChangePathParams(params);
+  const operation = params.operation === 'create' ? 'create' : params.operation === 'delete' ? 'delete' : 'modify';
+  if (!(await isGitWorkspace(workspace))) return;
+
+  if (operation === 'create') {
+    await rm(ensurePathInsideRoot(resolve(join(workspace, relativePath)), workspace), { recursive: true, force: true });
+    return;
+  }
+
+  await runGit(workspace, ['restore', '--', relativePath]);
 }
 
 async function readDirectoryNode(

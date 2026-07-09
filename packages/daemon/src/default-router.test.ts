@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -720,6 +720,27 @@ describe('default bridge routes', () => {
           expect.objectContaining({ relativePath: 'src/app.ts' }),
           expect.objectContaining({ relativePath: 'draft.md' }),
         ]),
+      });
+
+      await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.discardFile',
+        data: { id: 'm_discard_modify', data: { workspace, relativePath: 'src/app.ts', operation: 'modify' } },
+      });
+      expect(await readFile(join(workspace, 'src', 'app.ts'), 'utf8')).toBe('export const value = 1;\n');
+
+      await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.discardFile',
+        data: { id: 'm_discard_create', data: { workspace, relativePath: 'draft.md', operation: 'create' } },
+      });
+      await expect(access(join(workspace, 'draft.md'))).rejects.toThrow();
+
+      const [afterDiscard] = await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.compare',
+        data: { id: 'm_after_discard', data: { workspace } },
+      });
+      expect(afterDiscard.data).toMatchObject({
+        staged: [],
+        unstaged: [expect.objectContaining({ relativePath: 'README.md' })],
       });
     } finally {
       await rm(workspace, { recursive: true, force: true });
