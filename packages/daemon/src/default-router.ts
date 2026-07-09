@@ -19,7 +19,13 @@ import { createDefaultAgentAdapterRegistry } from './agent-adapters/default-regi
 import type { AgentAdapterRegistry } from './agent-adapters/registry.js';
 import { BridgeRouter } from './bridge-router.js';
 import { InMemoryConversationStore, type CreateConversationInput, type StoredMessage } from './conversation-store.js';
-import { getFileTreeByDir, getWorkspaceTree, readImageBase64, readTextFile } from './local-files.js';
+import {
+  compareWorkspaceChanges,
+  getFileTreeByDir,
+  getWorkspaceTree,
+  readImageBase64,
+  readTextFile,
+} from './local-files.js';
 import type { CliConfirmation } from './agent-adapters/types.js';
 
 const startedAt = Date.now();
@@ -446,6 +452,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     return result ?? { success: true };
   });
   router.register('conversation.get-workspace', async (data) => await getWorkspaceTree(asRecord(data)));
+  router.register('fileSnapshot.compare', async (data) => await compareWorkspaceChanges(asRecord(data)));
   router.register('get-file-by-dir', async (data) => await getFileTreeByDir(asRecord(data)));
   router.register('read-file', async (data) => await readTextFile(stringParam(asRecord(data).path)));
   router.register('get-image-base64', async (data) => await readImageBase64(stringParam(asRecord(data).path)));

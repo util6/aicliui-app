@@ -1,12 +1,20 @@
 import type { Dirent } from 'node:fs';
+import { execFile } from 'node:child_process';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
+import { promisify } from 'node:util';
+import type {
+  WorkspaceFileChange,
+  WorkspaceFileChangeOperation,
+  WorkspaceFileChangeSummary,
+} from '@aicliui/shared';
 
 const IGNORED_ENTRY_NAMES = new Set(['.git', 'node_modules', '.expo', '.next', 'dist', 'build']);
 const MAX_WORKSPACE_TREE_DEPTH = 4;
 const MAX_WORKSPACE_TREE_ENTRIES = 1000;
 const MAX_TEXT_FILE_BYTES = 1024 * 1024 * 2;
 const MAX_IMAGE_FILE_BYTES = 1024 * 1024 * 10;
+const execFileAsync = promisify(execFile);
 
 export type DirOrFileNode = {
   name: string;
@@ -52,6 +60,45 @@ export async function readImageBase64(path: string): Promise<string> {
   }
   const buffer = await readFile(filePath);
   return `data:${imageMimeType(filePath)};base64,${buffer.toString('base64')}`;
+}
+
+export async function compareWorkspaceChanges(params: Record<string, unknown>): Promise<WorkspaceFileChangeSummary> {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  const root = ensurePathInsideRoot(workspace, workspace);
+  if (!(await isGitWorkspace(root))) {
+    return { mode: 'snapshot', branch: null, staged: [], unstaged: [] };
+  }
+
+  const branch = await readGitBranch(root);
+  const status = await readGitStatus(root);
+  const stagedStats = await readGitNumstat(root, ['diff', '--cached', '--numstat']);
+  const unstagedStats = await readGitNumstat(root, ['diff', '--numstat']);
+  const staged = new Map<string, WorkspaceFileChange>();
+  const unstaged = new Map<string, WorkspaceFileChange>();
+
+  for (const item of status) {
+    if (item.indexStatus && item.indexStatus !== '?') {
+      staged.set(
+        item.path,
+        buildWorkspaceFileChange(root, item.path, operationFromGitStatus(item.indexStatus), stagedStats.get(item.path)),
+      );
+    }
+    if (item.worktreeStatus) {
+      const stats =
+        item.worktreeStatus === '?' ? await readUntrackedStats(root, item.path) : unstagedStats.get(item.path);
+      unstaged.set(
+        item.path,
+        buildWorkspaceFileChange(root, item.path, operationFromGitStatus(item.worktreeStatus), stats),
+      );
+    }
+  }
+
+  return {
+    mode: 'git-repo',
+    branch,
+    staged: [...staged.values()].sort(compareFileChanges),
+    unstaged: [...unstaged.values()].sort(compareFileChanges),
+  };
 }
 
 async function readDirectoryNode(
@@ -142,6 +189,139 @@ function imageMimeType(path: string): string {
   if (ext === 'bmp') return 'image/bmp';
   if (ext === 'avif') return 'image/avif';
   return 'image/png';
+}
+
+type GitStatusItem = {
+  indexStatus: string;
+  worktreeStatus: string;
+  path: string;
+};
+
+type ChangeStats = {
+  additions: number;
+  deletions: number;
+};
+
+async function isGitWorkspace(workspace: string): Promise<boolean> {
+  try {
+    const { stdout } = await runGit(workspace, ['rev-parse', '--is-inside-work-tree']);
+    return stdout.trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
+async function readGitBranch(workspace: string): Promise<string | null> {
+  try {
+    const { stdout } = await runGit(workspace, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const branch = stdout.trim();
+    return branch && branch !== 'HEAD' ? branch : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readGitStatus(workspace: string): Promise<GitStatusItem[]> {
+  const { stdout } = await runGit(workspace, ['status', '--porcelain=v1']);
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => parseGitStatusLine(line))
+    .filter((item): item is GitStatusItem => Boolean(item));
+}
+
+function parseGitStatusLine(line: string): GitStatusItem | null {
+  if (line.length < 4) return null;
+  const indexStatus = line[0] === ' ' ? '' : line[0];
+  const worktreeStatus = line[1] === ' ' ? '' : line[1];
+  const rawPath = line.slice(3);
+  const path = normalizeGitStatusPath(rawPath);
+  if (!path) return null;
+  if (indexStatus === '?' && worktreeStatus === '?') {
+    return { indexStatus: '', worktreeStatus: '?', path };
+  }
+  return { indexStatus, worktreeStatus, path };
+}
+
+function normalizeGitStatusPath(path: string): string {
+  const renamedPath = path.includes(' -> ') ? path.split(' -> ').pop() ?? path : path;
+  return normalizeRelativePath(renamedPath.replace(/^"|"$/g, ''));
+}
+
+async function readGitNumstat(workspace: string, args: string[]): Promise<Map<string, ChangeStats>> {
+  const { stdout } = await runGit(workspace, args);
+  const result = new Map<string, ChangeStats>();
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const [additions, deletions, ...pathParts] = line.split('\t');
+    const path = normalizeRelativePath(pathParts.join('\t'));
+    if (!path) continue;
+    result.set(path, {
+      additions: parseGitStatNumber(additions),
+      deletions: parseGitStatNumber(deletions),
+    });
+  }
+  return result;
+}
+
+function parseGitStatNumber(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+async function readUntrackedStats(workspace: string, relativePath: string): Promise<ChangeStats> {
+  const filePath = ensurePathInsideRoot(resolve(join(workspace, relativePath)), workspace);
+  try {
+    const stats = await lstat(filePath);
+    if (!stats.isFile() || stats.size > MAX_TEXT_FILE_BYTES) return { additions: 0, deletions: 0 };
+    const content = await readFile(filePath, 'utf8');
+    return { additions: countTextLines(content), deletions: 0 };
+  } catch {
+    return { additions: 0, deletions: 0 };
+  }
+}
+
+function countTextLines(content: string): number {
+  if (!content) return 0;
+  const lines = content.split(/\r\n|\r|\n/);
+  return content.endsWith('\n') || content.endsWith('\r') ? lines.length - 1 : lines.length;
+}
+
+function operationFromGitStatus(status: string): WorkspaceFileChangeOperation {
+  if (status === 'A' || status === '?' || status === 'R' || status === 'C') return 'create';
+  if (status === 'D') return 'delete';
+  return 'modify';
+}
+
+function buildWorkspaceFileChange(
+  workspace: string,
+  relativePath: string,
+  operation: WorkspaceFileChangeOperation,
+  stats: ChangeStats = { additions: 0, deletions: 0 },
+): WorkspaceFileChange {
+  const normalizedPath = normalizeRelativePath(relativePath);
+  return {
+    file_path: ensurePathInsideRoot(resolve(join(workspace, normalizedPath)), workspace),
+    relativePath: normalizedPath,
+    operation,
+    additions: stats.additions,
+    deletions: stats.deletions,
+  };
+}
+
+function compareFileChanges(left: WorkspaceFileChange, right: WorkspaceFileChange): number {
+  return left.relativePath.localeCompare(right.relativePath);
+}
+
+async function runGit(workspace: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  const result = await execFileAsync('git', args, {
+    cwd: workspace,
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024 * 4,
+  });
+  return {
+    stdout: String(result.stdout),
+    stderr: String(result.stderr),
+  };
 }
 
 function requiredString(value: unknown): string {

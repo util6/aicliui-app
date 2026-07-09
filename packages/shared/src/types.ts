@@ -217,6 +217,23 @@ export type SkillSuggestArtifact = ConversationArtifactBase<
 
 export type ConversationArtifact = CronTriggerArtifact | SkillSuggestArtifact;
 
+export type WorkspaceFileChangeOperation = 'create' | 'modify' | 'delete';
+
+export type WorkspaceFileChange = {
+  file_path: string;
+  relativePath: string;
+  operation: WorkspaceFileChangeOperation;
+  additions: number;
+  deletions: number;
+};
+
+export type WorkspaceFileChangeSummary = {
+  mode: 'git-repo' | 'snapshot';
+  branch: string | null;
+  staged: WorkspaceFileChange[];
+  unstaged: WorkspaceFileChange[];
+};
+
 export type IResponseMessage = {
   type: string;
   data: unknown;

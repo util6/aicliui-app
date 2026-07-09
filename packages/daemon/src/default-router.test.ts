@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { promisify } from 'node:util';
 import { createDefaultRouter } from './default-router.js';
 import { InMemoryConversationStore } from './conversation-store.js';
 import { createFallbackAgentAdapterRegistry } from './agent-adapters/default-registry.js';
 import { createAgentAdapterRegistry } from './agent-adapters/registry.js';
 import type { CliAgentAdapter } from './agent-adapters/types.js';
 import type { ConversationArtifact } from '@aicliui/shared';
+
+const execFileAsync = promisify(execFile);
 
 describe('default bridge routes', () => {
   it('creates conversations and lists them in AionUi mobile shape', async () => {
@@ -584,6 +588,61 @@ describe('default bridge routes', () => {
       ]);
       expect(text.data).toBe('# hello');
       expect(image.data).toBe('data:image/png;base64,iVBORw==');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('compares local git workspace changes in the AionUi fileSnapshot shape', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'aicliui-workspace-diff-'));
+    try {
+      await execFileAsync('git', ['init'], { cwd: workspace });
+      await execFileAsync('git', ['config', 'user.email', 'test@example.com'], { cwd: workspace });
+      await execFileAsync('git', ['config', 'user.name', 'AICLIUI Test'], { cwd: workspace });
+      await mkdir(join(workspace, 'src'));
+      await writeFile(join(workspace, 'README.md'), '# hello\n', 'utf8');
+      await writeFile(join(workspace, 'src', 'app.ts'), 'export const value = 1;\n', 'utf8');
+      await execFileAsync('git', ['add', '.'], { cwd: workspace });
+      await execFileAsync('git', ['commit', '-m', 'initial'], { cwd: workspace });
+
+      await writeFile(join(workspace, 'README.md'), '# hello\n\nstaged\n', 'utf8');
+      await execFileAsync('git', ['add', 'README.md'], { cwd: workspace });
+      await writeFile(join(workspace, 'src', 'app.ts'), 'export const value = 2;\n', 'utf8');
+      await writeFile(join(workspace, 'draft.md'), 'one\ntwo\n', 'utf8');
+
+      const router = createDefaultRouter({ adapters: createFallbackAgentAdapterRegistry() });
+      const [changes] = await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.compare',
+        data: { id: 'm_changes', data: { workspace } },
+      });
+
+      expect(changes.data).toMatchObject({
+        mode: 'git-repo',
+        branch: expect.any(String),
+        staged: [
+          expect.objectContaining({
+            file_path: join(workspace, 'README.md'),
+            relativePath: 'README.md',
+            operation: 'modify',
+            additions: expect.any(Number),
+            deletions: expect.any(Number),
+          }),
+        ],
+        unstaged: expect.arrayContaining([
+          expect.objectContaining({
+            file_path: join(workspace, 'src', 'app.ts'),
+            relativePath: 'src/app.ts',
+            operation: 'modify',
+          }),
+          expect.objectContaining({
+            file_path: join(workspace, 'draft.md'),
+            relativePath: 'draft.md',
+            operation: 'create',
+            additions: 2,
+            deletions: 0,
+          }),
+        ]),
+      });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
