@@ -345,6 +345,22 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     },
     [activeConversation?.extra.workspace, refreshWorkspaceChangeSummary],
   );
+  const handleStageAllWorkspaceFiles = useCallback(() => {
+    const workspace = activeConversation?.extra.workspace;
+    if (!workspace) return;
+    bridge
+      .request('fileSnapshot.stageAll', { workspace })
+      .then(() => refreshWorkspaceChangeSummary(workspace))
+      .catch(() => null);
+  }, [activeConversation?.extra.workspace, refreshWorkspaceChangeSummary]);
+  const handleUnstageAllWorkspaceFiles = useCallback(() => {
+    const workspace = activeConversation?.extra.workspace;
+    if (!workspace) return;
+    bridge
+      .request('fileSnapshot.unstageAll', { workspace })
+      .then(() => refreshWorkspaceChangeSummary(workspace))
+      .catch(() => null);
+  }, [activeConversation?.extra.workspace, refreshWorkspaceChangeSummary]);
 
   return (
     <KeyboardAvoidingView
@@ -371,6 +387,8 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
               onOpenDiff={handleOpenWorkspaceDiff}
               onStageFile={handleStageWorkspaceFile}
               onUnstageFile={handleUnstageWorkspaceFile}
+              onStageAll={handleStageAllWorkspaceFiles}
+              onUnstageAll={handleUnstageAllWorkspaceFiles}
             />
           ) : null
         }

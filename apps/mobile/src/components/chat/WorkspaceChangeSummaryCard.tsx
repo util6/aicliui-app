@@ -25,6 +25,8 @@ type WorkspaceChangeSummaryCardProps = {
   onOpenDiff?: (change: WorkspaceFileChange, source: 'staged' | 'unstaged') => void;
   onStageFile?: (change: WorkspaceFileChange) => void;
   onUnstageFile?: (change: WorkspaceFileChange) => void;
+  onStageAll?: () => void;
+  onUnstageAll?: () => void;
 };
 
 export function WorkspaceChangeSummaryCard({
@@ -33,6 +35,8 @@ export function WorkspaceChangeSummaryCard({
   onOpenDiff,
   onStageFile,
   onUnstageFile,
+  onStageAll,
+  onUnstageAll,
 }: WorkspaceChangeSummaryCardProps) {
   const [expanded, setExpanded] = useState(true);
   const surface = useThemeColor({}, 'surface');
@@ -86,6 +90,26 @@ export function WorkspaceChangeSummaryCard({
         </TouchableOpacity>
         {expanded ? (
           <View style={[styles.fileList, { borderTopColor: border }]}>
+            {onStageAll || onUnstageAll ? (
+              <View style={styles.bulkActions}>
+                {summary.unstaged.length > 0 && onStageAll ? (
+                  <BulkActionButton
+                    label='Stage all'
+                    iconName='add-circle-outline'
+                    testID='stage-all-workspace-files'
+                    onPress={onStageAll}
+                  />
+                ) : null}
+                {summary.staged.length > 0 && onUnstageAll ? (
+                  <BulkActionButton
+                    label='Unstage all'
+                    iconName='remove-circle-outline'
+                    testID='unstage-all-workspace-files'
+                    onPress={onUnstageAll}
+                  />
+                ) : null}
+              </View>
+            ) : null}
             {summary.staged.map((change) => (
               <ChangeRow
                 key={`staged:${change.relativePath}`}
@@ -112,6 +136,36 @@ export function WorkspaceChangeSummaryCard({
         ) : null}
       </View>
     </View>
+  );
+}
+
+function BulkActionButton({
+  label,
+  iconName,
+  testID,
+  onPress,
+}: {
+  label: string;
+  iconName: keyof typeof Ionicons.glyphMap;
+  testID: string;
+  onPress: () => void;
+}) {
+  const textSecondary = useThemeColor({}, 'textSecondary');
+  const border = useThemeColor({}, 'border');
+
+  return (
+    <TouchableOpacity
+      accessibilityRole='button'
+      testID={testID}
+      style={[styles.bulkButton, { borderColor: border }]}
+      onPress={onPress}
+      activeOpacity={0.72}
+    >
+      <Ionicons name={iconName} size={14} color={textSecondary} />
+      <ThemedText type='caption' style={[styles.bulkButtonText, { color: textSecondary }]}>
+        {label}
+      </ThemedText>
+    </TouchableOpacity>
   );
 }
 
@@ -268,6 +322,29 @@ const styles = StyleSheet.create({
   fileList: {
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingVertical: 5,
+  },
+  bulkActions: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 5,
+  },
+  bulkButton: {
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  bulkButtonText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   fileRow: {
     minHeight: 34,

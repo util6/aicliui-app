@@ -196,4 +196,43 @@ describe('WorkspaceChangeSummaryCard', () => {
       deletions: 1,
     });
   });
+
+  it('requests staging and unstaging all visible changes', () => {
+    const onStageAll = jest.fn();
+    const onUnstageAll = jest.fn();
+    const screen = render(
+      <WorkspaceChangeSummaryCard
+        onStageAll={onStageAll}
+        onUnstageAll={onUnstageAll}
+        summary={{
+          mode: 'git-repo',
+          branch: null,
+          staged: [
+            {
+              file_path: '/tmp/project/README.md',
+              relativePath: 'README.md',
+              operation: 'modify',
+              additions: 2,
+              deletions: 1,
+            },
+          ],
+          unstaged: [
+            {
+              file_path: '/tmp/project/src/App.tsx',
+              relativePath: 'src/App.tsx',
+              operation: 'modify',
+              additions: 3,
+              deletions: 1,
+            },
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.press(screen.getByTestId('stage-all-workspace-files'));
+    fireEvent.press(screen.getByTestId('unstage-all-workspace-files'));
+
+    expect(onStageAll).toHaveBeenCalledTimes(1);
+    expect(onUnstageAll).toHaveBeenCalledTimes(1);
+  });
 });
