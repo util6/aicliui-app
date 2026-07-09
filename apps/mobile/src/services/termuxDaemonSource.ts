@@ -1397,12 +1397,17 @@ async function sendOpenCodePrompt({
     await eventStream.ready;
     if (slashCommand) {
       const commandParts = await buildOpenCodeCommandParts(files, workspace);
+      const commandArguments = await appendExistingSelectedFilesToCommandArguments(
+        slashCommand.arguments,
+        files,
+        workspace,
+      );
       await requestOpenCodeJson(baseUrl, openCodeCommandSendPath(sessionId, workspace), {
         method: 'POST',
         signal,
         body: JSON.stringify({
           command: slashCommand.command,
-          arguments: slashCommand.arguments,
+          arguments: commandArguments,
           ...(model ? { model } : {}),
           ...(agentId ? { agent: agentId } : {}),
           ...(commandParts.length ? { parts: commandParts } : {}),
@@ -2663,6 +2668,12 @@ async function appendExistingSelectedFilesToPrompt(input, files, workspace) {
   }
   if (!selectedPaths.length) return input;
   return input + '\n\nSelected files:\n' + selectedPaths.map((filePath) => '- ' + filePath).join('\n');
+}
+
+async function appendExistingSelectedFilesToCommandArguments(input, files, workspace) {
+  const output = await appendExistingSelectedFilesToPrompt(input, files, workspace);
+  if (!input.length && output.startsWith('\n\nSelected files:\n')) return output.slice(2);
+  return output;
 }
 
 async function ensureOpenCodeServer() {

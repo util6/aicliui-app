@@ -302,6 +302,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain('files: attachments');
     expect(script).toContain('appendSelectedFilesToPrompt(input, files, workspace)');
     expect(script).toContain('appendExistingSelectedFilesToPrompt(input, files, workspace)');
+    expect(script).toContain('appendExistingSelectedFilesToCommandArguments');
     expect(script).toContain("'\\n\\nSelected files:\\n'");
     expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/wait'");
     expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/context'");

@@ -85,9 +85,14 @@ export function createOpenCodeAdapter(
         const slashCommand = parseOpenCodeSlashCommand(input.input);
         if (slashCommand && (await isKnownOpenCodeCommand(activeClient, slashCommand.command, input.workspace))) {
           const parts = await buildOpenCodeCommandParts(input.files);
+          const commandArguments = await appendSelectedFilesToCommandArguments(
+            slashCommand.arguments,
+            input.files,
+            input.workspace,
+          );
           const commandInput: OpenCodeCommandInput = {
             command: slashCommand.command,
-            arguments: slashCommand.arguments,
+            arguments: commandArguments,
             sessionId: cachedSessionId,
             directory: input.workspace,
             model: input.model,
@@ -400,6 +405,16 @@ async function appendSelectedFilesToPrompt(input: string, files: string[] = [], 
   }
   if (selectedPaths.length === 0) return input;
   return `${input}\n\nSelected files:\n${selectedPaths.map((filePath) => `- ${filePath}`).join('\n')}`;
+}
+
+async function appendSelectedFilesToCommandArguments(
+  input: string,
+  files: string[] = [],
+  workspace?: string,
+): Promise<string> {
+  const output = await appendSelectedFilesToPrompt(input, files, workspace);
+  if (input.length === 0 && output.startsWith('\n\nSelected files:\n')) return output.slice(2);
+  return output;
 }
 
 async function isKnownOpenCodeCommand(
