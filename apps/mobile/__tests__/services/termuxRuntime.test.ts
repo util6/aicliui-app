@@ -160,6 +160,10 @@ describe('termuxRuntime', () => {
     expect(script).toContain("if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);");
     expect(script).toContain("if (key === 'fileSnapshot.compare') return await compareWorkspaceChanges(params);");
     expect(script).toContain("if (key === 'fileSnapshot.diff') return await readWorkspaceFileDiff(params);");
+    expect(script).toContain("if (key === 'fileSnapshot.stageFile') return await stageWorkspaceFile(params);");
+    expect(script).toContain("if (key === 'fileSnapshot.stageAll') return await stageWorkspace(params);");
+    expect(script).toContain("if (key === 'fileSnapshot.unstageFile') return await unstageWorkspaceFile(params);");
+    expect(script).toContain("if (key === 'fileSnapshot.unstageAll') return await unstageWorkspace(params);");
     expect(script).toContain("if (key === 'get-file-by-dir') return await getFileTreeByDir(params);");
     expect(script).toContain("if (key === 'read-file') return await readTextFile(requiredString(params.path));");
     expect(script).toContain("if (key === 'get-image-base64') return await readImageBase64(requiredString(params.path));");

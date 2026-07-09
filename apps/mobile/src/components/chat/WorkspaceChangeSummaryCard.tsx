@@ -23,9 +23,17 @@ type WorkspaceChangeSummaryCardProps = {
   summary: WorkspaceFileChangeSummary;
   onOpenFile?: (change: WorkspaceFileChange) => void;
   onOpenDiff?: (change: WorkspaceFileChange, source: 'staged' | 'unstaged') => void;
+  onStageFile?: (change: WorkspaceFileChange) => void;
+  onUnstageFile?: (change: WorkspaceFileChange) => void;
 };
 
-export function WorkspaceChangeSummaryCard({ summary, onOpenFile, onOpenDiff }: WorkspaceChangeSummaryCardProps) {
+export function WorkspaceChangeSummaryCard({
+  summary,
+  onOpenFile,
+  onOpenDiff,
+  onStageFile,
+  onUnstageFile,
+}: WorkspaceChangeSummaryCardProps) {
   const [expanded, setExpanded] = useState(true);
   const surface = useThemeColor({}, 'surface');
   const border = useThemeColor({}, 'border');
@@ -86,6 +94,7 @@ export function WorkspaceChangeSummaryCard({ summary, onOpenFile, onOpenDiff }: 
                 source='staged'
                 onOpenFile={onOpenFile}
                 onOpenDiff={onOpenDiff}
+                onUnstageFile={onUnstageFile}
               />
             ))}
             {summary.unstaged.map((change) => (
@@ -96,6 +105,7 @@ export function WorkspaceChangeSummaryCard({ summary, onOpenFile, onOpenDiff }: 
                 source='unstaged'
                 onOpenFile={onOpenFile}
                 onOpenDiff={onOpenDiff}
+                onStageFile={onStageFile}
               />
             ))}
           </View>
@@ -111,12 +121,16 @@ function ChangeRow({
   source,
   onOpenFile,
   onOpenDiff,
+  onStageFile,
+  onUnstageFile,
 }: {
   change: WorkspaceFileChange;
   label: string;
   source: 'staged' | 'unstaged';
   onOpenFile?: (change: WorkspaceFileChange) => void;
   onOpenDiff?: (change: WorkspaceFileChange, source: 'staged' | 'unstaged') => void;
+  onStageFile?: (change: WorkspaceFileChange) => void;
+  onUnstageFile?: (change: WorkspaceFileChange) => void;
 }) {
   const success = useThemeColor({}, 'success');
   const warning = useThemeColor({}, 'warning');
@@ -162,6 +176,34 @@ function ChangeRow({
             <Ionicons name='git-pull-request-outline' size={14} color={textSecondary} />
             <ThemedText type='caption' style={[styles.diffText, { color: textSecondary }]}>
               Diff
+            </ThemedText>
+          </TouchableOpacity>
+        ) : null}
+        {source === 'unstaged' && onStageFile ? (
+          <TouchableOpacity
+            accessibilityRole='button'
+            testID={`stage-file-${change.relativePath}`}
+            style={styles.diffButton}
+            onPress={() => onStageFile(change)}
+            activeOpacity={0.72}
+          >
+            <Ionicons name='add-circle-outline' size={14} color={textSecondary} />
+            <ThemedText type='caption' style={[styles.diffText, { color: textSecondary }]}>
+              Stage
+            </ThemedText>
+          </TouchableOpacity>
+        ) : null}
+        {source === 'staged' && onUnstageFile ? (
+          <TouchableOpacity
+            accessibilityRole='button'
+            testID={`unstage-file-${change.relativePath}`}
+            style={styles.diffButton}
+            onPress={() => onUnstageFile(change)}
+            activeOpacity={0.72}
+          >
+            <Ionicons name='remove-circle-outline' size={14} color={textSecondary} />
+            <ThemedText type='caption' style={[styles.diffText, { color: textSecondary }]}>
+              Unstage
             </ThemedText>
           </TouchableOpacity>
         ) : null}

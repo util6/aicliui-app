@@ -661,6 +661,66 @@ describe('default bridge routes', () => {
         source: 'unstaged',
         diff: expect.stringContaining('+one'),
       });
+
+      await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.stageFile',
+        data: { id: 'm_stage_file', data: { workspace, relativePath: 'src/app.ts' } },
+      });
+      const [afterStageFile] = await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.compare',
+        data: { id: 'm_after_stage_file', data: { workspace } },
+      });
+      expect(afterStageFile.data).toMatchObject({
+        staged: expect.arrayContaining([expect.objectContaining({ relativePath: 'src/app.ts' })]),
+        unstaged: expect.arrayContaining([expect.objectContaining({ relativePath: 'draft.md' })]),
+      });
+
+      await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.unstageFile',
+        data: { id: 'm_unstage_file', data: { workspace, relativePath: 'src/app.ts' } },
+      });
+      const [afterUnstageFile] = await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.compare',
+        data: { id: 'm_after_unstage_file', data: { workspace } },
+      });
+      expect(afterUnstageFile.data).toMatchObject({
+        staged: [expect.objectContaining({ relativePath: 'README.md' })],
+        unstaged: expect.arrayContaining([expect.objectContaining({ relativePath: 'src/app.ts' })]),
+      });
+
+      await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.stageAll',
+        data: { id: 'm_stage_all', data: { workspace } },
+      });
+      const [afterStageAll] = await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.compare',
+        data: { id: 'm_after_stage_all', data: { workspace } },
+      });
+      expect(afterStageAll.data).toMatchObject({
+        staged: expect.arrayContaining([
+          expect.objectContaining({ relativePath: 'README.md' }),
+          expect.objectContaining({ relativePath: 'src/app.ts' }),
+          expect.objectContaining({ relativePath: 'draft.md' }),
+        ]),
+        unstaged: [],
+      });
+
+      await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.unstageAll',
+        data: { id: 'm_unstage_all', data: { workspace } },
+      });
+      const [afterUnstageAll] = await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.compare',
+        data: { id: 'm_after_unstage_all', data: { workspace } },
+      });
+      expect(afterUnstageAll.data).toMatchObject({
+        staged: [],
+        unstaged: expect.arrayContaining([
+          expect.objectContaining({ relativePath: 'README.md' }),
+          expect.objectContaining({ relativePath: 'src/app.ts' }),
+          expect.objectContaining({ relativePath: 'draft.md' }),
+        ]),
+      });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

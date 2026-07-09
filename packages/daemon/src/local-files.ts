@@ -104,12 +104,7 @@ export async function compareWorkspaceChanges(params: Record<string, unknown>): 
 }
 
 export async function readWorkspaceFileDiff(params: Record<string, unknown>): Promise<WorkspaceFileDiff> {
-  const workspace = resolveLocalPath(requiredString(params.workspace));
-  const relativePath = normalizeRelativePath(
-    typeof params.relativePath === 'string'
-      ? params.relativePath
-      : relative(workspace, resolveLocalPath(requiredString(params.file_path))),
-  );
+  const { workspace, relativePath } = workspaceChangePathParams(params);
   const source: WorkspaceFileDiffSource = params.source === 'staged' ? 'staged' : 'unstaged';
   const filePath = ensurePathInsideRoot(resolve(join(workspace, relativePath)), workspace);
 
@@ -127,6 +122,30 @@ export async function readWorkspaceFileDiff(params: Record<string, unknown>): Pr
         : await readGitDiff(workspace, ['diff', '--', relativePath]);
 
   return { relativePath, source, diff };
+}
+
+export async function stageWorkspaceFile(params: Record<string, unknown>): Promise<void> {
+  const { workspace, relativePath } = workspaceChangePathParams(params);
+  if (!(await isGitWorkspace(workspace))) return;
+  await runGit(workspace, ['add', '--', relativePath]);
+}
+
+export async function stageWorkspace(params: Record<string, unknown>): Promise<void> {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  if (!(await isGitWorkspace(workspace))) return;
+  await runGit(workspace, ['add', '--all', '--', '.']);
+}
+
+export async function unstageWorkspaceFile(params: Record<string, unknown>): Promise<void> {
+  const { workspace, relativePath } = workspaceChangePathParams(params);
+  if (!(await isGitWorkspace(workspace))) return;
+  await runGit(workspace, ['restore', '--staged', '--', relativePath]);
+}
+
+export async function unstageWorkspace(params: Record<string, unknown>): Promise<void> {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  if (!(await isGitWorkspace(workspace))) return;
+  await runGit(workspace, ['restore', '--staged', '--', '.']);
 }
 
 async function readDirectoryNode(
@@ -194,6 +213,17 @@ function matchesSearch(node: DirOrFileNode, search: string): boolean {
 
 function normalizeRelativePath(path: string): string {
   return path === '' ? '' : path.split('\\').join('/');
+}
+
+function workspaceChangePathParams(params: Record<string, unknown>): { workspace: string; relativePath: string } {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  const relativePath = normalizeRelativePath(
+    typeof params.relativePath === 'string'
+      ? params.relativePath
+      : relative(workspace, resolveLocalPath(requiredString(params.file_path))),
+  );
+  ensurePathInsideRoot(resolve(join(workspace, relativePath)), workspace);
+  return { workspace, relativePath };
 }
 
 function resolveLocalPath(path: string): string {

@@ -318,6 +318,33 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     setWorkspaceDiffError(null);
     setIsWorkspaceDiffLoading(false);
   }, []);
+  const refreshWorkspaceChangeSummary = useCallback(async (workspace: string) => {
+    const summary = await bridge.request<WorkspaceFileChangeSummary>('fileSnapshot.compare', { workspace }, 10000);
+    const count = (summary?.staged?.length ?? 0) + (summary?.unstaged?.length ?? 0);
+    setWorkspaceChanges(count > 0 ? summary : null);
+  }, []);
+  const handleStageWorkspaceFile = useCallback(
+    (change: WorkspaceFileChange) => {
+      const workspace = activeConversation?.extra.workspace;
+      if (!workspace) return;
+      bridge
+        .request('fileSnapshot.stageFile', { workspace, relativePath: change.relativePath })
+        .then(() => refreshWorkspaceChangeSummary(workspace))
+        .catch(() => null);
+    },
+    [activeConversation?.extra.workspace, refreshWorkspaceChangeSummary],
+  );
+  const handleUnstageWorkspaceFile = useCallback(
+    (change: WorkspaceFileChange) => {
+      const workspace = activeConversation?.extra.workspace;
+      if (!workspace) return;
+      bridge
+        .request('fileSnapshot.unstageFile', { workspace, relativePath: change.relativePath })
+        .then(() => refreshWorkspaceChangeSummary(workspace))
+        .catch(() => null);
+    },
+    [activeConversation?.extra.workspace, refreshWorkspaceChangeSummary],
+  );
 
   return (
     <KeyboardAvoidingView
@@ -342,6 +369,8 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
               summary={workspaceChanges}
               onOpenFile={handleOpenWorkspaceChange}
               onOpenDiff={handleOpenWorkspaceDiff}
+              onStageFile={handleStageWorkspaceFile}
+              onUnstageFile={handleUnstageWorkspaceFile}
             />
           ) : null
         }

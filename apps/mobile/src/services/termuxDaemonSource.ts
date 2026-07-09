@@ -142,6 +142,10 @@ async function route(key, data, emit) {
   if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);
   if (key === 'fileSnapshot.compare') return await compareWorkspaceChanges(params);
   if (key === 'fileSnapshot.diff') return await readWorkspaceFileDiff(params);
+  if (key === 'fileSnapshot.stageFile') return await stageWorkspaceFile(params);
+  if (key === 'fileSnapshot.stageAll') return await stageWorkspace(params);
+  if (key === 'fileSnapshot.unstageFile') return await unstageWorkspaceFile(params);
+  if (key === 'fileSnapshot.unstageAll') return await unstageWorkspace(params);
   if (key === 'get-file-by-dir') return await getFileTreeByDir(params);
   if (key === 'read-file') return await readTextFile(requiredString(params.path));
   if (key === 'get-image-base64') return await readImageBase64(requiredString(params.path));
@@ -387,10 +391,7 @@ async function compareWorkspaceChanges(params) {
 }
 
 async function readWorkspaceFileDiff(params) {
-  const workspace = resolveLocalPath(requiredString(params.workspace));
-  const relativePath = normalizeRelativePath(
-    typeof params.relativePath === 'string' ? params.relativePath : relative(workspace, resolveLocalPath(requiredString(params.file_path))),
-  );
+  const { workspace, relativePath } = workspaceChangePathParams(params);
   const source = params.source === 'staged' ? 'staged' : 'unstaged';
   const filePath = ensurePathInsideRoot(resolve(join(workspace, relativePath)), workspace);
 
@@ -408,6 +409,30 @@ async function readWorkspaceFileDiff(params) {
         : await readGitDiff(workspace, ['diff', '--', relativePath]);
 
   return { relativePath, source, diff };
+}
+
+async function stageWorkspaceFile(params) {
+  const { workspace, relativePath } = workspaceChangePathParams(params);
+  if (!(await isGitWorkspace(workspace))) return;
+  await runProcess('git', ['add', '--', relativePath], { cwd: workspace });
+}
+
+async function stageWorkspace(params) {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  if (!(await isGitWorkspace(workspace))) return;
+  await runProcess('git', ['add', '--all', '--', '.'], { cwd: workspace });
+}
+
+async function unstageWorkspaceFile(params) {
+  const { workspace, relativePath } = workspaceChangePathParams(params);
+  if (!(await isGitWorkspace(workspace))) return;
+  await runProcess('git', ['restore', '--staged', '--', relativePath], { cwd: workspace });
+}
+
+async function unstageWorkspace(params) {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  if (!(await isGitWorkspace(workspace))) return;
+  await runProcess('git', ['restore', '--staged', '--', '.'], { cwd: workspace });
 }
 
 async function isGitWorkspace(workspace) {
@@ -552,6 +577,15 @@ function matchesSearch(node, search) {
 
 function normalizeRelativePath(path) {
   return path === '' ? '' : path.split('\\').join('/');
+}
+
+function workspaceChangePathParams(params) {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  const relativePath = normalizeRelativePath(
+    typeof params.relativePath === 'string' ? params.relativePath : relative(workspace, resolveLocalPath(requiredString(params.file_path))),
+  );
+  ensurePathInsideRoot(resolve(join(workspace, relativePath)), workspace);
+  return { workspace, relativePath };
 }
 
 function resolveLocalPath(path) {

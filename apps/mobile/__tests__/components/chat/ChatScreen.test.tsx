@@ -181,6 +181,8 @@ jest.mock('@/src/components/chat/WorkspaceChangeSummaryCard', () => ({
     summary,
     onOpenFile,
     onOpenDiff,
+    onStageFile,
+    onUnstageFile,
   }: {
     summary: {
       staged: Array<{ file_path: string; relativePath: string }>;
@@ -188,10 +190,14 @@ jest.mock('@/src/components/chat/WorkspaceChangeSummaryCard', () => ({
     };
     onOpenFile?: (change: { file_path: string; relativePath: string }) => void;
     onOpenDiff?: (change: { file_path: string; relativePath: string }, source: 'staged' | 'unstaged') => void;
+    onStageFile?: (change: { file_path: string; relativePath: string }) => void;
+    onUnstageFile?: (change: { file_path: string; relativePath: string }) => void;
   }) => {
     const { Text } = require('react-native');
     const [firstChange] = [...summary.staged, ...summary.unstaged];
     const source = summary.staged.length > 0 ? 'staged' : 'unstaged';
+    const [firstStaged] = summary.staged;
+    const [firstUnstaged] = summary.unstaged;
     return (
       <>
         <Text testID='workspace-change-summary'>changes:{summary.staged.length + summary.unstaged.length}</Text>
@@ -203,6 +209,16 @@ jest.mock('@/src/components/chat/WorkspaceChangeSummaryCard', () => ({
         {firstChange ? (
           <Text testID='open-workspace-diff' onPress={() => onOpenDiff?.(firstChange, source)}>
             open-diff
+          </Text>
+        ) : null}
+        {firstUnstaged ? (
+          <Text testID='stage-workspace-file' onPress={() => onStageFile?.(firstUnstaged)}>
+            stage
+          </Text>
+        ) : null}
+        {firstStaged ? (
+          <Text testID='unstage-workspace-file' onPress={() => onUnstageFile?.(firstStaged)}>
+            unstage
           </Text>
         ) : null}
       </>
@@ -608,6 +624,70 @@ describe('ChatScreen', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/diff --git a\/README.md/)).toBeTruthy();
+    });
+  });
+
+  it('stages and refreshes a changed workspace file from the chat summary', async () => {
+    mockUseChat.mockReturnValue({
+      ...mockUseChat.mock.results.at(-1)?.value,
+      isStreaming: false,
+    });
+    let compareCount = 0;
+    mockBridgeRequest.mockImplementation((name: string, data?: Record<string, unknown>) => {
+      if (name === 'conversation.ensure-runtime') {
+        return Promise.resolve({ recovered: false, runtime: null, config_options: [] });
+      }
+      if (name === 'fileSnapshot.compare') {
+        compareCount += 1;
+        return Promise.resolve({
+          mode: 'git-repo',
+          branch: 'main',
+          staged:
+            compareCount > 1
+              ? [
+                  {
+                    file_path: '/tmp/project/src/App.tsx',
+                    relativePath: 'src/App.tsx',
+                    operation: 'modify',
+                    additions: 2,
+                    deletions: 1,
+                  },
+                ]
+              : [],
+          unstaged:
+            compareCount > 1
+              ? []
+              : [
+                  {
+                    file_path: '/tmp/project/src/App.tsx',
+                    relativePath: 'src/App.tsx',
+                    operation: 'modify',
+                    additions: 2,
+                    deletions: 1,
+                  },
+                ],
+        });
+      }
+      if (name === 'fileSnapshot.stageFile') {
+        expect(data).toEqual({ workspace: '/tmp/project', relativePath: 'src/App.tsx' });
+        return Promise.resolve(undefined);
+      }
+      return Promise.resolve(null);
+    });
+
+    const screen = render(<ChatScreen conversationId='conv-1' />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('stage-workspace-file')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('stage-workspace-file'));
+
+    await waitFor(() => {
+      expect(mockBridgeRequest).toHaveBeenCalledWith('fileSnapshot.stageFile', {
+        workspace: '/tmp/project',
+        relativePath: 'src/App.tsx',
+      });
+      expect(compareCount).toBeGreaterThan(1);
     });
   });
 });
