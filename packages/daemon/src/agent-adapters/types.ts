@@ -75,6 +75,7 @@ export type CliConfirmation = {
   options: Array<{
     label: string;
     value: unknown;
+    description?: string;
     params?: Record<string, string>;
   }>;
   command_type?: string;

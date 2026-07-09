@@ -1962,6 +1962,7 @@ function toOpenCodeQuestionConfirmation(request, conversationId, msgId, baseUrl)
     call_id: callId,
     callId,
     command_type: 'question',
+    questions: openCodeQuestions(request.questions),
     options: [...openCodeQuestionOptions(question), { label: 'Reject', value: 'reject' }],
   };
   pendingQuestions.set(requestId, {
@@ -1981,6 +1982,37 @@ function openCodeQuestionOptions(question) {
     .map((option) => {
       const label = typeof option === 'string' ? option : isRecord(option) ? stringValue(option.label) : undefined;
       return label ? { label, value: label } : null;
+    })
+    .filter(Boolean);
+}
+
+function openCodeQuestions(questions) {
+  if (!Array.isArray(questions)) return [];
+  return questions.filter(isRecord).map((question) => {
+    const header = stringValue(question.header);
+    const prompt = stringValue(question.question) || 'OpenCode question';
+    return {
+      ...(header ? { header } : {}),
+      question: prompt,
+      multiple: question.multiple === true,
+      custom: question.custom !== false,
+      options: openCodeQuestionOptionsWithDescriptions(question),
+    };
+  });
+}
+
+function openCodeQuestionOptionsWithDescriptions(question) {
+  const rawOptions = Array.isArray(question && question.options) ? question.options : [];
+  return rawOptions
+    .map((option) => {
+      const label = typeof option === 'string' ? option : isRecord(option) ? stringValue(option.label) : undefined;
+      if (!label) return null;
+      const description = isRecord(option) ? stringValue(option.description) : undefined;
+      return {
+        label,
+        value: label,
+        ...(description ? { description } : {}),
+      };
     })
     .filter(Boolean);
 }
@@ -2020,14 +2052,14 @@ async function confirmPendingPermission(params, emit) {
     if (params.data === 'reject') {
       await rejectOpenCodeQuestion(questionRecord);
     } else {
-      const answer = normalizeOpenCodeQuestionAnswer(params.data);
-      if (!answer.length) {
+      const answers = normalizeOpenCodeQuestionAnswers(params.data);
+      if (!answers.length) {
         return {
           success: false,
           error: { code: 'INVALID_CONFIRMATION_REPLY', message: 'Unsupported question answer' },
         };
       }
-      await replyOpenCodeQuestion(questionRecord, [answer]);
+      await replyOpenCodeQuestion(questionRecord, answers);
     }
     pendingQuestions.delete(confirmationId);
     const conversation = conversations.get(questionRecord.conversationId);
@@ -2126,9 +2158,23 @@ function normalizeOpenCodePermissionReply(value) {
   return null;
 }
 
-function normalizeOpenCodeQuestionAnswer(value) {
-  if (Array.isArray(value)) return value.filter((item) => typeof item === 'string' && item.length > 0);
-  return typeof value === 'string' && value.length > 0 ? [value] : [];
+function normalizeOpenCodeQuestionAnswers(value) {
+  if (isQuestionAnswerList(value)) {
+    return value.map((answer) => sanitizeQuestionAnswer(answer)).filter((answer) => answer.length > 0);
+  }
+  if (Array.isArray(value)) {
+    const answer = sanitizeQuestionAnswer(value);
+    return answer.length > 0 ? [answer] : [];
+  }
+  return typeof value === 'string' && value.length > 0 ? [[value]] : [];
+}
+
+function isQuestionAnswerList(value) {
+  return Array.isArray(value) && value.every((item) => Array.isArray(item));
+}
+
+function sanitizeQuestionAnswer(value) {
+  return value.filter((item) => typeof item === 'string' && item.length > 0);
 }
 
 function openCodeToolTitle(part, state) {

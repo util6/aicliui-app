@@ -134,7 +134,12 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("type !== 'question.v2.replied' && type !== 'question.replied'");
     expect(TERMUX_DAEMON_SOURCE).toContain('function toOpenCodeQuestionConfirmation(request, conversationId, msgId, baseUrl)');
     expect(TERMUX_DAEMON_SOURCE).toContain("command_type: 'question'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('questions: openCodeQuestions(request.questions)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeQuestionOptionsWithDescriptions(question)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('multiple: question.multiple === true');
+    expect(TERMUX_DAEMON_SOURCE).toContain('custom: question.custom !== false');
     expect(TERMUX_DAEMON_SOURCE).toContain('async function replyOpenCodeQuestion(record, answers)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('function normalizeOpenCodeQuestionAnswers(value)');
     expect(TERMUX_DAEMON_SOURCE).toContain('async function rejectOpenCodeQuestion(record)');
     expect(TERMUX_DAEMON_SOURCE).toContain("'/api/session/' + encodeURIComponent(record.sessionId) + '/question/'");
   });

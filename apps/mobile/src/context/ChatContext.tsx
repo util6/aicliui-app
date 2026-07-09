@@ -103,7 +103,7 @@ type ChatContextType = {
   clearQueuedCommands: () => void;
   resumeQueuedCommands: () => void;
   stopGeneration: () => void;
-  confirmAction: (confirmationId: string, callId: string, confirmKey: string) => Promise<void>;
+  confirmAction: (confirmationId: string, callId: string, confirmKey: unknown) => Promise<void>;
   updateArtifactStatus: (artifactId: string, status: ConversationArtifactStatus) => Promise<void>;
 };
 
@@ -706,7 +706,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   }, [conversationId, setCanSendMessage, setStreamingState]);
 
   const confirmAction = useCallback(
-    (confirmationId: string, callId: string, confirmKey: string) => {
+    (confirmationId: string, callId: string, confirmKey: unknown) => {
       if (!conversationId) {
         return Promise.reject(new Error('No active conversation'));
       }

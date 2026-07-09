@@ -5,7 +5,7 @@ import { useChat } from '@/src/context/ChatContext';
 
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
   }),
 }));
 
@@ -95,6 +95,66 @@ describe('ConfirmationCard', () => {
     });
 
     expect(confirmAction).toHaveBeenCalledWith('permission-message-1', 'tool-call-1', 'once');
+  });
+
+  it('answers OpenCode multi-step questions with selected and custom answers', async () => {
+    const confirmAction = jest.fn().mockResolvedValue(undefined);
+    mockUseChat.mockReturnValue({ confirmAction });
+
+    const screen = render(
+      <ConfirmationCard
+        content={{
+          id: 'que_1',
+          title: 'OpenCode question',
+          action: 'question',
+          description: 'Style\nWhich output style?',
+          callId: 'tool_question',
+          command_type: 'question',
+          questions: [
+            {
+              header: 'Style',
+              question: 'Which output style?',
+              multiple: false,
+              custom: true,
+              options: [
+                { label: 'Brief', value: 'Brief', description: 'Short answer' },
+                { label: 'Detailed', value: 'Detailed', description: 'Long answer' },
+              ],
+            },
+            {
+              header: 'Extras',
+              question: 'Pick extra sections',
+              multiple: true,
+              custom: true,
+              options: [
+                { label: 'Tests', value: 'Tests', description: 'Include test notes' },
+                { label: 'Risks', value: 'Risks', description: 'Include risk notes' },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('1 / 2')).toBeTruthy();
+    expect(screen.getByText('Which output style?')).toBeTruthy();
+    fireEvent.press(screen.getByText('Detailed'));
+    fireEvent.press(screen.getByText('Next'));
+
+    expect(screen.getByText('2 / 2')).toBeTruthy();
+    expect(screen.getByText('Pick extra sections')).toBeTruthy();
+    fireEvent.press(screen.getByText('Tests'));
+    fireEvent.press(screen.getByText('Type own answer'));
+    fireEvent.changeText(screen.getByPlaceholderText('Custom answer'), 'Accessibility');
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('Submit'));
+    });
+
+    expect(confirmAction).toHaveBeenCalledWith('que_1', 'tool_question', [
+      ['Detailed'],
+      ['Tests', 'Accessibility'],
+    ]);
   });
 
   it('disables confirmation options while a response is being sent', async () => {

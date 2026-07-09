@@ -205,8 +205,8 @@ export function createOpenCodeAdapter(
           };
         }
 
-        const answer = normalizeOpenCodeQuestionAnswer(input.data);
-        if (answer.length === 0) {
+        const answers = normalizeOpenCodeQuestionAnswers(input.data);
+        if (answers.length === 0) {
           return {
             success: false,
             error: { code: 'INVALID_CONFIRMATION_REPLY', message: 'Unsupported OpenCode question answer' },
@@ -216,7 +216,7 @@ export function createOpenCodeAdapter(
         const result = await activeClient.replyQuestion({
           sessionId: questionRecord.sessionId,
           requestId: questionRecord.requestId,
-          answers: [answer],
+          answers,
         });
         pendingQuestions.delete(input.confirmationId);
         return result;
@@ -496,6 +496,7 @@ function toOpenCodeQuestionConfirmation(request: OpenCodeQuestionRequest): CliCo
     call_id: callId,
     callId,
     command_type: 'question',
+    questions: openCodeQuestions(request.questions),
     options: [...openCodeQuestionOptions(question), { label: 'Reject', value: 'reject' }],
   };
 }
@@ -508,6 +509,37 @@ function openCodeQuestionOptions(question: Record<string, unknown> | undefined):
       return label ? { label, value: label } : null;
     })
     .filter((option): option is { label: string; value: string } => option !== null);
+}
+
+function openCodeQuestions(questions: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(questions)) return [];
+  return questions.filter(isRecord).map((question) => {
+    const header = stringValue(question.header);
+    const prompt = stringValue(question.question) || 'OpenCode question';
+    return {
+      ...(header ? { header } : {}),
+      question: prompt,
+      multiple: question.multiple === true,
+      custom: question.custom !== false,
+      options: openCodeQuestionOptionsWithDescriptions(question),
+    };
+  });
+}
+
+function openCodeQuestionOptionsWithDescriptions(question: Record<string, unknown>): CliConfirmation['options'] {
+  const rawOptions = Array.isArray(question.options) ? question.options : [];
+  return rawOptions
+    .map((option) => {
+      const label = typeof option === 'string' ? option : isRecord(option) ? stringValue(option.label) : undefined;
+      if (!label) return null;
+      const description = isRecord(option) ? stringValue(option.description) : undefined;
+      return {
+        label,
+        value: label,
+        ...(description ? { description } : {}),
+      };
+    })
+    .filter((option): option is { label: string; value: string; description?: string } => option !== null);
 }
 
 function openCodePermissionDescription(action: string, resources: string[], metadata: unknown): string {
@@ -529,11 +561,23 @@ function normalizeOpenCodePermissionReply(value: unknown): OpenCodePermissionRep
   return null;
 }
 
-function normalizeOpenCodeQuestionAnswer(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+function normalizeOpenCodeQuestionAnswers(value: unknown): string[][] {
+  if (isQuestionAnswerList(value)) {
+    return value.map((answer) => sanitizeQuestionAnswer(answer)).filter((answer) => answer.length > 0);
   }
-  return typeof value === 'string' && value.length > 0 ? [value] : [];
+  if (Array.isArray(value)) {
+    const answer = sanitizeQuestionAnswer(value);
+    return answer.length > 0 ? [answer] : [];
+  }
+  return typeof value === 'string' && value.length > 0 ? [[value]] : [];
+}
+
+function isQuestionAnswerList(value: unknown): value is unknown[][] {
+  return Array.isArray(value) && value.every((item) => Array.isArray(item));
+}
+
+function sanitizeQuestionAnswer(value: unknown[]): string[] {
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

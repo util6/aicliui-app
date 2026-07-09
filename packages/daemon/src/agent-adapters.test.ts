@@ -722,6 +722,16 @@ describe('agent adapters', () => {
                       { label: 'Detailed', description: 'Long answer' },
                     ],
                   },
+                  {
+                    header: 'Extras',
+                    question: 'Pick extra sections',
+                    multiple: true,
+                    custom: true,
+                    options: [
+                      { label: 'Tests', description: 'Include test notes' },
+                      { label: 'Risks', description: 'Include risk notes' },
+                    ],
+                  },
                 ],
                 tool: { callID: 'tool_question', messageID: 'msg_question' },
               },
@@ -757,6 +767,28 @@ describe('agent adapters', () => {
           call_id: 'tool_question',
           callId: 'tool_question',
           command_type: 'question',
+          questions: [
+            {
+              header: 'Style',
+              question: 'Which output style?',
+              multiple: false,
+              custom: true,
+              options: [
+                { label: 'Brief', value: 'Brief', description: 'Short answer' },
+                { label: 'Detailed', value: 'Detailed', description: 'Long answer' },
+              ],
+            },
+            {
+              header: 'Extras',
+              question: 'Pick extra sections',
+              multiple: true,
+              custom: true,
+              options: [
+                { label: 'Tests', value: 'Tests', description: 'Include test notes' },
+                { label: 'Risks', value: 'Risks', description: 'Include risk notes' },
+              ],
+            },
+          ],
           options: [
             { label: 'Brief', value: 'Brief' },
             { label: 'Detailed', value: 'Detailed' },
@@ -772,10 +804,12 @@ describe('agent adapters', () => {
         conversationId: 'conv-1',
         confirmationId: 'que_1',
         callId: 'tool_question',
-        data: 'Detailed',
+        data: [['Detailed'], ['Tests', 'Accessibility']],
       }),
     ).resolves.toEqual({ success: true });
-    expect(questionReplies).toEqual([{ sessionId: 'ses_question', requestId: 'que_1', answers: [['Detailed']] }]);
+    expect(questionReplies).toEqual([
+      { sessionId: 'ses_question', requestId: 'que_1', answers: [['Detailed'], ['Tests', 'Accessibility']] },
+    ]);
 
     const rejectAdapter = createOpenCodeAdapter(
       {
