@@ -82,6 +82,10 @@ describe('Termux daemon OpenCode slash commands', () => {
 
   it('returns an AionUi-style runtime acknowledgement when stopping local turns', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("const runtime = idleRuntimeSummary('finished', pendingConfirmationCount(conversationId));");
+    expect(TERMUX_DAEMON_SOURCE).toContain('run.openCode = { baseUrl, sessionId };');
+    expect(TERMUX_DAEMON_SOURCE).toContain('await abortOpenCodeRun(run);');
+    expect(TERMUX_DAEMON_SOURCE).toContain("'/session/' + encodeURIComponent(run.openCode.sessionId) + '/abort'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('async function abortOpenCodeRun(run)');
     expect(TERMUX_DAEMON_SOURCE).toContain('return { success: true, stopped: true, runtime };');
   });
 

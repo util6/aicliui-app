@@ -136,7 +136,7 @@ async function route(key, data, emit) {
   if (key === 'remove-conversation') return await removeConversation(requiredString(params.id), emit);
   if (key === 'update-conversation') return await updateConversation(requiredString(params.id), isRecord(params.updates) ? params.updates : {}, emit);
   if (key === 'chat.send.message') return await sendMessage(params, emit);
-  if (key === 'chat.stop.stream') return stopStream(params);
+  if (key === 'chat.stop.stream') return await stopStream(params);
   if (key === 'confirmation.list') return listConfirmations(requiredString(params.conversation_id));
   if (key === 'confirmation.confirm') return await confirmPendingPermission(params, emit);
   if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);
@@ -798,7 +798,7 @@ async function sendMessage(params, emit) {
   const input = requiredString(params.input);
   const conversation = conversations.get(conversationId);
   if (!conversation) throw new Error("Conversation '" + conversationId + "' was not found");
-  stopActiveRun(conversationId);
+  await stopActiveRun(conversationId);
   const userMsgId = typeof params.msg_id === 'string' ? params.msg_id : randomId();
   const assistantMsgId = 'assistant_' + userMsgId;
   const run = createActiveRun(conversationId, assistantMsgId);
@@ -957,6 +957,9 @@ async function sendMessage(params, emit) {
         onPermissionResolved: emitAssistantPermissionResolved,
         onQuestion: emitAssistantQuestion,
         onQuestionResolved: emitAssistantQuestionResolved,
+        onSession: (baseUrl, sessionId) => {
+          run.openCode = { baseUrl, sessionId };
+        },
       });
       emit('chat.response.stream', {
         type: 'thought',
@@ -1062,18 +1065,19 @@ function createActiveRun(conversationId, turnId) {
   };
 }
 
-function stopActiveRun(conversationId) {
+async function stopActiveRun(conversationId) {
   const run = activeRuns.get(conversationId);
   if (!run) return false;
   run.cancel();
   activeRuns.delete(conversationId);
+  await abortOpenCodeRun(run);
   return true;
 }
 
-function stopStream(params) {
+async function stopStream(params) {
   const conversationId = requiredString(params.conversation_id);
   const runtime = idleRuntimeSummary('finished', pendingConfirmationCount(conversationId));
-  if (!stopActiveRun(conversationId)) {
+  if (!(await stopActiveRun(conversationId))) {
     const conversation = conversations.get(conversationId);
     return { success: true, stopped: false, runtime: conversation ? conversation.runtime || runtime : runtime };
   }
@@ -1085,6 +1089,17 @@ function stopStream(params) {
     void saveStore();
   }
   return { success: true, stopped: true, runtime };
+}
+
+async function abortOpenCodeRun(run) {
+  if (!run || !run.openCode) return;
+  try {
+    await requestOpenCodeJson(run.openCode.baseUrl, '/session/' + encodeURIComponent(run.openCode.sessionId) + '/abort', {
+      method: 'POST',
+    });
+  } catch {
+    // Local cancellation should still complete if the OpenCode process is already idle or gone.
+  }
 }
 
 async function sendOpenCodePrompt({
@@ -1105,12 +1120,14 @@ async function sendOpenCodePrompt({
   onPermissionResolved,
   onQuestion,
   onQuestionResolved,
+  onSession,
 }) {
   const baseUrl = await ensureOpenCodeServer();
   const attachments = await buildOpenCodeFileAttachments(files, workspace);
   const modelRef = parseOpenCodeModelRef(model);
   const agentId = parseOpenCodeAgent(agent);
   const sessionId = await ensureOpenCodeSession({ conversationId, workspace, modelRef, agentId, signal });
+  if (onSession) onSession(baseUrl, sessionId);
   const slashCommand = await findOpenCodeSlashCommand(baseUrl, workspace, input, signal);
   const eventStream = subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, {
     onContent,

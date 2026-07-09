@@ -127,8 +127,8 @@ describe('termuxRuntime', () => {
     expect(script).toContain('availableModels: geminiModels');
     expect(script).toContain("currentModelLabel: 'Default OpenCode model'");
     expect(script).toContain("const response = await requestOpenCodeJson(baseUrl, '/api/model', { method: 'GET' });");
-    expect(script).toContain('function normalizeOpenCodeModels(models)');
-    expect(script).toContain("id: model.providerID + '/' + model.id");
+    expect(script).toContain('function normalizeOpenCodeModels(value)');
+    expect(script).toContain("id: providerId + '/' + id");
     expect(script).toContain("runtime: idleRuntimeSummary('finished', 0)");
     expect(script).toContain('function normalizeConversationModel(model, extra)');
     expect(script).toContain('if (isRecord(model) && (model.id || model.useModel))');
@@ -297,7 +297,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/context'");
     expect(script).toContain("if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(push));");
     expect(script).toContain("if (key === 'chat.send.message') return await sendMessage(params, emit);");
-    expect(script).toContain("if (key === 'chat.stop.stream') return stopStream(params);");
+    expect(script).toContain("if (key === 'chat.stop.stream') return await stopStream(params);");
     expect(script).toContain('function listArtifacts(conversationId)');
     expect(script).toContain('async function updateArtifactStatus(params, emit)');
     expect(script).toContain("emit('conversation.artifact', updated);");

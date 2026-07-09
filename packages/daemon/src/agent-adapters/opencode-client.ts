@@ -156,6 +156,10 @@ export type OpenCodeRejectQuestionInput = {
   requestId: string;
 };
 
+export type OpenCodeAbortSessionInput = {
+  sessionId: string;
+};
+
 export type OpenCodeSessionClient = {
   sendPrompt(input: OpenCodePromptInput): Promise<OpenCodePromptResult>;
   sendCommand(input: OpenCodeCommandInput): Promise<OpenCodePromptResult>;
@@ -164,6 +168,7 @@ export type OpenCodeSessionClient = {
   confirmPermission?(input: OpenCodeConfirmPermissionInput): Promise<{ success: true }>;
   replyQuestion?(input: OpenCodeReplyQuestionInput): Promise<{ success: true }>;
   rejectQuestion?(input: OpenCodeRejectQuestionInput): Promise<{ success: true }>;
+  abortSession?(input: OpenCodeAbortSessionInput): Promise<{ success: true }>;
   listCommands(input?: OpenCodeCommandListInput): Promise<Array<{ command: string; description: string; hint?: string }>>;
   listModels?(): Promise<OpenCodeModelInfo[]>;
 };
@@ -423,6 +428,10 @@ export function createOpenCodeClient(options: OpenCodeClientOptions): OpenCodeSe
       await requestJson(`/api/session/${encodeURIComponent(input.sessionId)}/question/${encodeURIComponent(input.requestId)}/reject`, {
         method: 'POST',
       });
+      return { success: true };
+    },
+    async abortSession(input) {
+      await requestJson<unknown>(`/session/${encodeURIComponent(input.sessionId)}/abort`, { method: 'POST' });
       return { success: true };
     },
     async listCommands(input = {}) {

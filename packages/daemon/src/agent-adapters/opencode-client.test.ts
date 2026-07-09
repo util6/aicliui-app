@@ -1527,6 +1527,26 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('aborts OpenCode sessions through the local HTTP API', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url, init) => {
+        calls.push({ url: String(url), init });
+        if (String(url).endsWith('/session/ses_abort/abort')) {
+          return jsonResponse({ data: true });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    await expect(client.abortSession!({ sessionId: 'ses_abort' })).resolves.toEqual({ success: true });
+
+    expect(calls.map((call) => [call.url, call.init?.method])).toEqual([
+      ['http://127.0.0.1:4096/session/ses_abort/abort', 'POST'],
+    ]);
+  });
+
   it('extracts assistant text from common context message shapes', () => {
     expect(
       extractOpenCodeAssistantText([
