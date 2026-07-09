@@ -15,6 +15,9 @@ type MessageBubbleProps = {
 export function MessageBubble({ message }: MessageBubbleProps) {
   const tint = useThemeColor({}, 'tint');
   const surface = useThemeColor({}, 'surface');
+  const border = useThemeColor({}, 'border');
+  const icon = useThemeColor({}, 'icon');
+  const textSecondary = useThemeColor({}, 'textSecondary');
   const error = useThemeColor({}, 'error');
   const warning = useThemeColor({}, 'warning');
   const success = useThemeColor({}, 'success');
@@ -94,19 +97,65 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       );
 
     case 'plan': {
-      const entries = message.content?.entries || [];
+      const entries = normalizePlanEntries(message.content?.entries);
+      const done = entries.filter((entry) => isPlanEntryComplete(entry.status)).length;
+      const activeEntry =
+        entries.find((entry) => entry.status === 'in_progress') ||
+        entries.find((entry) => entry.status === 'pending') ||
+        [...entries].reverse().find((entry) => isPlanEntryComplete(entry.status)) ||
+        entries[0];
+      const activeTitle = activeEntry ? planEntryTitle(activeEntry) : '';
       return (
         <View style={[styles.row, styles.rowLeft]}>
-          <View style={[styles.planContainer, { backgroundColor: surface }]}>
-            <ThemedText style={styles.planTitle}>Plan</ThemedText>
-            {entries.map((entry: any, i: number) => (
-              <View key={i} style={styles.planEntry}>
-                <ThemedText type='caption'>
-                  {entry.status === 'completed' ? '\u2705' : entry.status === 'in_progress' ? '\u23F3' : '\u2B55'}{' '}
-                  {entry.title || entry.description}
-                </ThemedText>
+          <View style={[styles.planContainer, { backgroundColor: surface, borderColor: border }]}>
+            <View style={styles.planHeader}>
+              <View style={styles.planTitleRow}>
+                <Ionicons name='checkbox-outline' size={16} color={tint} />
+                <ThemedText style={styles.planTitle}>Plan</ThemedText>
               </View>
-            ))}
+              {entries.length > 0 ? (
+                <ThemedText type='caption' style={[styles.planProgress, { color: textSecondary }]}>
+                  {done}/{entries.length} done
+                </ThemedText>
+              ) : null}
+            </View>
+            {activeTitle ? (
+              <ThemedText type='caption' style={[styles.planPreview, { color: textSecondary }]} numberOfLines={1}>
+                Current: {activeTitle}
+              </ThemedText>
+            ) : null}
+            <View style={styles.planList}>
+              {entries.map((entry, i) => {
+                const title = planEntryTitle(entry);
+                const complete = isPlanEntryComplete(entry.status);
+                return (
+                  <View key={`${entry.status}-${title}-${i}`} style={styles.planEntry}>
+                    <Ionicons
+                      name={planEntryIcon(entry.status)}
+                      size={15}
+                      color={planEntryColor(entry.status, { success, warning, tint, icon })}
+                    />
+                    <View style={styles.planEntryBody}>
+                      <ThemedText
+                        type='caption'
+                        style={[
+                          styles.planEntryText,
+                          { color: complete ? textSecondary : undefined },
+                          complete ? styles.planEntryTextComplete : null,
+                        ]}
+                      >
+                        {title}
+                      </ThemedText>
+                      {entry.priority ? (
+                        <ThemedText type='caption' style={[styles.planPriority, { color: textSecondary }]}>
+                          {entry.priority}
+                        </ThemedText>
+                      ) : null}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
           </View>
         </View>
       );
@@ -118,6 +167,51 @@ export function MessageBubble({ message }: MessageBubbleProps) {
     default:
       return null;
   }
+}
+
+type PlanEntry = {
+  title?: string;
+  description?: string;
+  status?: string;
+  priority?: string;
+};
+
+function normalizePlanEntries(value: unknown): PlanEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null && !Array.isArray(entry))
+    .map((entry) => ({
+      title: typeof entry.title === 'string' ? entry.title : undefined,
+      description: typeof entry.description === 'string' ? entry.description : undefined,
+      status: typeof entry.status === 'string' ? entry.status : 'pending',
+      priority: typeof entry.priority === 'string' ? entry.priority : undefined,
+    }))
+    .filter((entry) => planEntryTitle(entry).length > 0);
+}
+
+function planEntryTitle(entry: PlanEntry): string {
+  return entry.title || entry.description || '';
+}
+
+function isPlanEntryComplete(status?: string): boolean {
+  return status === 'completed' || status === 'cancelled' || status === 'canceled';
+}
+
+function planEntryIcon(status?: string): keyof typeof Ionicons.glyphMap {
+  if (status === 'completed') return 'checkmark-circle';
+  if (status === 'in_progress') return 'radio-button-on';
+  if (status === 'cancelled' || status === 'canceled') return 'close-circle';
+  return 'ellipse-outline';
+}
+
+function planEntryColor(
+  status: string | undefined,
+  colors: { success: string; warning: string; tint: string; icon: string },
+): string {
+  if (status === 'completed') return colors.success;
+  if (status === 'in_progress') return colors.tint;
+  if (status === 'cancelled' || status === 'canceled') return colors.warning;
+  return colors.icon;
 }
 
 function ThinkingBlock({ message }: { message: TMessage }) {
@@ -224,18 +318,61 @@ const styles = StyleSheet.create({
     maxWidth: '90%',
   },
   planContainer: {
-    borderRadius: 12,
-    padding: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     maxWidth: '90%',
-    gap: 4,
+    minWidth: 220,
+    gap: 8,
+  },
+  planHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  planTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    minWidth: 0,
   },
   planTitle: {
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 4,
+  },
+  planProgress: {
+    fontSize: 12,
+    flexShrink: 0,
+  },
+  planPreview: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  planList: {
+    gap: 7,
   },
   planEntry: {
-    paddingVertical: 2,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  planEntryBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  planEntryText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  planEntryTextComplete: {
+    textDecorationLine: 'line-through',
+  },
+  planPriority: {
+    marginTop: 1,
+    fontSize: 11,
+    textTransform: 'uppercase',
   },
   thinkingContainer: {
     borderWidth: StyleSheet.hairlineWidth,

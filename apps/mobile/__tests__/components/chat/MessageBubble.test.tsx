@@ -34,6 +34,16 @@ const makeAgentStatusMessage = (content: TMessage['content']): TMessage => ({
   content,
 });
 
+const makePlanMessage = (content: TMessage['content']): TMessage => ({
+  id: 'plan-1',
+  msg_id: 'msg-1',
+  conversation_id: 'conv-1',
+  type: 'plan',
+  position: 'left',
+  createdAt: Date.now(),
+  content,
+});
+
 describe('MessageBubble thinking', () => {
   it('renders active thinking summary and body', () => {
     const message = makeThinkingMessage({
@@ -80,5 +90,27 @@ describe('MessageBubble agent status', () => {
 
     expect(screen.getByText('OpenCode: error')).toBeTruthy();
     expect(screen.getByText('provider rejected the request')).toBeTruthy();
+  });
+});
+
+describe('MessageBubble plan', () => {
+  it('renders progress and the active OpenCode todo preview', () => {
+    const message = makePlanMessage({
+      sessionId: 'ses_todo',
+      entries: [
+        { title: 'Inspect AionUi client', status: 'completed', priority: 'high' },
+        { title: 'Implement Android proxy', status: 'in_progress', priority: 'medium' },
+        { title: 'Verify local runtime', status: 'pending', priority: 'low' },
+      ],
+    });
+
+    const screen = render(<MessageBubble message={message} />);
+
+    expect(screen.getByText('Plan')).toBeTruthy();
+    expect(screen.getByText('1/3 done')).toBeTruthy();
+    expect(screen.getByText('Current: Implement Android proxy')).toBeTruthy();
+    expect(screen.getByText('Inspect AionUi client')).toBeTruthy();
+    expect(screen.getByText('Implement Android proxy')).toBeTruthy();
+    expect(screen.getByText('Verify local runtime')).toBeTruthy();
   });
 });
