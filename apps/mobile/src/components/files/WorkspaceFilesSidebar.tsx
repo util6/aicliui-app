@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { View, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet, Alert } from 'react-native';
+import { View, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet, Alert, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
@@ -47,6 +47,8 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
   const [tree, setTree] = useState<IDirOrFile[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<FlatItem | null>(null);
+  const [renameText, setRenameText] = useState('');
 
   const fetchFiles = useCallback(async () => {
     if (!activeConversationId || !currentWorkspace) return;
@@ -175,6 +177,37 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
     },
     [currentWorkspace, fetchFiles, t],
   );
+  const handleStartRename = useCallback((item: FlatItem) => {
+    setRenameTarget(item);
+    setRenameText(item.name);
+  }, []);
+  const handleCancelRename = useCallback(() => {
+    setRenameTarget(null);
+    setRenameText('');
+  }, []);
+  const handleSubmitRename = useCallback(async () => {
+    if (!currentWorkspace || !renameTarget) return;
+    const nextName = renameText.trim();
+    if (!nextName) {
+      Alert.alert(t('common.error'), t('files.renameEmpty', { defaultValue: 'Enter a new name' }));
+      return;
+    }
+    if (nextName === renameTarget.name) {
+      handleCancelRename();
+      return;
+    }
+    try {
+      await bridge.request('workspace.renameEntry', {
+        workspace: currentWorkspace,
+        path: renameTarget.fullPath,
+        new_name: nextName,
+      });
+      handleCancelRename();
+      await fetchFiles();
+    } catch {
+      Alert.alert(t('common.error'), t('files.renameFailed', { defaultValue: 'Failed to rename' }));
+    }
+  }, [currentWorkspace, fetchFiles, handleCancelRename, renameTarget, renameText, t]);
 
   // No workspace state
   if (!currentWorkspace) {
@@ -186,59 +219,113 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
     );
   }
 
-  const renderItem = ({ item }: { item: FlatItem }) => (
-    <TouchableOpacity
-      style={[styles.item, { paddingLeft: 16 + 16 * item.depth }]}
-      onPress={() => (item.isDir ? toggleExpand(item) : handleFileSelect(item.fullPath))}
-      activeOpacity={0.6}
-    >
-      {item.isDir && (
-        <Ionicons
-          name={item.isExpanded ? 'chevron-down' : 'chevron-forward'}
-          size={14}
-          color={iconColor}
-          style={styles.chevron}
-        />
-      )}
-      <Ionicons
-        name={item.isDir ? (item.isExpanded ? 'folder-open' : 'folder') : 'document-outline'}
-        size={18}
-        color={item.isDir ? tint : iconColor}
-        style={styles.icon}
-      />
-      <ThemedText style={styles.itemName} numberOfLines={1}>
-        {item.name}
-      </ThemedText>
-      <TouchableOpacity
-        accessibilityRole='button'
-        accessibilityLabel={t('files.addToChat', {
-          file: item.name,
-          defaultValue: `Add ${item.name} to chat`,
-        })}
-        testID={`add-file-to-chat-${item.relativePath}`}
-        style={styles.addButton}
-        onPress={() => handleAddToChat(item)}
-        activeOpacity={0.72}
-        hitSlop={6}
-      >
-        <Ionicons name='add-circle-outline' size={20} color={tint} />
-      </TouchableOpacity>
-      <TouchableOpacity
-        accessibilityRole='button'
-        accessibilityLabel={t('files.deleteEntry', {
-          file: item.name,
-          defaultValue: `Delete ${item.name}`,
-        })}
-        testID={`delete-workspace-entry-${item.relativePath}`}
-        style={styles.actionButton}
-        onPress={() => handleDeleteEntry(item)}
-        activeOpacity={0.72}
-        hitSlop={6}
-      >
-        <Ionicons name='trash-outline' size={19} color={iconColor} />
-      </TouchableOpacity>
-    </TouchableOpacity>
-  );
+  const renderItem = ({ item }: { item: FlatItem }) => {
+    const isRenaming = renameTarget?.fullPath === item.fullPath;
+    return (
+      <View>
+        <TouchableOpacity
+          style={[styles.item, { paddingLeft: 16 + 16 * item.depth }]}
+          onPress={() => (item.isDir ? toggleExpand(item) : handleFileSelect(item.fullPath))}
+          activeOpacity={0.6}
+        >
+          {item.isDir && (
+            <Ionicons
+              name={item.isExpanded ? 'chevron-down' : 'chevron-forward'}
+              size={14}
+              color={iconColor}
+              style={styles.chevron}
+            />
+          )}
+          <Ionicons
+            name={item.isDir ? (item.isExpanded ? 'folder-open' : 'folder') : 'document-outline'}
+            size={18}
+            color={item.isDir ? tint : iconColor}
+            style={styles.icon}
+          />
+          <ThemedText style={styles.itemName} numberOfLines={1}>
+            {item.name}
+          </ThemedText>
+          <TouchableOpacity
+            accessibilityRole='button'
+            accessibilityLabel={t('files.addToChat', {
+              file: item.name,
+              defaultValue: `Add ${item.name} to chat`,
+            })}
+            testID={`add-file-to-chat-${item.relativePath}`}
+            style={styles.addButton}
+            onPress={() => handleAddToChat(item)}
+            activeOpacity={0.72}
+            hitSlop={6}
+          >
+            <Ionicons name='add-circle-outline' size={20} color={tint} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole='button'
+            accessibilityLabel={t('files.renameEntry', {
+              file: item.name,
+              defaultValue: `Rename ${item.name}`,
+            })}
+            testID={`rename-workspace-entry-${item.relativePath}`}
+            style={styles.actionButton}
+            onPress={() => handleStartRename(item)}
+            activeOpacity={0.72}
+            hitSlop={6}
+          >
+            <Ionicons name='create-outline' size={19} color={iconColor} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole='button'
+            accessibilityLabel={t('files.deleteEntry', {
+              file: item.name,
+              defaultValue: `Delete ${item.name}`,
+            })}
+            testID={`delete-workspace-entry-${item.relativePath}`}
+            style={styles.actionButton}
+            onPress={() => handleDeleteEntry(item)}
+            activeOpacity={0.72}
+            hitSlop={6}
+          >
+            <Ionicons name='trash-outline' size={19} color={iconColor} />
+          </TouchableOpacity>
+        </TouchableOpacity>
+        {isRenaming && (
+          <View style={[styles.renameRow, { paddingLeft: 16 + 16 * item.depth }]}>
+            <TextInput
+              value={renameText}
+              onChangeText={setRenameText}
+              autoFocus
+              selectTextOnFocus
+              testID={`rename-workspace-entry-input-${item.relativePath}`}
+              placeholder={t('files.renamePlaceholder', { defaultValue: 'New name' })}
+              placeholderTextColor={iconColor}
+              style={[styles.renameInput, { borderColor: border, color: iconColor }]}
+              onSubmitEditing={handleSubmitRename}
+            />
+            <TouchableOpacity
+              accessibilityRole='button'
+              accessibilityLabel={t('common.save', { defaultValue: 'Save' })}
+              testID={`save-workspace-entry-rename-${item.relativePath}`}
+              style={styles.actionButton}
+              onPress={handleSubmitRename}
+              activeOpacity={0.72}
+            >
+              <Ionicons name='checkmark' size={21} color={tint} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityRole='button'
+              accessibilityLabel={t('common.cancel', { defaultValue: 'Cancel' })}
+              testID={`cancel-workspace-entry-rename-${item.relativePath}`}
+              style={styles.actionButton}
+              onPress={handleCancelRename}
+              activeOpacity={0.72}
+            >
+              <Ionicons name='close' size={21} color={iconColor} />
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: background }]}>
@@ -322,6 +409,21 @@ const styles = StyleSheet.create({
     minHeight: 32,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  renameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: 16,
+    paddingBottom: 8,
+    gap: 6,
+  },
+  renameInput: {
+    flex: 1,
+    minHeight: 36,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    fontSize: 14,
   },
   emptyContainer: {
     justifyContent: 'center',

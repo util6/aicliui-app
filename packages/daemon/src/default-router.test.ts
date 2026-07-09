@@ -627,6 +627,54 @@ describe('default bridge routes', () => {
     }
   });
 
+  it('renames workspace entries without allowing moves outside the workspace', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'aicliui-workspace-rename-'));
+    try {
+      await mkdir(join(workspace, 'src'));
+      await writeFile(join(workspace, 'src', 'draft.ts'), 'export const draft = true;', 'utf8');
+
+      const router = createDefaultRouter({ adapters: createFallbackAgentAdapterRegistry() });
+
+      const [renamed] = await router.handleIncoming({
+        name: 'subscribe-workspace.renameEntry',
+        data: {
+          id: 'm_rename_entry',
+          data: { workspace, path: join(workspace, 'src', 'draft.ts'), new_name: 'final.ts' },
+        },
+      });
+
+      expect(renamed.data).toEqual({ new_path: join(workspace, 'src', 'final.ts') });
+      await expect(access(join(workspace, 'src', 'draft.ts'))).rejects.toThrow();
+      await expect(readFile(join(workspace, 'src', 'final.ts'), 'utf8')).resolves.toBe('export const draft = true;');
+
+      const [moveAttempt] = await router.handleIncoming({
+        name: 'subscribe-workspace.renameEntry',
+        data: {
+          id: 'm_rename_move',
+          data: { workspace, path: join(workspace, 'src', 'final.ts'), new_name: '../outside.ts' },
+        },
+      });
+
+      expect(moveAttempt.data).toMatchObject({
+        success: false,
+        error: { code: 'BRIDGE_ROUTE_FAILED' },
+      });
+      await expect(access(join(workspace, 'src', 'final.ts'))).resolves.toBeUndefined();
+
+      const [rootAttempt] = await router.handleIncoming({
+        name: 'subscribe-workspace.renameEntry',
+        data: { id: 'm_rename_root', data: { workspace, path: workspace, new_name: 'renamed-root' } },
+      });
+
+      expect(rootAttempt.data).toMatchObject({
+        success: false,
+        error: { code: 'BRIDGE_ROUTE_FAILED' },
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('compares local git workspace changes in the AionUi fileSnapshot shape', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'aicliui-workspace-diff-'));
     try {

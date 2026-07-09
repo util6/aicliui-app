@@ -141,6 +141,7 @@ async function route(key, data, emit) {
   if (key === 'confirmation.confirm') return await confirmPendingPermission(params, emit);
   if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);
   if (key === 'workspace.removeEntry') return await removeWorkspaceEntry(params);
+  if (key === 'workspace.renameEntry') return await renameWorkspaceEntry(params);
   if (key === 'fileSnapshot.compare') return await compareWorkspaceChanges(params);
   if (key === 'fileSnapshot.diff') return await readWorkspaceFileDiff(params);
   if (key === 'fileSnapshot.stageFile') return await stageWorkspaceFile(params);
@@ -367,6 +368,30 @@ async function removeWorkspaceEntry(params) {
   }
   await rm(targetPath, { recursive: true, force: true });
   return { success: true };
+}
+
+async function renameWorkspaceEntry(params) {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  const rawPath =
+    typeof params.path === 'string'
+      ? params.path
+      : typeof params.file_path === 'string'
+        ? params.file_path
+        : join(workspace, requiredString(params.relativePath));
+  const targetPath = ensurePathInsideRoot(resolveLocalPath(rawPath), workspace);
+  if (targetPath === workspace) {
+    throw new Error('Refusing to rename the workspace root');
+  }
+
+  const newName = requiredString(params.new_name || params.newName).trim();
+  if (!newName) throw new Error('Expected non-empty new name');
+  if (newName === '.' || newName === '..' || newName.includes('/') || newName.includes('\\') || newName.includes('\0')) {
+    throw new Error('New name must be a single path segment');
+  }
+
+  const newPath = ensurePathInsideRoot(resolve(dirname(targetPath), newName), workspace);
+  await rename(targetPath, newPath);
+  return { new_path: newPath };
 }
 
 async function compareWorkspaceChanges(params) {

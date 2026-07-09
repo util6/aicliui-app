@@ -1,7 +1,7 @@
 import type { Dirent } from 'node:fs';
 import { execFile } from 'node:child_process';
-import { lstat, readFile, readdir, rm } from 'node:fs/promises';
-import { basename, join, relative, resolve } from 'node:path';
+import { lstat, readFile, readdir, rename, rm } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type {
   WorkspaceFileChange,
@@ -78,6 +78,30 @@ export async function removeWorkspaceEntry(params: Record<string, unknown>): Pro
   }
   await rm(targetPath, { recursive: true, force: true });
   return { success: true };
+}
+
+export async function renameWorkspaceEntry(params: Record<string, unknown>): Promise<{ new_path: string }> {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  const rawPath =
+    typeof params.path === 'string'
+      ? params.path
+      : typeof params.file_path === 'string'
+        ? params.file_path
+        : join(workspace, requiredString(params.relativePath));
+  const targetPath = ensurePathInsideRoot(resolveLocalPath(rawPath), workspace);
+  if (targetPath === workspace) {
+    throw new Error('Refusing to rename the workspace root');
+  }
+
+  const newName = requiredString(params.new_name ?? params.newName).trim();
+  if (!newName) throw new Error('Expected non-empty new name');
+  if (newName === '.' || newName === '..' || newName.includes('/') || newName.includes('\\') || newName.includes('\0')) {
+    throw new Error('New name must be a single path segment');
+  }
+
+  const newPath = ensurePathInsideRoot(resolve(dirname(targetPath), newName), workspace);
+  await rename(targetPath, newPath);
+  return { new_path: newPath };
 }
 
 export async function compareWorkspaceChanges(params: Record<string, unknown>): Promise<WorkspaceFileChangeSummary> {

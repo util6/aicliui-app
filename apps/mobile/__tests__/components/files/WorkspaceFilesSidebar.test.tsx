@@ -184,4 +184,65 @@ describe('WorkspaceFilesSidebar', () => {
     });
     alertSpy.mockRestore();
   });
+
+  it('renames a workspace entry and refreshes the tree', async () => {
+    mockBridgeRequest
+      .mockResolvedValueOnce([
+        {
+          name: 'project',
+          fullPath: '/tmp/project',
+          relativePath: '',
+          isDir: true,
+          isFile: false,
+          children: [
+            {
+              name: 'README.md',
+              fullPath: '/tmp/project/README.md',
+              relativePath: 'README.md',
+              isDir: false,
+              isFile: true,
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce({ new_path: '/tmp/project/NOTES.md' })
+      .mockResolvedValueOnce([
+        {
+          name: 'project',
+          fullPath: '/tmp/project',
+          relativePath: '',
+          isDir: true,
+          isFile: false,
+          children: [
+            {
+              name: 'NOTES.md',
+              fullPath: '/tmp/project/NOTES.md',
+              relativePath: 'NOTES.md',
+              isDir: false,
+              isFile: true,
+            },
+          ],
+        },
+      ]);
+
+    const screen = render(<WorkspaceFilesSidebar navigation={{ closeDrawer: jest.fn(), openDrawer: jest.fn() }} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('README.md')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('rename-workspace-entry-README.md'));
+    fireEvent.changeText(screen.getByTestId('rename-workspace-entry-input-README.md'), 'NOTES.md');
+    fireEvent.press(screen.getByTestId('save-workspace-entry-rename-README.md'));
+
+    await waitFor(() => {
+      expect(mockBridgeRequest).toHaveBeenCalledWith('workspace.renameEntry', {
+        workspace: '/tmp/project',
+        path: '/tmp/project/README.md',
+        new_name: 'NOTES.md',
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText('NOTES.md')).toBeTruthy();
+    });
+  });
 });
