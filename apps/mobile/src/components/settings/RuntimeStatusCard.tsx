@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
 import { useThemeColor } from '../../hooks/useThemeColor';
@@ -13,6 +14,7 @@ import {
 } from '../../services/runtimeStatus';
 
 type RuntimeTone = 'ready' | 'pending' | 'missing';
+const DAEMON_LOG_PATH = '~/.aicliui/logs/daemon.log';
 
 type RuntimeRowProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -47,6 +49,15 @@ export function RuntimeStatusCard() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const copyDaemonLogPath = useCallback(async () => {
+    try {
+      await Clipboard.setStringAsync(DAEMON_LOG_PATH);
+      Alert.alert(t('common.copied'), DAEMON_LOG_PATH);
+    } catch {
+      Alert.alert(t('common.error'), DAEMON_LOG_PATH);
+    }
+  }, [t]);
 
   return (
     <View style={styles.section}>
@@ -106,7 +117,7 @@ export function RuntimeStatusCard() {
               <RuntimeRow
                 icon='pulse-outline'
                 label={t('connect.bootstrap')}
-                value={bootstrapLabel(status.bootstrap)}
+                value={bootstrapLabel(status.bootstrap, t)}
                 tone={bootstrapTone(status.bootstrap.phase)}
               />
             )}
@@ -119,6 +130,22 @@ export function RuntimeStatusCard() {
                 tone={agentTone(agent.state)}
               />
             ))}
+            <TouchableOpacity
+              accessibilityRole='button'
+              accessibilityLabel={t('settings.copyDaemonLogPath')}
+              testID='copy-daemon-log-path'
+              style={styles.diagnosticAction}
+              onPress={copyDaemonLogPath}
+              activeOpacity={0.72}
+            >
+              <Ionicons name='copy-outline' size={18} color={tint} style={styles.rowIcon} />
+              <View style={styles.rowText}>
+                <ThemedText style={[styles.rowLabel, { color: tint }]}>{t('settings.copyDaemonLogPath')}</ThemedText>
+                <ThemedText type='caption' style={{ color: textSecondary }} numberOfLines={1}>
+                  {DAEMON_LOG_PATH}
+                </ThemedText>
+              </View>
+            </TouchableOpacity>
           </>
         ) : (
           <View style={[styles.row, { borderBottomColor: border }]}>
@@ -148,7 +175,7 @@ function RuntimeRow({ icon, label, value, tone }: RuntimeRowProps) {
       <Ionicons name={icon} size={20} color={color} style={styles.rowIcon} />
       <View style={styles.rowText}>
         <ThemedText style={styles.rowLabel}>{label}</ThemedText>
-        <ThemedText type='caption' style={{ color: textSecondary }} numberOfLines={1}>
+        <ThemedText type='caption' style={{ color: textSecondary }} numberOfLines={2}>
           {value}
         </ThemedText>
       </View>
@@ -172,8 +199,14 @@ function agentTone(state: RuntimeAgentHealth['state']): RuntimeTone {
   return 'pending';
 }
 
-function bootstrapLabel(bootstrap: NonNullable<RuntimeStatus['bootstrap']>): string {
-  return bootstrap.detail ? `${bootstrap.phase} · ${bootstrap.detail}` : bootstrap.phase;
+function bootstrapLabel(
+  bootstrap: NonNullable<RuntimeStatus['bootstrap']>,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  const details = [bootstrap.detail, formatUpdatedAt(bootstrap.updatedAt, t)].filter(
+    (item): item is string => Boolean(item),
+  );
+  return details.length > 0 ? `${bootstrap.phase} · ${details.join(' · ')}` : bootstrap.phase;
 }
 
 function bootstrapTone(phase: string): RuntimeTone {
@@ -204,6 +237,25 @@ function termuxExternalAppsTone(state: RuntimeStatus['termux']['allowExternalApp
   if (state === 'enabled') return 'ready';
   if (state === 'disabled') return 'missing';
   return 'pending';
+}
+
+function formatUpdatedAt(
+  updatedAt: number | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string | null {
+  if (!updatedAt) return null;
+  const elapsedMs = Math.max(0, Date.now() - updatedAt);
+  const elapsedMinutes = Math.floor(elapsedMs / 60000);
+  if (elapsedMinutes < 1) return t('settings.updatedJustNow', { defaultValue: 'Updated just now' });
+  if (elapsedMinutes < 60) {
+    return t('settings.updatedMinutesAgo', { count: elapsedMinutes, defaultValue: `Updated ${elapsedMinutes}m ago` });
+  }
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return t('settings.updatedHoursAgo', { count: elapsedHours, defaultValue: `Updated ${elapsedHours}h ago` });
+  }
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return t('settings.updatedDaysAgo', { count: elapsedDays, defaultValue: `Updated ${elapsedDays}d ago` });
 }
 
 const styles = StyleSheet.create({
@@ -249,5 +301,12 @@ const styles = StyleSheet.create({
   rowLabel: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  diagnosticAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
   },
 });

@@ -163,6 +163,11 @@
     "refreshRuntime": "Refresh",
     "runtimeUnavailable": "Runtime status unavailable",
     "termuxExternalApps": "Allow external apps",
+    "copyDaemonLogPath": "Copy daemon log path",
+    "updatedJustNow": "Updated just now",
+    "updatedMinutesAgo": "Updated {{count}}m ago",
+    "updatedHoursAgo": "Updated {{count}}h ago",
+    "updatedDaysAgo": "Updated {{count}}d ago",
     "about": "О приложении",
     "version": "Версия",
     "language": "Язык"
