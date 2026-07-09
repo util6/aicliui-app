@@ -234,6 +234,14 @@ export type WorkspaceFileChangeSummary = {
   unstaged: WorkspaceFileChange[];
 };
 
+export type WorkspaceFileDiffSource = 'staged' | 'unstaged';
+
+export type WorkspaceFileDiff = {
+  relativePath: string;
+  source: WorkspaceFileDiffSource;
+  diff: string;
+};
+
 export type IResponseMessage = {
   type: string;
   data: unknown;

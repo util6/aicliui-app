@@ -615,6 +615,14 @@ describe('default bridge routes', () => {
         name: 'subscribe-fileSnapshot.compare',
         data: { id: 'm_changes', data: { workspace } },
       });
+      const [stagedDiff] = await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.diff',
+        data: { id: 'm_staged_diff', data: { workspace, relativePath: 'README.md', source: 'staged' } },
+      });
+      const [untrackedDiff] = await router.handleIncoming({
+        name: 'subscribe-fileSnapshot.diff',
+        data: { id: 'm_untracked_diff', data: { workspace, relativePath: 'draft.md', source: 'unstaged' } },
+      });
 
       expect(changes.data).toMatchObject({
         mode: 'git-repo',
@@ -642,6 +650,16 @@ describe('default bridge routes', () => {
             deletions: 0,
           }),
         ]),
+      });
+      expect(stagedDiff.data).toMatchObject({
+        relativePath: 'README.md',
+        source: 'staged',
+        diff: expect.stringContaining('+staged'),
+      });
+      expect(untrackedDiff.data).toMatchObject({
+        relativePath: 'draft.md',
+        source: 'unstaged',
+        diff: expect.stringContaining('+one'),
       });
     } finally {
       await rm(workspace, { recursive: true, force: true });

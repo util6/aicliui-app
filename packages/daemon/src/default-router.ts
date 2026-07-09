@@ -25,6 +25,7 @@ import {
   getWorkspaceTree,
   readImageBase64,
   readTextFile,
+  readWorkspaceFileDiff,
 } from './local-files.js';
 import type { CliConfirmation } from './agent-adapters/types.js';
 
@@ -453,6 +454,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
   });
   router.register('conversation.get-workspace', async (data) => await getWorkspaceTree(asRecord(data)));
   router.register('fileSnapshot.compare', async (data) => await compareWorkspaceChanges(asRecord(data)));
+  router.register('fileSnapshot.diff', async (data) => await readWorkspaceFileDiff(asRecord(data)));
   router.register('get-file-by-dir', async (data) => await getFileTreeByDir(asRecord(data)));
   router.register('read-file', async (data) => await readTextFile(stringParam(asRecord(data).path)));
   router.register('get-image-base64', async (data) => await readImageBase64(stringParam(asRecord(data).path)));

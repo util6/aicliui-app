@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
@@ -11,7 +21,12 @@ import { ContextUsageIndicator } from './ContextUsageIndicator';
 import { QueuedCommandPanel } from './QueuedCommandPanel';
 import { FilePickerSheet } from './FilePickerSheet';
 import { ConversationArtifactCard } from './ConversationArtifactCard';
-import { WorkspaceChangeSummaryCard, type WorkspaceFileChangeSummary } from './WorkspaceChangeSummaryCard';
+import {
+  WorkspaceChangeSummaryCard,
+  type WorkspaceFileChange,
+  type WorkspaceFileChangeSummary,
+} from './WorkspaceChangeSummaryCard';
+import { MarkdownContent } from './MarkdownContent';
 import { useChat } from '../../context/ChatContext';
 import { useConversations } from '../../context/ConversationContext';
 import { useFilesTabOptional } from '../../context/FilesTabContext';
@@ -89,9 +104,15 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const [isFilePickerVisible, setIsFilePickerVisible] = useState(false);
   const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceFileChangeSummary | null>(null);
+  const [workspaceDiff, setWorkspaceDiff] = useState<WorkspaceFileDiff | null>(null);
+  const [isWorkspaceDiffLoading, setIsWorkspaceDiffLoading] = useState(false);
+  const [workspaceDiffError, setWorkspaceDiffError] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
+  const workspaceDiffRequestRef = useRef(0);
   const background = useThemeColor({}, 'background');
   const surface = useThemeColor({}, 'surface');
+  const border = useThemeColor({}, 'border');
+  const tint = useThemeColor({}, 'tint');
   const processedMessages = useProcessedMessages(messages, artifacts);
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === conversationId),
@@ -115,10 +136,18 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     setAttachedFiles([]);
     setIsFilePickerVisible(false);
     setWorkspaceChanges(null);
+    workspaceDiffRequestRef.current += 1;
+    setWorkspaceDiff(null);
+    setWorkspaceDiffError(null);
+    setIsWorkspaceDiffLoading(false);
   }, [conversationId]);
 
   useEffect(() => {
     setWorkspaceChanges(null);
+    workspaceDiffRequestRef.current += 1;
+    setWorkspaceDiff(null);
+    setWorkspaceDiffError(null);
+    setIsWorkspaceDiffLoading(false);
   }, [activeConversation?.extra.workspace]);
 
   useEffect(() => {
@@ -255,6 +284,40 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     },
     [filesTab, router],
   );
+  const handleOpenWorkspaceDiff = useCallback(
+    (change: WorkspaceFileChange, source: 'staged' | 'unstaged') => {
+      const workspace = activeConversation?.extra.workspace;
+      if (!workspace) return;
+
+      setWorkspaceDiff(null);
+      setWorkspaceDiffError(null);
+      setIsWorkspaceDiffLoading(true);
+      const requestId = workspaceDiffRequestRef.current + 1;
+      workspaceDiffRequestRef.current = requestId;
+      bridge
+        .request<WorkspaceFileDiff>('fileSnapshot.diff', {
+          workspace,
+          relativePath: change.relativePath,
+          source,
+        })
+        .then((diff) => {
+          if (workspaceDiffRequestRef.current === requestId) setWorkspaceDiff(diff);
+        })
+        .catch(() => {
+          if (workspaceDiffRequestRef.current === requestId) setWorkspaceDiffError(t('filePreview.errorLoading'));
+        })
+        .finally(() => {
+          if (workspaceDiffRequestRef.current === requestId) setIsWorkspaceDiffLoading(false);
+        });
+    },
+    [activeConversation?.extra.workspace, t],
+  );
+  const closeWorkspaceDiff = useCallback(() => {
+    workspaceDiffRequestRef.current += 1;
+    setWorkspaceDiff(null);
+    setWorkspaceDiffError(null);
+    setIsWorkspaceDiffLoading(false);
+  }, []);
 
   return (
     <KeyboardAvoidingView
@@ -275,7 +338,11 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         contentContainerStyle={styles.list}
         ListFooterComponent={
           workspaceChanges ? (
-            <WorkspaceChangeSummaryCard summary={workspaceChanges} onOpenFile={handleOpenWorkspaceChange} />
+            <WorkspaceChangeSummaryCard
+              summary={workspaceChanges}
+              onOpenFile={handleOpenWorkspaceChange}
+              onOpenDiff={handleOpenWorkspaceDiff}
+            />
           ) : null
         }
         ListEmptyComponent={
@@ -330,9 +397,47 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         onDone={handleAttachedFilesSelected}
         onClose={() => setIsFilePickerVisible(false)}
       />
+      <Modal
+        visible={isWorkspaceDiffLoading || Boolean(workspaceDiff) || Boolean(workspaceDiffError)}
+        animationType='slide'
+        onRequestClose={closeWorkspaceDiff}
+      >
+        <View style={[styles.diffModal, { backgroundColor: background }]}>
+          <View style={[styles.diffHeader, { borderBottomColor: border }]}>
+            <ThemedText style={styles.diffTitle} numberOfLines={1}>
+              {workspaceDiff?.relativePath ?? 'Diff'}
+            </ThemedText>
+            <TouchableOpacity accessibilityRole='button' onPress={closeWorkspaceDiff} hitSlop={8}>
+              <ThemedText style={[styles.diffClose, { color: tint }]}>
+                {t('common.close', { defaultValue: 'Close' })}
+              </ThemedText>
+            </TouchableOpacity>
+          </View>
+          {isWorkspaceDiffLoading ? (
+            <View style={styles.diffCenter}>
+              <ActivityIndicator size='large' color={tint} />
+              <ThemedText type='caption'>{t('filePreview.loading')}</ThemedText>
+            </View>
+          ) : workspaceDiffError ? (
+            <View style={styles.diffCenter}>
+              <ThemedText>{workspaceDiffError}</ThemedText>
+            </View>
+          ) : workspaceDiff ? (
+            <ScrollView style={[styles.diffBody, { backgroundColor: surface }]}>
+              <MarkdownContent content={`\`\`\`diff\n${workspaceDiff.diff}\n\`\`\``} />
+            </ScrollView>
+          ) : null}
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
+
+type WorkspaceFileDiff = {
+  relativePath: string;
+  source: 'staged' | 'unstaged';
+  diff: string;
+};
 
 function uniqueFiles(files: string[]): string[] {
   return Array.from(new Set(files.filter((file) => typeof file === 'string' && file.length > 0)));
@@ -384,5 +489,39 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 4,
     alignItems: 'center',
+  },
+  diffModal: {
+    flex: 1,
+  },
+  diffHeader: {
+    minHeight: 56,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 16 : 8,
+    paddingBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  diffTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  diffClose: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  diffCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    padding: 24,
+  },
+  diffBody: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
 });

@@ -141,6 +141,7 @@ async function route(key, data, emit) {
   if (key === 'confirmation.confirm') return await confirmPendingPermission(params, emit);
   if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);
   if (key === 'fileSnapshot.compare') return await compareWorkspaceChanges(params);
+  if (key === 'fileSnapshot.diff') return await readWorkspaceFileDiff(params);
   if (key === 'get-file-by-dir') return await getFileTreeByDir(params);
   if (key === 'read-file') return await readTextFile(requiredString(params.path));
   if (key === 'get-image-base64') return await readImageBase64(requiredString(params.path));
@@ -385,6 +386,30 @@ async function compareWorkspaceChanges(params) {
   };
 }
 
+async function readWorkspaceFileDiff(params) {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  const relativePath = normalizeRelativePath(
+    typeof params.relativePath === 'string' ? params.relativePath : relative(workspace, resolveLocalPath(requiredString(params.file_path))),
+  );
+  const source = params.source === 'staged' ? 'staged' : 'unstaged';
+  const filePath = ensurePathInsideRoot(resolve(join(workspace, relativePath)), workspace);
+
+  if (!(await isGitWorkspace(workspace))) {
+    return { relativePath, source, diff: '' };
+  }
+
+  const status = await readGitStatus(workspace);
+  const statusItem = status.find((item) => item.path === relativePath);
+  const diff =
+    source === 'staged'
+      ? await readGitDiff(workspace, ['diff', '--cached', '--', relativePath])
+      : statusItem && statusItem.worktreeStatus === '?'
+        ? await readGitDiff(workspace, ['diff', '--no-index', '--', '/dev/null', filePath], true)
+        : await readGitDiff(workspace, ['diff', '--', relativePath]);
+
+  return { relativePath, source, diff };
+}
+
 async function isGitWorkspace(workspace) {
   try {
     const result = await runProcess('git', ['rev-parse', '--is-inside-work-tree'], { cwd: workspace });
@@ -487,6 +512,14 @@ function buildWorkspaceFileChange(workspace, relativePath, operation, stats) {
 
 function compareFileChanges(left, right) {
   return left.relativePath.localeCompare(right.relativePath);
+}
+
+async function readGitDiff(workspace, args, allowExitOne) {
+  const result = await runProcess('git', args, {
+    cwd: workspace,
+    allowExitCodes: allowExitOne ? [0, 1] : [0],
+  });
+  return result.stdout;
 }
 
 function imageMimeType(path) {
@@ -2660,7 +2693,8 @@ function runProcess(command, args, options = {}) {
     child.on('exit', (code) => {
       if (signal) signal.removeEventListener('abort', abort);
       if (signal?.aborted) return reject(signal.reason || new Error('Process aborted'));
-      if (code === 0) return resolve({ stdout, stderr });
+      const allowedExitCodes = Array.isArray(options.allowExitCodes) ? options.allowExitCodes : [0];
+      if (allowedExitCodes.includes(code)) return resolve({ stdout, stderr });
       reject(new Error(command + ' exited with code ' + code + ': ' + (stderr || stdout).slice(-1000)));
     });
   });

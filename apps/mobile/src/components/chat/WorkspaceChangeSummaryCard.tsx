@@ -22,9 +22,10 @@ export type WorkspaceFileChangeSummary = {
 type WorkspaceChangeSummaryCardProps = {
   summary: WorkspaceFileChangeSummary;
   onOpenFile?: (change: WorkspaceFileChange) => void;
+  onOpenDiff?: (change: WorkspaceFileChange, source: 'staged' | 'unstaged') => void;
 };
 
-export function WorkspaceChangeSummaryCard({ summary, onOpenFile }: WorkspaceChangeSummaryCardProps) {
+export function WorkspaceChangeSummaryCard({ summary, onOpenFile, onOpenDiff }: WorkspaceChangeSummaryCardProps) {
   const [expanded, setExpanded] = useState(true);
   const surface = useThemeColor({}, 'surface');
   const border = useThemeColor({}, 'border');
@@ -78,14 +79,23 @@ export function WorkspaceChangeSummaryCard({ summary, onOpenFile }: WorkspaceCha
         {expanded ? (
           <View style={[styles.fileList, { borderTopColor: border }]}>
             {summary.staged.map((change) => (
-              <ChangeRow key={`staged:${change.relativePath}`} change={change} label='staged' onOpenFile={onOpenFile} />
+              <ChangeRow
+                key={`staged:${change.relativePath}`}
+                change={change}
+                label='staged'
+                source='staged'
+                onOpenFile={onOpenFile}
+                onOpenDiff={onOpenDiff}
+              />
             ))}
             {summary.unstaged.map((change) => (
               <ChangeRow
                 key={`unstaged:${change.relativePath}`}
                 change={change}
                 label='worktree'
+                source='unstaged'
                 onOpenFile={onOpenFile}
+                onOpenDiff={onOpenDiff}
               />
             ))}
           </View>
@@ -98,11 +108,15 @@ export function WorkspaceChangeSummaryCard({ summary, onOpenFile }: WorkspaceCha
 function ChangeRow({
   change,
   label,
+  source,
   onOpenFile,
+  onOpenDiff,
 }: {
   change: WorkspaceFileChange;
   label: string;
+  source: 'staged' | 'unstaged';
   onOpenFile?: (change: WorkspaceFileChange) => void;
+  onOpenDiff?: (change: WorkspaceFileChange, source: 'staged' | 'unstaged') => void;
 }) {
   const success = useThemeColor({}, 'success');
   const warning = useThemeColor({}, 'warning');
@@ -136,6 +150,20 @@ function ChangeRow({
           <ThemedText type='caption' style={[styles.fileStat, { color: error }]}>
             -{change.deletions}
           </ThemedText>
+        ) : null}
+        {onOpenDiff ? (
+          <TouchableOpacity
+            accessibilityRole='button'
+            testID={`open-diff-${change.relativePath}`}
+            style={styles.diffButton}
+            onPress={() => onOpenDiff(change, source)}
+            activeOpacity={0.72}
+          >
+            <Ionicons name='git-pull-request-outline' size={14} color={textSecondary} />
+            <ThemedText type='caption' style={[styles.diffText, { color: textSecondary }]}>
+              Diff
+            </ThemedText>
+          </TouchableOpacity>
         ) : null}
       </View>
     </TouchableOpacity>
@@ -226,12 +254,25 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   fileStats: {
-    minWidth: 48,
+    minWidth: 76,
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    alignItems: 'center',
     gap: 5,
   },
   fileStat: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  diffButton: {
+    minHeight: 26,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+  },
+  diffText: {
     fontSize: 11,
     fontWeight: '700',
   },

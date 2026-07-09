@@ -7,6 +7,8 @@ import type {
   WorkspaceFileChange,
   WorkspaceFileChangeOperation,
   WorkspaceFileChangeSummary,
+  WorkspaceFileDiff,
+  WorkspaceFileDiffSource,
 } from '@aicliui/shared';
 
 const IGNORED_ENTRY_NAMES = new Set(['.git', 'node_modules', '.expo', '.next', 'dist', 'build']);
@@ -99,6 +101,32 @@ export async function compareWorkspaceChanges(params: Record<string, unknown>): 
     staged: [...staged.values()].sort(compareFileChanges),
     unstaged: [...unstaged.values()].sort(compareFileChanges),
   };
+}
+
+export async function readWorkspaceFileDiff(params: Record<string, unknown>): Promise<WorkspaceFileDiff> {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  const relativePath = normalizeRelativePath(
+    typeof params.relativePath === 'string'
+      ? params.relativePath
+      : relative(workspace, resolveLocalPath(requiredString(params.file_path))),
+  );
+  const source: WorkspaceFileDiffSource = params.source === 'staged' ? 'staged' : 'unstaged';
+  const filePath = ensurePathInsideRoot(resolve(join(workspace, relativePath)), workspace);
+
+  if (!(await isGitWorkspace(workspace))) {
+    return { relativePath, source, diff: '' };
+  }
+
+  const status = await readGitStatus(workspace);
+  const statusItem = status.find((item) => item.path === relativePath);
+  const diff =
+    source === 'staged'
+      ? await readGitDiff(workspace, ['diff', '--cached', '--', relativePath])
+      : statusItem?.worktreeStatus === '?'
+        ? await readGitDiff(workspace, ['diff', '--no-index', '--', '/dev/null', filePath], true)
+        : await readGitDiff(workspace, ['diff', '--', relativePath]);
+
+  return { relativePath, source, diff };
 }
 
 async function readDirectoryNode(
@@ -322,6 +350,22 @@ async function runGit(workspace: string, args: string[]): Promise<{ stdout: stri
     stdout: String(result.stdout),
     stderr: String(result.stderr),
   };
+}
+
+async function readGitDiff(workspace: string, args: string[], allowExitOne = false): Promise<string> {
+  try {
+    const { stdout } = await runGit(workspace, args);
+    return stdout;
+  } catch (error) {
+    if (allowExitOne && isRecord(error) && error.code === 1 && typeof error.stdout === 'string') {
+      return error.stdout;
+    }
+    throw error;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function requiredString(value: unknown): string {

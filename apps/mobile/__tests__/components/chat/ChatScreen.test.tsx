@@ -180,21 +180,29 @@ jest.mock('@/src/components/chat/WorkspaceChangeSummaryCard', () => ({
   WorkspaceChangeSummaryCard: ({
     summary,
     onOpenFile,
+    onOpenDiff,
   }: {
     summary: {
       staged: Array<{ file_path: string; relativePath: string }>;
       unstaged: Array<{ file_path: string; relativePath: string }>;
     };
     onOpenFile?: (change: { file_path: string; relativePath: string }) => void;
+    onOpenDiff?: (change: { file_path: string; relativePath: string }, source: 'staged' | 'unstaged') => void;
   }) => {
     const { Text } = require('react-native');
     const [firstChange] = [...summary.staged, ...summary.unstaged];
+    const source = summary.staged.length > 0 ? 'staged' : 'unstaged';
     return (
       <>
         <Text testID='workspace-change-summary'>changes:{summary.staged.length + summary.unstaged.length}</Text>
         {firstChange ? (
           <Text testID='open-workspace-change' onPress={() => onOpenFile?.(firstChange)}>
             {firstChange.relativePath}
+          </Text>
+        ) : null}
+        {firstChange ? (
+          <Text testID='open-workspace-diff' onPress={() => onOpenDiff?.(firstChange, source)}>
+            open-diff
           </Text>
         ) : null}
       </>
@@ -553,5 +561,53 @@ describe('ChatScreen', () => {
 
     expect(filesTab.openTab).toHaveBeenCalledWith('/tmp/project/src/App.tsx');
     expect(mockRouterPush).toHaveBeenCalledWith('/(tabs)/files');
+  });
+
+  it('opens a changed workspace file diff from the chat summary', async () => {
+    mockUseChat.mockReturnValue({
+      ...mockUseChat.mock.results.at(-1)?.value,
+      isStreaming: false,
+    });
+    mockBridgeRequest.mockImplementation((name: string, data?: Record<string, unknown>) => {
+      if (name === 'conversation.ensure-runtime') {
+        return Promise.resolve({ recovered: false, runtime: null, config_options: [] });
+      }
+      if (name === 'fileSnapshot.compare') {
+        return Promise.resolve({
+          mode: 'git-repo',
+          branch: 'main',
+          staged: [
+            {
+              file_path: '/tmp/project/README.md',
+              relativePath: 'README.md',
+              operation: 'modify',
+              additions: 2,
+              deletions: 1,
+            },
+          ],
+          unstaged: [],
+        });
+      }
+      if (name === 'fileSnapshot.diff') {
+        expect(data).toEqual({ workspace: '/tmp/project', relativePath: 'README.md', source: 'staged' });
+        return Promise.resolve({
+          relativePath: 'README.md',
+          source: 'staged',
+          diff: 'diff --git a/README.md b/README.md\n+staged',
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    const screen = render(<ChatScreen conversationId='conv-1' />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('open-workspace-diff')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('open-workspace-diff'));
+
+    await waitFor(() => {
+      expect(screen.getByText(/diff --git a\/README.md/)).toBeTruthy();
+    });
   });
 });

@@ -109,4 +109,40 @@ describe('WorkspaceChangeSummaryCard', () => {
       deletions: 1,
     });
   });
+
+  it('requests a diff for a changed file with its source', () => {
+    const onOpenDiff = jest.fn();
+    const screen = render(
+      <WorkspaceChangeSummaryCard
+        onOpenDiff={onOpenDiff}
+        summary={{
+          mode: 'git-repo',
+          branch: null,
+          staged: [
+            {
+              file_path: '/tmp/project/README.md',
+              relativePath: 'README.md',
+              operation: 'modify',
+              additions: 2,
+              deletions: 1,
+            },
+          ],
+          unstaged: [],
+        }}
+      />,
+    );
+
+    fireEvent.press(screen.getByTestId('open-diff-README.md'));
+
+    expect(onOpenDiff).toHaveBeenCalledWith(
+      {
+        file_path: '/tmp/project/README.md',
+        relativePath: 'README.md',
+        operation: 'modify',
+        additions: 2,
+        deletions: 1,
+      },
+      'staged',
+    );
+  });
 });
