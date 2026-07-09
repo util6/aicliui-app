@@ -138,7 +138,7 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
   };
   const handleAddToChat = useCallback(
     (item: FlatItem) => {
-      if (!activeConversationId || !item.isFile) return;
+      if (!activeConversationId) return;
       addPendingFiles(activeConversationId, [item.fullPath]);
       Alert.alert(
         t('files.addedToChat', { defaultValue: 'Added to chat' }),
@@ -209,22 +209,20 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
       <ThemedText style={styles.itemName} numberOfLines={1}>
         {item.name}
       </ThemedText>
-      {item.isFile ? (
-        <TouchableOpacity
-          accessibilityRole='button'
-          accessibilityLabel={t('files.addToChat', {
-            file: item.name,
-            defaultValue: `Add ${item.name} to chat`,
-          })}
-          testID={`add-file-to-chat-${item.relativePath}`}
-          style={styles.addButton}
-          onPress={() => handleAddToChat(item)}
-          activeOpacity={0.72}
-          hitSlop={6}
-        >
-          <Ionicons name='add-circle-outline' size={20} color={tint} />
-        </TouchableOpacity>
-      ) : null}
+      <TouchableOpacity
+        accessibilityRole='button'
+        accessibilityLabel={t('files.addToChat', {
+          file: item.name,
+          defaultValue: `Add ${item.name} to chat`,
+        })}
+        testID={`add-file-to-chat-${item.relativePath}`}
+        style={styles.addButton}
+        onPress={() => handleAddToChat(item)}
+        activeOpacity={0.72}
+        hitSlop={6}
+      >
+        <Ionicons name='add-circle-outline' size={20} color={tint} />
+      </TouchableOpacity>
       <TouchableOpacity
         accessibilityRole='button'
         accessibilityLabel={t('files.deleteEntry', {

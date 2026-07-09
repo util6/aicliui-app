@@ -90,6 +90,42 @@ describe('WorkspaceFilesSidebar', () => {
     alertSpy.mockRestore();
   });
 
+  it('adds a workspace folder to the active chat attachments', async () => {
+    const addPendingFiles = jest.fn();
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    mockUseWorkspaceAttachments.mockReturnValue({ addPendingFiles });
+    mockBridgeRequest.mockResolvedValueOnce([
+      {
+        name: 'project',
+        fullPath: '/tmp/project',
+        relativePath: '',
+        isDir: true,
+        isFile: false,
+        children: [
+          {
+            name: 'src',
+            fullPath: '/tmp/project/src',
+            relativePath: 'src',
+            isDir: true,
+            isFile: false,
+            children: [],
+          },
+        ],
+      },
+    ]);
+
+    const screen = render(<WorkspaceFilesSidebar navigation={{ closeDrawer: jest.fn(), openDrawer: jest.fn() }} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('src')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('add-file-to-chat-src'));
+
+    expect(addPendingFiles).toHaveBeenCalledWith('conv-1', ['/tmp/project/src']);
+    expect(alertSpy).toHaveBeenCalledWith('Added to chat', 'src');
+    alertSpy.mockRestore();
+  });
+
   it('confirms before deleting a workspace file and refreshes the tree', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
       buttons?.find((button) => button.style === 'destructive')?.onPress?.();
