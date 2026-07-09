@@ -179,11 +179,20 @@ describe('WorkspaceFilesSidebar', () => {
           isFile: false,
           children: [
             {
-              name: 'app.ts',
-              fullPath: '/tmp/project/src/app.ts',
-              relativePath: 'src/app.ts',
-              isDir: false,
-              isFile: true,
+              name: 'src',
+              fullPath: '/tmp/project/src',
+              relativePath: 'src',
+              isDir: true,
+              isFile: false,
+              children: [
+                {
+                  name: 'app.ts',
+                  fullPath: '/tmp/project/src/app.ts',
+                  relativePath: 'src/app.ts',
+                  isDir: false,
+                  isFile: true,
+                },
+              ],
             },
           ],
         },

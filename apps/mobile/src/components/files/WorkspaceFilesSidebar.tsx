@@ -119,8 +119,9 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
 
     const flatten = (nodes: IDirOrFile[], depth: number): FlatItem[] => {
       const result: FlatItem[] = [];
+      const hasActiveSearch = searchText.trim().length > 0;
       for (const node of sortNodes(nodes)) {
-        const isExpanded = node.isDir && expanded.has(node.fullPath);
+        const isExpanded = node.isDir && (expanded.has(node.fullPath) || (hasActiveSearch && Boolean(node.children?.length)));
         result.push({
           name: node.name,
           fullPath: node.fullPath,
@@ -138,7 +139,7 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
     };
 
     return flatten(rootChildren, 0);
-  }, [tree, expanded]);
+  }, [tree, expanded, searchText]);
 
   const handleFileSelect = (fullPath: string) => {
     openTab(fullPath);
