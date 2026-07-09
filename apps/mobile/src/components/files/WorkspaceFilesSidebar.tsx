@@ -49,8 +49,9 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
   const [loading, setLoading] = useState(false);
   const [renameTarget, setRenameTarget] = useState<FlatItem | null>(null);
   const [renameText, setRenameText] = useState('');
+  const [searchText, setSearchText] = useState('');
 
-  const fetchFiles = useCallback(async () => {
+  const fetchFiles = useCallback(async (searchValue: string) => {
     if (!activeConversationId || !currentWorkspace) return;
     setLoading(true);
     try {
@@ -58,7 +59,7 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
         conversation_id: activeConversationId,
         workspace: currentWorkspace,
         path: currentWorkspace,
-        search: '',
+        search: searchValue.trim(),
       });
       if (Array.isArray(res)) {
         setTree(res);
@@ -75,16 +76,20 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
   useEffect(() => {
     if (currentWorkspace && activeConversationId) {
       setExpanded(new Set());
-      void fetchFiles();
+      const timer = setTimeout(() => {
+        void fetchFiles(searchText);
+      }, searchText.trim() ? 200 : 0);
+      return () => clearTimeout(timer);
     } else {
       setTree([]);
     }
-  }, [currentWorkspace, activeConversationId, fetchFiles]);
+  }, [currentWorkspace, activeConversationId, fetchFiles, searchText]);
 
   // Reset expansion when workspace changes to different project
   useEffect(() => {
     if (workspaceChanged) {
       setExpanded(new Set());
+      setSearchText('');
     }
   }, [workspaceChanged]);
 
@@ -168,14 +173,14 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
                   workspace: currentWorkspace,
                   path: item.fullPath,
                 })
-                .then(() => fetchFiles())
+                .then(() => fetchFiles(searchText))
                 .catch(() => Alert.alert(t('common.error'), t('files.deleteFailed', { defaultValue: 'Failed to delete' })));
             },
           },
         ],
       );
     },
-    [currentWorkspace, fetchFiles, t],
+    [currentWorkspace, fetchFiles, searchText, t],
   );
   const handleStartRename = useCallback((item: FlatItem) => {
     setRenameTarget(item);
@@ -203,11 +208,11 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
         new_name: nextName,
       });
       handleCancelRename();
-      await fetchFiles();
+      await fetchFiles(searchText);
     } catch {
       Alert.alert(t('common.error'), t('files.renameFailed', { defaultValue: 'Failed to rename' }));
     }
-  }, [currentWorkspace, fetchFiles, handleCancelRename, renameTarget, renameText, t]);
+  }, [currentWorkspace, fetchFiles, handleCancelRename, renameTarget, renameText, searchText, t]);
 
   // No workspace state
   if (!currentWorkspace) {
@@ -338,6 +343,31 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
           <Ionicons name='close' size={22} color={iconColor} />
         </TouchableOpacity>
       </View>
+      <View style={[styles.searchRow, { borderBottomColor: border }]}>
+        <Ionicons name='search-outline' size={16} color={iconColor} />
+        <TextInput
+          value={searchText}
+          onChangeText={setSearchText}
+          testID='workspace-file-search-input'
+          placeholder={t('files.searchPlaceholder', { defaultValue: 'Search files' })}
+          placeholderTextColor={iconColor}
+          autoCapitalize='none'
+          autoCorrect={false}
+          style={[styles.searchInput, { color: iconColor }]}
+        />
+        {searchText.length > 0 && (
+          <TouchableOpacity
+            accessibilityRole='button'
+            accessibilityLabel={t('files.clearSearch', { defaultValue: 'Clear search' })}
+            testID='workspace-file-search-clear'
+            style={styles.clearSearchButton}
+            onPress={() => setSearchText('')}
+            activeOpacity={0.72}
+          >
+            <Ionicons name='close-circle' size={18} color={iconColor} />
+          </TouchableOpacity>
+        )}
+      </View>
 
       {loading ? (
         <ActivityIndicator size='small' color={tint} style={styles.loader} />
@@ -380,6 +410,26 @@ const styles = StyleSheet.create({
   },
   loader: {
     marginTop: 40,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  searchInput: {
+    flex: 1,
+    minHeight: 34,
+    fontSize: 14,
+    paddingVertical: 0,
+  },
+  clearSearchButton: {
+    minWidth: 30,
+    minHeight: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   item: {
     flexDirection: 'row',

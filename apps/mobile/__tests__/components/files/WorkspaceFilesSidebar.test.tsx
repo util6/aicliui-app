@@ -126,6 +126,65 @@ describe('WorkspaceFilesSidebar', () => {
     alertSpy.mockRestore();
   });
 
+  it('filters workspace files through the workspace search request', async () => {
+    mockBridgeRequest
+      .mockResolvedValueOnce([
+        {
+          name: 'project',
+          fullPath: '/tmp/project',
+          relativePath: '',
+          isDir: true,
+          isFile: false,
+          children: [
+            {
+              name: 'README.md',
+              fullPath: '/tmp/project/README.md',
+              relativePath: 'README.md',
+              isDir: false,
+              isFile: true,
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          name: 'project',
+          fullPath: '/tmp/project',
+          relativePath: '',
+          isDir: true,
+          isFile: false,
+          children: [
+            {
+              name: 'app.ts',
+              fullPath: '/tmp/project/src/app.ts',
+              relativePath: 'src/app.ts',
+              isDir: false,
+              isFile: true,
+            },
+          ],
+        },
+      ]);
+
+    const screen = render(<WorkspaceFilesSidebar navigation={{ closeDrawer: jest.fn(), openDrawer: jest.fn() }} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('README.md')).toBeTruthy();
+    });
+    fireEvent.changeText(screen.getByTestId('workspace-file-search-input'), 'app');
+
+    await waitFor(() => {
+      expect(mockBridgeRequest).toHaveBeenCalledWith('conversation.get-workspace', {
+        conversation_id: 'conv-1',
+        workspace: '/tmp/project',
+        path: '/tmp/project',
+        search: 'app',
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText('app.ts')).toBeTruthy();
+    });
+  });
+
   it('confirms before deleting a workspace file and refreshes the tree', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
       buttons?.find((button) => button.style === 'destructive')?.onPress?.();
