@@ -1437,6 +1437,7 @@ function extractOpenCodeAgentStatus(event, sessionId) {
   if (type === 'session.next.context.updated') return openCodeContextUpdatedStatus(data, sessionId);
   if (type === 'session.next.step.started') return openCodeStepStartedStatus(data, sessionId);
   if (type === 'session.next.step.failed') return openCodeStepFailedStatus(data, sessionId);
+  if (type === 'session.next.retried') return openCodeRetriedStatus(data, sessionId);
   return null;
 }
 
@@ -1525,6 +1526,29 @@ function openCodeStepFailedStatus(data, sessionId) {
       ...(messageId ? { messageId } : {}),
       message,
       detail: message,
+    },
+  };
+}
+
+function openCodeRetriedStatus(data, sessionId) {
+  const attempt = typeof data.attempt === 'number' && Number.isFinite(data.attempt) ? data.attempt : undefined;
+  const error = isRecord(data.error) ? data.error : {};
+  const errorMessage = stringValue(error.message);
+  const message =
+    'Retrying OpenCode request' +
+    (attempt ? ' (attempt ' + attempt + ')' : '') +
+    (errorMessage ? ': ' + errorMessage : '');
+  const statusCode =
+    typeof error.statusCode === 'number' && Number.isFinite(error.statusCode) ? error.statusCode : undefined;
+  const retryable = typeof error.isRetryable === 'boolean' ? error.isRetryable : undefined;
+  return {
+    data: {
+      ...openCodeAgentStatusBase('retrying', sessionId),
+      ...(attempt !== undefined ? { attempt } : {}),
+      message,
+      detail: message,
+      ...(retryable !== undefined ? { retryable } : {}),
+      ...(statusCode !== undefined ? { statusCode } : {}),
     },
   };
 }

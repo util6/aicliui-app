@@ -205,6 +205,13 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("openCodeAgentStatusBase('workspace_moved', sessionId)");
   });
 
+  it('routes OpenCode retry events through the local agent status stream', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.retried'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('function openCodeRetriedStatus(data, sessionId)');
+    expect(TERMUX_DAEMON_SOURCE).toContain("openCodeAgentStatusBase('retrying', sessionId)");
+    expect(TERMUX_DAEMON_SOURCE).toContain('Retrying OpenCode request');
+  });
+
   it('parses OpenCode serve listening URLs like the package daemon', () => {
     const parseOpenCodeServeUrl = loadEmbeddedFunction<(line: string) => string | null>('parseOpenCodeServeUrl');
 

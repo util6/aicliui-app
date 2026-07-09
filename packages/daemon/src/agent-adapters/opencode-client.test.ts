@@ -1002,6 +1002,70 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode retry events as agent status updates', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_retry' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.retried',
+              data: {
+                sessionID: 'ses_retry',
+                attempt: 2,
+                error: {
+                  message: 'rate limited',
+                  statusCode: 429,
+                  isRetryable: true,
+                },
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_retry/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_retry/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_retry/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'retry done' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_retry' },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          agent_name: 'OpenCode',
+          status: 'retrying',
+          sessionId: 'ses_retry',
+          attempt: 2,
+          message: 'Retrying OpenCode request (attempt 2): rate limited',
+          detail: 'Retrying OpenCode request (attempt 2): rate limited',
+          retryable: true,
+          statusCode: 429,
+        },
+      },
+      { type: 'content', content: 'retry done' },
+    ]);
+  });
+
   it('falls back to context text when the OpenCode SSE stream is unavailable', async () => {
     const client = createOpenCodeClient({
       baseUrl: 'http://127.0.0.1:4096',
