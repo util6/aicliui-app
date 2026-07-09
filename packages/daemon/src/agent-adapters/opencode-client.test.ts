@@ -325,6 +325,62 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode text ended events without duplicating previous deltas', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_text_ended' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.text.delta',
+              data: {
+                sessionID: 'ses_text_ended',
+                assistantMessageID: 'msg_text',
+                textID: 'txt_1',
+                delta: 'hello ',
+              },
+            },
+            {
+              type: 'session.next.text.ended',
+              data: {
+                sessionID: 'ses_text_ended',
+                assistantMessageID: 'msg_text',
+                textID: 'txt_1',
+                text: 'hello world',
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_text_ended/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_text_ended/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_text_ended/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'hello world from context' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_text_ended' },
+      { type: 'content', content: 'hello ' },
+      { type: 'content', content: 'world' },
+    ]);
+  });
+
   it('streams OpenCode v2 tool lifecycle events while prompting', async () => {
     const client = createOpenCodeClient({
       baseUrl: 'http://127.0.0.1:4096',

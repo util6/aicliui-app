@@ -647,7 +647,18 @@ function extractOpenCodeEventTextDelta(
   const type = typeof payload.type === 'string' ? payload.type : '';
   const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
   if (type === 'session.next.text.delta' && data.sessionID === sessionId && typeof data.delta === 'string') {
+    const textId = stringValue(data.textID);
+    if (textId) {
+      textByPartId.set(textId, (textByPartId.get(textId) || '') + data.delta);
+    }
     return data.delta;
+  }
+  if (type === 'session.next.text.ended' && data.sessionID === sessionId && typeof data.text === 'string') {
+    const textId = stringValue(data.textID);
+    if (!textId) return data.text;
+    const previous = textByPartId.get(textId) || '';
+    textByPartId.set(textId, data.text);
+    return data.text.startsWith(previous) ? data.text.slice(previous.length) : data.text;
   }
   if (type !== 'message.part.updated') return '';
   const part = isRecord(data.part) ? data.part : {};

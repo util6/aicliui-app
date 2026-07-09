@@ -147,6 +147,13 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain("status: 'done'");
   });
 
+  it('routes OpenCode text ended events through the local content stream', () => {
+    expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.text.ended'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('const textId = stringValue(data.textID)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('textByPartId.set(textId, data.text)');
+    expect(TERMUX_DAEMON_SOURCE).toContain('return data.text.startsWith(previous) ? data.text.slice(previous.length) : data.text;');
+  });
+
   it('routes OpenCode compaction events through the local thinking stream', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('createOpenCodeCompactionEventExtractor');
     expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.compaction.started'");
