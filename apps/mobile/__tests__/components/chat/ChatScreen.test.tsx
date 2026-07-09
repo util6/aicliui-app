@@ -164,6 +164,13 @@ jest.mock('@/src/components/chat/ConversationArtifactCard', () => ({
   },
 }));
 
+jest.mock('@/src/components/chat/WorkspaceChangeSummaryCard', () => ({
+  WorkspaceChangeSummaryCard: ({ summary }: { summary: { staged: unknown[]; unstaged: unknown[] } }) => {
+    const { Text } = require('react-native');
+    return <Text testID='workspace-change-summary'>changes:{summary.staged.length + summary.unstaged.length}</Text>;
+  },
+}));
+
 const mockUseChat = useChat as jest.Mock;
 
 describe('ChatScreen', () => {
@@ -235,6 +242,9 @@ describe('ChatScreen', () => {
             },
           },
         });
+      }
+      if (name === 'fileSnapshot.compare') {
+        return Promise.resolve({ mode: 'git-repo', branch: 'main', staged: [], unstaged: [] });
       }
       return Promise.reject(new Error(`Unexpected bridge request ${name}`));
     });
@@ -411,6 +421,62 @@ describe('ChatScreen', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('conversation-artifact-skill_suggest').props.children).toBe('Review skill');
+    });
+  });
+
+  it('renders local workspace change summaries inside the chat timeline', async () => {
+    mockUseChat.mockReturnValue({
+      ...mockUseChat.mock.results.at(-1)?.value,
+      isStreaming: false,
+    });
+    mockBridgeRequest.mockImplementation((name: string, data?: Record<string, unknown>) => {
+      if (name === 'conversation.ensure-runtime') {
+        return Promise.resolve({
+          recovered: false,
+          runtime: {
+            state: 'idle',
+            can_send_message: true,
+            has_task: false,
+            task_status: 'finished',
+            is_processing: false,
+            pending_confirmations: 0,
+            turn_id: null,
+          },
+          config_options: [],
+        });
+      }
+      if (name === 'fileSnapshot.compare') {
+        expect(data).toEqual({ workspace: '/tmp/project' });
+        return Promise.resolve({
+          mode: 'git-repo',
+          branch: 'main',
+          staged: [
+            {
+              file_path: '/tmp/project/README.md',
+              relativePath: 'README.md',
+              operation: 'modify',
+              additions: 2,
+              deletions: 1,
+            },
+          ],
+          unstaged: [
+            {
+              file_path: '/tmp/project/src/App.tsx',
+              relativePath: 'src/App.tsx',
+              operation: 'create',
+              additions: 12,
+              deletions: 0,
+            },
+          ],
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    const screen = render(<ChatScreen conversationId='conv-1' />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('workspace-change-summary').props.children).toEqual(['changes:', 2]);
     });
   });
 });

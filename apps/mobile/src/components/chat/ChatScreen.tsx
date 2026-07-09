@@ -10,6 +10,7 @@ import { ContextUsageIndicator } from './ContextUsageIndicator';
 import { QueuedCommandPanel } from './QueuedCommandPanel';
 import { FilePickerSheet } from './FilePickerSheet';
 import { ConversationArtifactCard } from './ConversationArtifactCard';
+import { WorkspaceChangeSummaryCard, type WorkspaceFileChangeSummary } from './WorkspaceChangeSummaryCard';
 import { useChat } from '../../context/ChatContext';
 import { useConversations } from '../../context/ConversationContext';
 import { useThemeColor } from '../../hooks/useThemeColor';
@@ -83,6 +84,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   const [configOptionIds, setConfigOptionIds] = useState<ConfigOptionIds>({});
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const [isFilePickerVisible, setIsFilePickerVisible] = useState(false);
+  const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceFileChangeSummary | null>(null);
   const flatListRef = useRef<FlatList>(null);
   const background = useThemeColor({}, 'background');
   const surface = useThemeColor({}, 'surface');
@@ -108,7 +110,12 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   useEffect(() => {
     setAttachedFiles([]);
     setIsFilePickerVisible(false);
+    setWorkspaceChanges(null);
   }, [conversationId]);
+
+  useEffect(() => {
+    setWorkspaceChanges(null);
+  }, [activeConversation?.extra.workspace]);
 
   useEffect(() => {
     let cancelled = false;
@@ -145,6 +152,29 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
       cancelled = true;
     };
   }, [activeBackend, conversationId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const workspace = activeConversation?.extra.workspace;
+    if (!workspace || isStreaming) return () => {
+      cancelled = true;
+    };
+
+    bridge
+      .request<WorkspaceFileChangeSummary>('fileSnapshot.compare', { workspace }, 10000)
+      .then((summary) => {
+        if (cancelled) return;
+        const count = (summary?.staged?.length ?? 0) + (summary?.unstaged?.length ?? 0);
+        setWorkspaceChanges(count > 0 ? summary : null);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceChanges(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConversation?.extra.workspace, conversationId, isStreaming, messages.length]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -232,6 +262,9 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         renderItem={renderItem}
         keyExtractor={keyExtractor}
         contentContainerStyle={styles.list}
+        ListFooterComponent={
+          workspaceChanges ? <WorkspaceChangeSummaryCard summary={workspaceChanges} /> : null
+        }
         ListEmptyComponent={
           <View style={styles.empty}>
             <ThemedText type='caption'>{t('conversations.empty')}</ThemedText>
