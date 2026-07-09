@@ -147,6 +147,13 @@ jest.mock('@/src/components/chat/ChatSessionBar', () => ({
   },
 }));
 
+jest.mock('@/src/components/chat/ConfirmationCard', () => ({
+  ConfirmationCard: ({ content, msgId }: { content: { id?: string; title?: string }; msgId?: string }) => {
+    const { Text } = require('react-native');
+    return <Text testID={`pending-confirmation-${content.id ?? msgId}`}>{content.title ?? content.id ?? msgId}</Text>;
+  },
+}));
+
 jest.mock('@/src/components/chat/ContextUsageIndicator', () => ({
   ContextUsageIndicator: () => {
     const { Text } = require('react-native');
@@ -371,6 +378,7 @@ describe('ChatScreen', () => {
         text: 'second',
         files: ['src/App.tsx'],
       },
+      confirmations: [],
       thought: null,
       contextUsage: null,
       slashCommands: [],
@@ -393,6 +401,27 @@ describe('ChatScreen', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('chat-input-queued-count').props.children).toEqual(['queued:', 2]);
+    });
+  });
+
+  it('surfaces pending confirmations in a fixed dock above the input', async () => {
+    mockUseChat.mockReturnValue({
+      ...mockUseChat.mock.results.at(-1)?.value,
+      confirmations: [
+        {
+          id: 'permission-1',
+          msg_id: 'permission-message-1',
+          title: 'Allow shell command',
+          options: [{ label: 'Allow once', value: 'once' }],
+        },
+      ],
+    });
+
+    const screen = render(<ChatScreen conversationId='conv-1' />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pending-confirmation-dock')).toBeTruthy();
+      expect(screen.getByTestId('pending-confirmation-permission-1').props.children).toBe('Allow shell command');
     });
   });
 

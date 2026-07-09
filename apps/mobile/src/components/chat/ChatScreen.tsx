@@ -18,6 +18,7 @@ import { MessageBubble } from './MessageBubble';
 import { ToolCallSummary } from './ToolCallSummary';
 import { ChatInputBar } from './ChatInputBar';
 import { ChatSessionBar } from './ChatSessionBar';
+import { ConfirmationCard } from './ConfirmationCard';
 import { ContextUsageIndicator } from './ContextUsageIndicator';
 import { QueuedCommandPanel } from './QueuedCommandPanel';
 import { FilePickerSheet } from './FilePickerSheet';
@@ -84,6 +85,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     isQueuePaused,
     queuedCommandWarning,
     queuedCommandDraft,
+    confirmations,
     artifacts,
     thought,
     contextUsage,
@@ -455,6 +457,17 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         onClear={clearQueuedCommands}
         onResume={resumeQueuedCommands}
       />
+      {confirmations.length > 0 ? (
+        <View style={styles.confirmationDock} testID='pending-confirmation-dock'>
+          {confirmations.map((confirmation, index) => (
+            <ConfirmationCard
+              key={String(confirmation.id ?? confirmation.msg_id ?? index)}
+              content={confirmation}
+              msgId={typeof confirmation.msg_id === 'string' ? confirmation.msg_id : undefined}
+            />
+          ))}
+        </View>
+      ) : null}
       <ChatInputBar
         onSend={sendMessage}
         onStop={stopGeneration}
@@ -576,6 +589,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 4,
     alignItems: 'center',
+  },
+  confirmationDock: {
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    gap: 8,
   },
   diffModal: {
     flex: 1,
