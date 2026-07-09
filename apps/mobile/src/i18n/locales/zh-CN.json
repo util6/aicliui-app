@@ -179,6 +179,7 @@
     "runtimeUnavailable": "无法获取运行状态",
     "termuxExternalApps": "允许外部应用",
     "copyDaemonLogPath": "复制 daemon 日志路径",
+    "openRuntimeSettings": "打开运行时设置",
     "updatedJustNow": "刚刚更新",
     "updatedMinutesAgo": "{{count}} 分钟前更新",
     "updatedHoursAgo": "{{count}} 小时前更新",

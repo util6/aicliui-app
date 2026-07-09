@@ -4,6 +4,7 @@ import { NewConversationModal } from '@/src/components/conversation/NewConversat
 
 const mockFetchAgents = jest.fn();
 const mockUseConversations = jest.fn();
+const mockPush = jest.fn();
 
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -16,9 +17,16 @@ jest.mock('react-i18next', () => ({
         'connect.statusMissing': 'Missing',
         'connect.statusError': 'Error',
         'connect.statusInstalling': 'Installing',
+        'settings.openRuntimeSettings': 'Open runtime settings',
       };
       return options?.defaultValue ?? labels[key] ?? key;
     },
+  }),
+}));
+
+jest.mock('expo-router', () => ({
+  useRouter: () => ({
+    push: mockPush,
   }),
 }));
 
@@ -63,10 +71,14 @@ describe('NewConversationModal', () => {
     expect(onAgentSelected).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
 
+    fireEvent.press(screen.getByTestId('agent-runtime-settings-codex'));
+    expect(mockPush).toHaveBeenCalledWith('/(tabs)/settings');
+    expect(onClose).toHaveBeenCalledTimes(1);
+
     fireEvent.press(screen.getByTestId('agent-row-opencode'));
     expect(onAgentSelected).toHaveBeenCalledWith(
       expect.objectContaining({ backend: 'opencode', state: 'ready' }),
     );
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });

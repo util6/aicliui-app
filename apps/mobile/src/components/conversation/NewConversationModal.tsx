@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Modal, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
 import { useConversations, type AgentInfo } from '../../context/ConversationContext';
@@ -22,6 +23,7 @@ const agentIcons: Record<string, string> = {
 
 export function NewConversationModal({ visible, onClose, onAgentSelected }: NewConversationModalProps) {
   const { t } = useTranslation();
+  const router = useRouter();
   const { availableAgents, fetchAgents } = useConversations();
   const [isLoadingAgents, setIsLoadingAgents] = useState(false);
   const tint = useThemeColor({}, 'tint');
@@ -44,6 +46,11 @@ export function NewConversationModal({ visible, onClose, onAgentSelected }: NewC
     if (!isAgentSelectable(agent)) return;
     onAgentSelected(agent);
     onClose();
+  };
+
+  const openRuntimeSettings = () => {
+    onClose();
+    router.push('/(tabs)/settings');
   };
 
   const renderAgent = ({ item }: { item: AgentInfo }) => {
@@ -71,6 +78,20 @@ export function NewConversationModal({ visible, onClose, onAgentSelected }: NewC
           <ThemedText type='caption' style={{ color: item.state ? statusColor : textSecondary }} numberOfLines={2}>
             {agentStatusLabel(item, t)}
           </ThemedText>
+          {!selectable && (
+            <TouchableOpacity
+              accessibilityRole='button'
+              accessibilityLabel={t('settings.openRuntimeSettings', { defaultValue: 'Open runtime settings' })}
+              testID={`agent-runtime-settings-${item.backend}`}
+              style={styles.runtimeSettingsButton}
+              onPress={openRuntimeSettings}
+              activeOpacity={0.72}
+            >
+              <ThemedText style={[styles.runtimeSettingsText, { color: tint }]}>
+                {t('settings.openRuntimeSettings', { defaultValue: 'Open runtime settings' })}
+              </ThemedText>
+            </TouchableOpacity>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -186,5 +207,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     textTransform: 'capitalize',
+  },
+  runtimeSettingsButton: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    paddingVertical: 2,
+  },
+  runtimeSettingsText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
