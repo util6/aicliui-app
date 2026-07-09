@@ -88,6 +88,10 @@ export type ConfirmActionInput = {
   data: unknown;
 };
 
+export type AbortActionInput = {
+  conversationId: string;
+};
+
 export type SendMessageInput = {
   conversationId: string;
   input: string;
@@ -142,4 +146,5 @@ export type CliAgentAdapter = {
   sendMessage(input: SendMessageInput): AsyncIterable<CliAgentEvent>;
   getSlashCommands?(input: GetSlashCommandsInput): Promise<SlashCommandInfo[]>;
   confirm?(input: ConfirmActionInput): Promise<unknown> | unknown;
+  abort?(input: AbortActionInput): Promise<unknown> | unknown;
 };

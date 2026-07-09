@@ -959,6 +959,37 @@ describe('agent adapters', () => {
     ]);
   });
 
+  it('aborts the active OpenCode session through the shared adapter contract', async () => {
+    const aborts: unknown[] = [];
+    const adapter = createOpenCodeAdapter(
+      {
+        commandExists: async () => true,
+      },
+      {
+        client: {
+          sendPrompt: async () => ({ sessionId: 'unused', text: 'unused fallback' }),
+          sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+          listCommands: async () => [],
+          streamPrompt: async function* () {
+            yield { type: 'session', sessionId: 'ses_abort_adapter' };
+            yield { type: 'content', content: 'started' };
+          },
+          abortSession: async (input) => {
+            aborts.push(input);
+            return { success: true };
+          },
+        },
+      },
+    );
+
+    for await (const _event of adapter.sendMessage({ conversationId: 'conv-1', input: 'hello' })) {
+      // Exhaust the stream so the session id is cached for this conversation.
+    }
+
+    await expect(adapter.abort?.({ conversationId: 'conv-1' })).resolves.toEqual({ success: true });
+    expect(aborts).toEqual([{ sessionId: 'ses_abort_adapter' }]);
+  });
+
   it('sends OpenCode slash input through the command endpoint and reuses the conversation session', async () => {
     const calls: unknown[] = [];
     const adapter = createOpenCodeAdapter(

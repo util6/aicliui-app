@@ -40,6 +40,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
   const adapters = options?.adapters ?? createDefaultAgentAdapterRegistry();
   const pendingConfirmations = new Map<string, PendingConfirmationRecord>();
   const activeRuns = new Map<string, AbortController>();
+  const activeRunBackends = new Map<string, string>();
   const activeTurnIds = new Map<string, string>();
 
   router.register('runtime.get-status', async () => getRuntimeStatus(adapters));
@@ -175,7 +176,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     if (!adapter) {
       throw new Error(`Agent adapter '${backend}' was not found`);
     }
-    stopActiveRun(activeRuns, conversationId);
+    await stopActiveRun(activeRuns, activeRunBackends, adapters, conversationId);
     const runController = new AbortController();
     const acceptedRuntime = runningRuntimeSummary(
       'running',
@@ -183,6 +184,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       pendingConfirmationCount(pendingConfirmations, conversationId),
     );
     activeRuns.set(conversationId, runController);
+    activeRunBackends.set(conversationId, backend);
     activeTurnIds.set(conversationId, assistantMsgId);
     store.updateConversation(conversationId, {
       status: 'running',
@@ -333,6 +335,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
         const activeRun = activeRuns.get(conversationId);
         if (activeRun === runController) {
           activeRuns.delete(conversationId);
+          activeRunBackends.delete(conversationId);
           activeTurnIds.delete(conversationId);
         }
         if (activeRun === runController || activeRun === undefined) {
@@ -375,9 +378,9 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
       runtime: acceptedRuntime,
     };
   });
-  router.register('chat.stop.stream', (data) => {
+  router.register('chat.stop.stream', async (data) => {
     const conversationId = stringParam(asRecord(data).conversation_id);
-    const stopped = stopActiveRun(activeRuns, conversationId);
+    const stopped = await stopActiveRun(activeRuns, activeRunBackends, adapters, conversationId);
     activeTurnIds.delete(conversationId);
     const runtime = idleRuntimeSummary('finished', pendingConfirmationCount(pendingConfirmations, conversationId));
     if (stopped) {
@@ -492,11 +495,25 @@ function pendingConfirmationCount(
   return count;
 }
 
-function stopActiveRun(activeRuns: Map<string, AbortController>, conversationId: string): boolean {
+async function stopActiveRun(
+  activeRuns: Map<string, AbortController>,
+  activeRunBackends: Map<string, string>,
+  adapters: AgentAdapterRegistry,
+  conversationId: string,
+): Promise<boolean> {
   const controller = activeRuns.get(conversationId);
   if (!controller) return false;
+  const backend = activeRunBackends.get(conversationId);
   controller.abort(new Error('Generation stopped by user'));
   activeRuns.delete(conversationId);
+  activeRunBackends.delete(conversationId);
+  if (backend) {
+    try {
+      await adapters.get(backend)?.abort?.({ conversationId });
+    } catch {
+      // Local cancellation should still complete if the backend session is already idle or gone.
+    }
+  }
   return true;
 }
 

@@ -1449,6 +1449,72 @@ describe('default bridge routes', () => {
     });
   });
 
+  it('forwards chat.stop.stream to the active backend adapter abort hook', async () => {
+    let nextId = 0;
+    const aborts: unknown[] = [];
+    let startedResolve!: () => void;
+    const started = new Promise<void>((resolve) => {
+      startedResolve = resolve;
+    });
+    const store = new InMemoryConversationStore({
+      now: () => 5200 + nextId,
+      id: () => `adapter-stop-id-${++nextId}`,
+    });
+    const router = createDefaultRouter({
+      store,
+      adapters: createAgentAdapterRegistry([
+        {
+          backend: 'opencode',
+          name: 'opencode',
+          label: 'OpenCode',
+          probe: async () => ({ backend: 'opencode', state: 'ready' }),
+          sendMessage: async function* (input) {
+            startedResolve();
+            if (!input.signal) return;
+            await new Promise<void>((resolve) => {
+              input.signal?.addEventListener('abort', () => resolve(), { once: true });
+            });
+          },
+          abort: async (input) => {
+            aborts.push(input);
+            return { success: true };
+          },
+        } satisfies CliAgentAdapter,
+      ]),
+    });
+
+    await router.handleIncoming({
+      name: 'subscribe-create-conversation',
+      data: {
+        id: 'm_create_adapter_stop',
+        data: {
+          type: 'acp',
+          name: 'adapter stop',
+          model: { id: '', useModel: '' },
+          extra: { backend: 'opencode' },
+        },
+      },
+    });
+
+    const sendPromise = router.handleIncoming({
+      name: 'subscribe-chat.send.message',
+      data: {
+        id: 'm_send_adapter_stop',
+        data: { conversation_id: 'adapter-stop-id-1', msg_id: 'user-msg-adapter-stop', input: 'long running' },
+      },
+    });
+
+    await started;
+    const [stopResponse] = await router.handleIncoming({
+      name: 'subscribe-chat.stop.stream',
+      data: { id: 'm_adapter_stop', data: { conversation_id: 'adapter-stop-id-1' } },
+    });
+
+    expect(stopResponse.data).toMatchObject({ success: true, stopped: true });
+    expect(aborts).toEqual([{ conversationId: 'adapter-stop-id-1' }]);
+    await sendPromise;
+  });
+
   it('marks conversations running while an adapter stream is active and finished when it ends', async () => {
     let nextId = 0;
     let startedResolve!: () => void;

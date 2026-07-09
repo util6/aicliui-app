@@ -169,6 +169,15 @@ export function createOpenCodeAdapter(
       if (!activeClient) return [];
       return activeClient.listCommands({ directory: input.workspace });
     },
+    async abort(input) {
+      const sessionId = sessionByConversationId.get(input.conversationId);
+      if (!sessionId) return { success: true };
+
+      const activeClient = await getActiveClient();
+      if (!activeClient?.abortSession) return { success: true };
+
+      return activeClient.abortSession({ sessionId });
+    },
     async confirm(input) {
       const questionRecord = pendingQuestions.get(input.confirmationId);
       if (questionRecord) {
