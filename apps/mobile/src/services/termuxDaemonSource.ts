@@ -471,7 +471,7 @@ async function getOpenCodeModelInfo() {
   try {
     const baseUrl = await ensureOpenCodeServer();
     const response = await requestOpenCodeJson(baseUrl, '/api/model', { method: 'GET' });
-    const availableModels = normalizeOpenCodeModels(Array.isArray(response && response.data) ? response.data : []);
+    const availableModels = normalizeOpenCodeModels(response);
     return {
       currentModelId: null,
       currentModelLabel: 'Default OpenCode model',
@@ -655,8 +655,9 @@ function extractOpenCodeCommands(value) {
     .filter(Boolean);
 }
 
-function normalizeOpenCodeModels(models) {
-  return models
+function normalizeOpenCodeModels(value) {
+  const rawModels = Array.isArray(value) ? value : isRecord(value) && Array.isArray(value.data) ? value.data : [];
+  return rawModels
     .filter(isRecord)
     .map((model) => {
       if (model.enabled === false) return null;

@@ -214,23 +214,25 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(parseOpenCodeServeUrl('waiting for server')).toBeNull();
   });
 
-  it('normalizes OpenCode model provider aliases like the package daemon', () => {
+  it('normalizes OpenCode model responses like the package daemon', () => {
     const normalizeOpenCodeModels = loadEmbeddedFunction<
-      (models: unknown[]) => Array<{ id: string; label: string }>
+      (value: unknown) => Array<{ id: string; label: string }>
     >('normalizeOpenCodeModels', ['isRecord', 'stringValue']);
 
-    expect(
-      normalizeOpenCodeModels([
-        { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', providerID: 'anthropic' },
-        { id: 'gpt-5', name: 'GPT-5', providerId: 'openai' },
-        { id: 'qwen3-coder', provider: 'qwen' },
-        { id: 'disabled-model', providerID: 'ignored', enabled: false },
-        { id: 'missing-provider' },
-      ]),
-    ).toEqual([
+    const models = [
+      { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', providerID: 'anthropic' },
+      { id: 'gpt-5', name: 'GPT-5', providerId: 'openai' },
+      { id: 'qwen3-coder', provider: 'qwen' },
+      { id: 'disabled-model', providerID: 'ignored', enabled: false },
+      { id: 'missing-provider' },
+    ];
+    const expected = [
       { id: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4 (anthropic)' },
       { id: 'openai/gpt-5', label: 'GPT-5 (openai)' },
       { id: 'qwen/qwen3-coder', label: 'qwen3-coder (qwen)' },
-    ]);
+    ];
+
+    expect(normalizeOpenCodeModels(models)).toEqual(expected);
+    expect(normalizeOpenCodeModels({ data: models })).toEqual(expected);
   });
 });
