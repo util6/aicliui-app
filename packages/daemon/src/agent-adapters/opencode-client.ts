@@ -555,8 +555,9 @@ function subscribeOpenCodeSessionEvents(input: {
         const text = extractTextDelta(event);
         if (text) input.handlers.onContent(text);
 
-        const reasoning = extractReasoningEvent(event);
-        if (reasoning) input.handlers.onThinking(reasoning);
+        for (const reasoning of extractReasoningEvent(event)) {
+          input.handlers.onThinking(reasoning);
+        }
 
         const compaction = extractCompactionEvent(event);
         if (compaction) input.handlers.onThinking(compaction);
@@ -676,23 +677,41 @@ function extractOpenCodeEventTextDelta(
   return part.text.startsWith(previous) ? part.text.slice(previous.length) : '';
 }
 
-function createOpenCodeReasoningEventExtractor(sessionId: string): (event: unknown) => OpenCodeThinkingUpdate | null {
-  return (event) => extractOpenCodeReasoningEvent(event, sessionId);
+function createOpenCodeReasoningEventExtractor(sessionId: string): (event: unknown) => OpenCodeThinkingUpdate[] {
+  const reasoningByPartId = new Map<string, string>();
+  return (event) => extractOpenCodeReasoningEvent(event, sessionId, reasoningByPartId);
 }
 
-function extractOpenCodeReasoningEvent(event: unknown, sessionId: string): OpenCodeThinkingUpdate | null {
-  if (!isRecord(event)) return null;
+function extractOpenCodeReasoningEvent(
+  event: unknown,
+  sessionId: string,
+  reasoningByPartId: Map<string, string>,
+): OpenCodeThinkingUpdate[] {
+  if (!isRecord(event)) return [];
   const payload = isRecord(event.payload) ? event.payload : event;
   const type = typeof payload.type === 'string' ? payload.type : '';
   const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
-  if (data.sessionID !== sessionId) return null;
+  if (data.sessionID !== sessionId) return [];
   if (type === 'session.next.reasoning.delta' && typeof data.delta === 'string') {
-    return { content: data.delta, status: 'thinking' };
+    const reasoningId = stringValue(data.reasoningID);
+    if (reasoningId) {
+      reasoningByPartId.set(reasoningId, (reasoningByPartId.get(reasoningId) || '') + data.delta);
+    }
+    return [{ content: data.delta, status: 'thinking' }];
   }
   if (type === 'session.next.reasoning.ended') {
-    return { content: '', status: 'done' };
+    const updates: OpenCodeThinkingUpdate[] = [];
+    if (typeof data.text === 'string') {
+      const reasoningId = stringValue(data.reasoningID);
+      const previous = reasoningId ? reasoningByPartId.get(reasoningId) || '' : '';
+      if (reasoningId) reasoningByPartId.set(reasoningId, data.text);
+      const suffix = data.text.startsWith(previous) ? data.text.slice(previous.length) : data.text;
+      if (suffix) updates.push({ content: suffix, status: 'thinking' });
+    }
+    updates.push({ content: '', status: 'done' });
+    return updates;
   }
-  return null;
+  return [];
 }
 
 function createOpenCodeCompactionEventExtractor(sessionId: string): (event: unknown) => OpenCodeThinkingUpdate | null {

@@ -1262,8 +1262,9 @@ function subscribeOpenCodeSessionEvents(baseUrl, workspace, sessionId, signal, h
       const parse = createSseParser((event) => {
         const text = extractTextDelta(event);
         if (text) handlers.onContent(text);
-        const reasoning = extractReasoningEvent(event);
-        if (reasoning) handlers.onThinking(reasoning);
+        for (const reasoning of extractReasoningEvent(event)) {
+          handlers.onThinking(reasoning);
+        }
         const compaction = extractCompactionEvent(event);
         if (compaction) handlers.onThinking(compaction);
         const tool = extractToolUpdate(event);
@@ -1369,22 +1370,36 @@ function extractOpenCodeEventTextDelta(event, sessionId, textByPartId) {
 }
 
 function createOpenCodeReasoningEventExtractor(sessionId) {
-  return (event) => extractOpenCodeReasoningEvent(event, sessionId);
+  const reasoningByPartId = new Map();
+  return (event) => extractOpenCodeReasoningEvent(event, sessionId, reasoningByPartId);
 }
 
-function extractOpenCodeReasoningEvent(event, sessionId) {
-  if (!isRecord(event)) return null;
+function extractOpenCodeReasoningEvent(event, sessionId, reasoningByPartId) {
+  if (!isRecord(event)) return [];
   const payload = isRecord(event.payload) ? event.payload : event;
   const type = typeof payload.type === 'string' ? payload.type : '';
   const data = isRecord(payload.data) ? payload.data : isRecord(payload.properties) ? payload.properties : {};
-  if (data.sessionID !== sessionId) return null;
+  if (data.sessionID !== sessionId) return [];
   if (type === 'session.next.reasoning.delta' && typeof data.delta === 'string') {
-    return { content: data.delta, status: 'thinking' };
+    const reasoningId = stringValue(data.reasoningID);
+    if (reasoningId) {
+      reasoningByPartId.set(reasoningId, (reasoningByPartId.get(reasoningId) || '') + data.delta);
+    }
+    return [{ content: data.delta, status: 'thinking' }];
   }
   if (type === 'session.next.reasoning.ended') {
-    return { content: '', status: 'done' };
+    const updates = [];
+    if (typeof data.text === 'string') {
+      const reasoningId = stringValue(data.reasoningID);
+      const previous = reasoningId ? reasoningByPartId.get(reasoningId) || '' : '';
+      if (reasoningId) reasoningByPartId.set(reasoningId, data.text);
+      const suffix = data.text.startsWith(previous) ? data.text.slice(previous.length) : data.text;
+      if (suffix) updates.push({ content: suffix, status: 'thinking' });
+    }
+    updates.push({ content: '', status: 'done' });
+    return updates;
   }
-  return null;
+  return [];
 }
 
 function createOpenCodeCompactionEventExtractor(sessionId) {

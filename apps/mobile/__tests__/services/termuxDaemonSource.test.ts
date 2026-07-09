@@ -140,6 +140,9 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(TERMUX_DAEMON_SOURCE).toContain('createOpenCodeReasoningEventExtractor');
     expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.reasoning.delta'");
     expect(TERMUX_DAEMON_SOURCE).toContain("type === 'session.next.reasoning.ended'");
+    expect(TERMUX_DAEMON_SOURCE).toContain('reasoningByPartId.set(reasoningId');
+    expect(TERMUX_DAEMON_SOURCE).toContain("reasoningByPartId.get(reasoningId) || ''");
+    expect(TERMUX_DAEMON_SOURCE).toContain('const suffix = data.text.startsWith(previous) ? data.text.slice(previous.length) : data.text;');
     expect(TERMUX_DAEMON_SOURCE).toContain("type: 'thinking',");
     expect(TERMUX_DAEMON_SOURCE).toContain(
       "subject: typeof update.subject === 'string' ? update.subject : 'OpenCode reasoning'",

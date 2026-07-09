@@ -875,11 +875,11 @@ describe('OpenCode local API client', () => {
             },
             {
               type: 'session.next.reasoning.delta',
-              data: { sessionID: 'ses_reasoning', reasoningID: 'rsn_1', delta: 'the files.' },
+              data: { sessionID: 'ses_reasoning', reasoningID: 'rsn_1', delta: 'the files' },
             },
             {
               type: 'session.next.reasoning.ended',
-              data: { sessionID: 'ses_reasoning', reasoningID: 'rsn_1', text: 'I will inspect the files.' },
+              data: { sessionID: 'ses_reasoning', reasoningID: 'rsn_1', text: 'I will inspect the files carefully.' },
             },
           ]);
         }
@@ -906,9 +906,54 @@ describe('OpenCode local API client', () => {
     expect(events).toEqual([
       { type: 'session', sessionId: 'ses_reasoning' },
       { type: 'thinking', content: 'I will inspect ', status: 'thinking' },
-      { type: 'thinking', content: 'the files.', status: 'thinking' },
+      { type: 'thinking', content: 'the files', status: 'thinking' },
+      { type: 'thinking', content: ' carefully.', status: 'thinking' },
       { type: 'thinking', content: '', status: 'done' },
       { type: 'content', content: 'done' },
+    ]);
+  });
+
+  it('streams replayed OpenCode reasoning ended events as full thinking content', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_reasoning_replay' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.reasoning.ended',
+              data: {
+                sessionID: 'ses_reasoning_replay',
+                reasoningID: 'rsn_replay',
+                text: 'Replayed reasoning content.',
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_reasoning_replay/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_reasoning_replay/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_reasoning_replay/context')) {
+          return jsonResponse({ data: [] });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_reasoning_replay' },
+      { type: 'thinking', content: 'Replayed reasoning content.', status: 'thinking' },
+      { type: 'thinking', content: '', status: 'done' },
     ]);
   });
 
