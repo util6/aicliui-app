@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AppState } from 'react-native';
 import { bridge } from '../services/bridge';
 import { setPendingInitialMessage } from '../services/pendingInitialMessages';
+import type { RuntimeAgentHealth, RuntimeStatus } from '../services/runtimeStatus';
 import { useConnection } from './ConnectionContext';
 
 /**
@@ -47,6 +48,9 @@ export type AgentInfo = {
   backend: string;
   name: string;
   label?: string;
+  state?: RuntimeAgentHealth['state'];
+  version?: string;
+  detail?: string;
 };
 
 type CreateConversationParams = {
@@ -303,11 +307,12 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
   const fetchAgents = useCallback(async () => {
     if (connectionState !== 'connected') return;
     try {
-      const response = await bridge.request<{ success: boolean; data?: AgentInfo[] }>(
-        'acp.get-available-agents',
-      );
+      const [response, runtimeStatus] = await Promise.all([
+        bridge.request<{ success: boolean; data?: AgentInfo[] }>('acp.get-available-agents'),
+        bridge.request<RuntimeStatus>('runtime.get-status', undefined, 3000).catch(() => null),
+      ]);
       if (response?.success && Array.isArray(response.data)) {
-        setAvailableAgents(response.data);
+        setAvailableAgents(mergeAgentHealth(response.data, runtimeStatus));
       }
     } catch (e) {
       console.warn('[Conversations] Failed to fetch agents:', e);
@@ -474,6 +479,21 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
       {children}
     </ConversationContext.Provider>
   );
+}
+
+function mergeAgentHealth(agents: AgentInfo[], runtimeStatus: RuntimeStatus | null): AgentInfo[] {
+  if (!runtimeStatus?.agents?.length) return agents;
+  const healthByBackend = new Map(runtimeStatus.agents.map((agent) => [agent.backend, agent]));
+  return agents.map((agent) => {
+    const health = healthByBackend.get(agent.backend);
+    if (!health) return agent;
+    return {
+      ...agent,
+      state: health.state,
+      ...(health.version ? { version: health.version } : {}),
+      ...(health.detail ? { detail: health.detail } : {}),
+    };
+  });
 }
 
 export function useConversations() {

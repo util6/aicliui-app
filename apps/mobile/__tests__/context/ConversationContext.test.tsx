@@ -47,6 +47,32 @@ function ListProbe() {
   );
 }
 
+function AgentsProbe() {
+  const { availableAgents, fetchAgents, startNewChat, pendingAgent } = useConversations();
+  return (
+    <>
+      <Text testID='agents'>{availableAgents.map((agent) => `${agent.backend}:${agent.state}:${agent.detail ?? ''}`).join('|')}</Text>
+      <Text testID='pending-agent'>{pendingAgent?.backend ?? ''}</Text>
+      <Text
+        testID='fetch-agents'
+        onPress={() => {
+          void fetchAgents();
+        }}
+      >
+        fetch-agents
+      </Text>
+      <Text
+        testID='start-opencode'
+        onPress={() => {
+          startNewChat(availableAgents[0]);
+        }}
+      >
+        start-opencode
+      </Text>
+    </>
+  );
+}
+
 function conversationWithStatus(status: Conversation['status']): Conversation {
   return {
     id: 'conv-1',
@@ -539,6 +565,52 @@ describe('ConversationContext new chat context', () => {
         }),
       ),
     );
+  });
+
+  it('merges local runtime health into available agent rows', async () => {
+    mockRequest.mockImplementation((name: string) => {
+      if (name === 'database.get-user-conversations') return Promise.resolve([]);
+      if (name === 'acp.get-available-agents') {
+        return Promise.resolve({
+          success: true,
+          data: [
+            { backend: 'opencode', name: 'opencode', label: 'OpenCode' },
+            { backend: 'codex', name: 'codex', label: 'Codex CLI' },
+          ],
+        });
+      }
+      if (name === 'runtime.get-status') {
+        return Promise.resolve({
+          daemon: { version: '0.1.0', startedAt: 1000 },
+          termux: { runCommandPermission: 'granted', allowExternalApps: 'enabled' },
+          agents: [
+            { backend: 'opencode', state: 'ready', version: '1.0.0' },
+            { backend: 'codex', state: 'missing', detail: 'codex command not found' },
+          ],
+        });
+      }
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <AgentsProbe />
+      </ConversationProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('fetch-agents'));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('agents').props.children).toBe(
+        'opencode:ready:|codex:missing:codex command not found',
+      ),
+    );
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('start-opencode'));
+    });
+    expect(screen.getByTestId('pending-agent').props.children).toBe('opencode');
   });
 });
 

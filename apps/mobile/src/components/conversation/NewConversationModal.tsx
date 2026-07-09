@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
 import { useConversations, type AgentInfo } from '../../context/ConversationContext';
 import { useThemeColor } from '../../hooks/useThemeColor';
+import { getAgentStateLabelKey } from '../../services/runtimeStatus';
 
 type NewConversationModalProps = {
   visible: boolean;
@@ -13,6 +14,7 @@ type NewConversationModalProps = {
 
 const agentIcons: Record<string, string> = {
   claude: 'C',
+  opencode: 'O',
   gemini: 'G',
   codex: 'X',
   qwen: 'Q',
@@ -27,6 +29,9 @@ export function NewConversationModal({ visible, onClose, onAgentSelected }: NewC
   const surface = useThemeColor({}, 'surface');
   const border = useThemeColor({}, 'border');
   const text = useThemeColor({}, 'text');
+  const textSecondary = useThemeColor({}, 'textSecondary');
+  const warning = useThemeColor({}, 'warning');
+  const error = useThemeColor({}, 'error');
 
   useEffect(() => {
     if (visible) {
@@ -36,16 +41,26 @@ export function NewConversationModal({ visible, onClose, onAgentSelected }: NewC
   }, [visible, fetchAgents]);
 
   const handleSelect = (agent: AgentInfo) => {
+    if (!isAgentSelectable(agent)) return;
     onAgentSelected(agent);
     onClose();
   };
 
   const renderAgent = ({ item }: { item: AgentInfo }) => {
     const icon = agentIcons[item.backend] || item.backend.charAt(0).toUpperCase();
+    const selectable = isAgentSelectable(item);
+    const statusColor = getAgentStatusColor(item, {
+      ready: tint,
+      pending: warning,
+      missing: error,
+      fallback: textSecondary,
+    });
     return (
       <TouchableOpacity
-        style={[styles.agentItem, { borderBottomColor: border }]}
+        testID={`agent-row-${item.backend}`}
+        style={[styles.agentItem, { borderBottomColor: border, opacity: selectable ? 1 : 0.62 }]}
         onPress={() => handleSelect(item)}
+        disabled={!selectable}
         activeOpacity={0.6}
       >
         <View style={[styles.agentIcon, { backgroundColor: tint + '20' }]}>
@@ -53,7 +68,9 @@ export function NewConversationModal({ visible, onClose, onAgentSelected }: NewC
         </View>
         <View style={styles.agentInfo}>
           <ThemedText style={styles.agentName}>{item.label || item.name}</ThemedText>
-          <ThemedText type='caption'>{item.backend}</ThemedText>
+          <ThemedText type='caption' style={{ color: item.state ? statusColor : textSecondary }} numberOfLines={2}>
+            {agentStatusLabel(item, t)}
+          </ThemedText>
         </View>
       </TouchableOpacity>
     );
@@ -89,6 +106,27 @@ export function NewConversationModal({ visible, onClose, onAgentSelected }: NewC
       </View>
     </Modal>
   );
+}
+
+function isAgentSelectable(agent: AgentInfo): boolean {
+  return agent.state !== 'missing' && agent.state !== 'error';
+}
+
+function agentStatusLabel(agent: AgentInfo, t: (key: string) => string): string {
+  if (!agent.state) return agent.backend;
+  const details = [agent.version, agent.detail].filter((item): item is string => Boolean(item));
+  const state = t(getAgentStateLabelKey(agent.state));
+  return details.length > 0 ? `${state} · ${details.join(' · ')}` : state;
+}
+
+function getAgentStatusColor(
+  agent: AgentInfo,
+  colors: { ready: string; pending: string; missing: string; fallback: string },
+): string {
+  if (agent.state === 'ready') return colors.ready;
+  if (agent.state === 'installing') return colors.pending;
+  if (agent.state === 'missing' || agent.state === 'error') return colors.missing;
+  return colors.fallback;
 }
 
 const styles = StyleSheet.create({
