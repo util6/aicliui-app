@@ -885,14 +885,14 @@ function openCodeModelRef(value: unknown): string | undefined {
 }
 
 function createOpenCodeToolUpdateExtractor(sessionId: string): (event: unknown) => OpenCodeToolUpdate | null {
-  const toolByCallId = new Map<string, { name: string; description: string }>();
+  const toolByCallId = new Map<string, { name: string; description: string; inputText?: string }>();
   return (event) => extractOpenCodeToolUpdate(event, sessionId, toolByCallId);
 }
 
 function extractOpenCodeToolUpdate(
   event: unknown,
   sessionId: string,
-  toolByCallId: Map<string, { name: string; description: string }>,
+  toolByCallId: Map<string, { name: string; description: string; inputText?: string }>,
 ): OpenCodeToolUpdate | null {
   const shellTool = extractOpenCodeShellToolUpdate(event, sessionId, toolByCallId);
   if (shellTool) return shellTool;
@@ -923,7 +923,7 @@ function extractOpenCodeToolUpdate(
 function extractOpenCodeShellToolUpdate(
   event: unknown,
   sessionId: string,
-  toolByCallId: Map<string, { name: string; description: string }>,
+  toolByCallId: Map<string, { name: string; description: string; inputText?: string }>,
 ): OpenCodeToolUpdate | null {
   if (!isRecord(event)) return null;
   const payload = isRecord(event.payload) ? event.payload : event;
@@ -951,7 +951,7 @@ function extractOpenCodeShellToolUpdate(
 function extractOpenCodeNextToolUpdate(
   event: unknown,
   sessionId: string,
-  toolByCallId: Map<string, { name: string; description: string }>,
+  toolByCallId: Map<string, { name: string; description: string; inputText?: string }>,
 ): OpenCodeToolUpdate | null {
   if (!isRecord(event)) return null;
   const payload = isRecord(event.payload) ? event.payload : event;
@@ -960,15 +960,36 @@ function extractOpenCodeNextToolUpdate(
   if (data.sessionID !== sessionId) return null;
   const callId = stringValue(data.callID);
   if (!callId) return null;
+  const cached = toolByCallId.get(callId) ?? { name: 'tool', description: callId };
+
+  if (type === 'session.next.tool.input.started') {
+    const name = stringValue(data.name) ?? cached.name;
+    const description = name;
+    toolByCallId.set(callId, { name, description, inputText: '' });
+    return openCodeToolUpdate(callId, name, description, 'Pending', '');
+  }
+
+  if (type === 'session.next.tool.input.delta') {
+    const delta = stringValue(data.delta) ?? '';
+    const nextInputText = (cached.inputText ?? '') + delta;
+    toolByCallId.set(callId, { ...cached, inputText: nextInputText });
+    return openCodeToolUpdate(callId, cached.name, cached.description, 'Pending', nextInputText);
+  }
+
+  if (type === 'session.next.tool.input.ended') {
+    const nextInputText = stringValue(data.text) ?? cached.inputText ?? '';
+    const description = nextInputText || cached.description;
+    toolByCallId.set(callId, { ...cached, description, inputText: nextInputText });
+    return openCodeToolUpdate(callId, cached.name, description, 'Pending', nextInputText);
+  }
 
   if (type === 'session.next.tool.called') {
-    const name = stringValue(data.tool) ?? 'tool';
+    const name = stringValue(data.tool) ?? cached.name;
     const description = openCodeToolTitle({ tool: name }, { input: data.input });
     toolByCallId.set(callId, { name, description });
     return openCodeToolUpdate(callId, name, description, 'Executing', '');
   }
 
-  const cached = toolByCallId.get(callId) ?? { name: 'tool', description: callId };
   if (type === 'session.next.tool.progress') {
     return openCodeToolUpdate(callId, cached.name, cached.description, 'Executing', openCodeNextToolDisplay(data));
   }

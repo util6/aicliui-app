@@ -466,6 +466,127 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode v2 tool input lifecycle events while prompting', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_tool_input' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.tool.input.started',
+              data: {
+                sessionID: 'ses_tool_input',
+                assistantMessageID: 'msg_input',
+                callID: 'tool_input',
+                name: 'bash',
+              },
+            },
+            {
+              type: 'session.next.tool.input.delta',
+              data: {
+                sessionID: 'ses_tool_input',
+                assistantMessageID: 'msg_input',
+                callID: 'tool_input',
+                delta: 'echo ',
+              },
+            },
+            {
+              type: 'session.next.tool.input.ended',
+              data: {
+                sessionID: 'ses_tool_input',
+                assistantMessageID: 'msg_input',
+                callID: 'tool_input',
+                text: 'echo hi',
+              },
+            },
+            {
+              type: 'session.next.tool.called',
+              data: {
+                sessionID: 'ses_tool_input',
+                callID: 'tool_input',
+                tool: 'bash',
+                input: { command: 'echo hi' },
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_tool_input/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_tool_input/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_tool_input/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'tool input done' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_tool_input' },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'tool_input',
+          call_id: 'tool_input',
+          name: 'bash',
+          description: 'bash',
+          status: 'Pending',
+          resultDisplay: '',
+          result_display: '',
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'tool_input',
+          call_id: 'tool_input',
+          name: 'bash',
+          description: 'bash',
+          status: 'Pending',
+          resultDisplay: 'echo ',
+          result_display: 'echo ',
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'tool_input',
+          call_id: 'tool_input',
+          name: 'bash',
+          description: 'echo hi',
+          status: 'Pending',
+          resultDisplay: 'echo hi',
+          result_display: 'echo hi',
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          callId: 'tool_input',
+          call_id: 'tool_input',
+          name: 'bash',
+          description: 'echo hi',
+          status: 'Executing',
+          resultDisplay: '',
+          result_display: '',
+        },
+      },
+      { type: 'content', content: 'tool input done' },
+    ]);
+  });
+
   it('streams OpenCode v2 shell lifecycle events while prompting', async () => {
     const client = createOpenCodeClient({
       baseUrl: 'http://127.0.0.1:4096',
