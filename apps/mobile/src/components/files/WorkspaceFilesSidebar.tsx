@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { View, FlatList, TouchableOpacity, ActivityIndicator, StyleSheet, Alert, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
 import { useWorkspace } from '../../context/WorkspaceContext';
@@ -154,6 +155,17 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
     },
     [activeConversationId, addPendingFiles, t],
   );
+  const handleCopyPath = useCallback(
+    async (item: FlatItem) => {
+      try {
+        await Clipboard.setStringAsync(item.fullPath);
+        Alert.alert(t('common.copied', { defaultValue: 'Copied' }), item.relativePath || item.name);
+      } catch {
+        Alert.alert(t('common.error'), t('files.copyPathFailed', { defaultValue: 'Failed to copy path' }));
+      }
+    },
+    [t],
+  );
   const handleDeleteEntry = useCallback(
     (item: FlatItem) => {
       if (!currentWorkspace) return;
@@ -280,6 +292,20 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
             hitSlop={6}
           >
             <Ionicons name='create-outline' size={19} color={iconColor} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole='button'
+            accessibilityLabel={t('files.copyPath', {
+              file: item.name,
+              defaultValue: `Copy path for ${item.name}`,
+            })}
+            testID={`copy-workspace-entry-path-${item.relativePath}`}
+            style={styles.actionButton}
+            onPress={() => void handleCopyPath(item)}
+            activeOpacity={0.72}
+            hitSlop={6}
+          >
+            <Ionicons name='copy-outline' size={18} color={iconColor} />
           </TouchableOpacity>
           <TouchableOpacity
             accessibilityRole='button'

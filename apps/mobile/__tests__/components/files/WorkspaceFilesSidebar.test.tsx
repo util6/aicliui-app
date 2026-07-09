@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { WorkspaceFilesSidebar } from '@/src/components/files/WorkspaceFilesSidebar';
 
+const mockSetStringAsync = jest.fn();
 const mockUseWorkspace = jest.fn();
 const mockUseConversations = jest.fn();
 const mockUseFilesTab = jest.fn();
@@ -13,6 +14,10 @@ jest.mock('@expo/vector-icons', () => {
   const { Text } = require('react-native');
   return { Ionicons: ({ name }: { name: string }) => <Text>{name}</Text> };
 });
+
+jest.mock('expo-clipboard', () => ({
+  setStringAsync: (...args: unknown[]) => mockSetStringAsync(...args),
+}));
 
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -44,6 +49,8 @@ jest.mock('@/src/services/bridge', () => ({
 
 describe('WorkspaceFilesSidebar', () => {
   beforeEach(() => {
+    mockSetStringAsync.mockReset();
+    mockSetStringAsync.mockResolvedValue(undefined);
     mockBridgeRequest.mockReset();
     mockUseWorkspace.mockReturnValue({
       currentWorkspace: '/tmp/project',
@@ -123,6 +130,23 @@ describe('WorkspaceFilesSidebar', () => {
 
     expect(addPendingFiles).toHaveBeenCalledWith('conv-1', ['/tmp/project/src']);
     expect(alertSpy).toHaveBeenCalledWith('Added to chat', 'src');
+    alertSpy.mockRestore();
+  });
+
+  it('copies a workspace file path to the clipboard', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+
+    const screen = render(<WorkspaceFilesSidebar navigation={{ closeDrawer: jest.fn(), openDrawer: jest.fn() }} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('README.md')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('copy-workspace-entry-path-README.md'));
+
+    await waitFor(() => {
+      expect(mockSetStringAsync).toHaveBeenCalledWith('/tmp/project/README.md');
+    });
+    expect(alertSpy).toHaveBeenCalledWith('Copied', 'README.md');
     alertSpy.mockRestore();
   });
 
