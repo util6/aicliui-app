@@ -89,4 +89,63 @@ describe('WorkspaceFilesSidebar', () => {
     expect(alertSpy).toHaveBeenCalledWith('Added to chat', 'README.md');
     alertSpy.mockRestore();
   });
+
+  it('confirms before deleting a workspace file and refreshes the tree', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+      buttons?.find((button) => button.style === 'destructive')?.onPress?.();
+    });
+    mockBridgeRequest
+      .mockResolvedValueOnce([
+        {
+          name: 'project',
+          fullPath: '/tmp/project',
+          relativePath: '',
+          isDir: true,
+          isFile: false,
+          children: [
+            {
+              name: 'README.md',
+              fullPath: '/tmp/project/README.md',
+              relativePath: 'README.md',
+              isDir: false,
+              isFile: true,
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce([
+        {
+          name: 'project',
+          fullPath: '/tmp/project',
+          relativePath: '',
+          isDir: true,
+          isFile: false,
+          children: [],
+        },
+      ]);
+
+    const screen = render(<WorkspaceFilesSidebar navigation={{ closeDrawer: jest.fn(), openDrawer: jest.fn() }} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('README.md')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('delete-workspace-entry-README.md'));
+
+    await waitFor(() => {
+      expect(mockBridgeRequest).toHaveBeenCalledWith('workspace.removeEntry', {
+        workspace: '/tmp/project',
+        path: '/tmp/project/README.md',
+      });
+    });
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Delete file?',
+      'README.md',
+      expect.arrayContaining([expect.objectContaining({ style: 'destructive' })]),
+    );
+    await waitFor(() => {
+      expect(mockBridgeRequest).toHaveBeenCalledTimes(3);
+    });
+    alertSpy.mockRestore();
+  });
 });

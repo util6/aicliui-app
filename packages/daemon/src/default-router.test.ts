@@ -593,6 +593,40 @@ describe('default bridge routes', () => {
     }
   });
 
+  it('removes workspace entries without allowing paths outside the workspace', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'aicliui-workspace-remove-'));
+    const outside = await mkdtemp(join(tmpdir(), 'aicliui-outside-remove-'));
+    try {
+      await mkdir(join(workspace, 'src'));
+      await writeFile(join(workspace, 'src', 'draft.ts'), 'export const draft = true;', 'utf8');
+      await writeFile(join(outside, 'keep.ts'), 'keep', 'utf8');
+
+      const router = createDefaultRouter({ adapters: createFallbackAgentAdapterRegistry() });
+
+      const [removed] = await router.handleIncoming({
+        name: 'subscribe-workspace.removeEntry',
+        data: { id: 'm_remove_entry', data: { workspace, path: join(workspace, 'src', 'draft.ts') } },
+      });
+
+      expect(removed.data).toEqual({ success: true });
+      await expect(access(join(workspace, 'src', 'draft.ts'))).rejects.toThrow();
+
+      const [outsideAttempt] = await router.handleIncoming({
+        name: 'subscribe-workspace.removeEntry',
+        data: { id: 'm_remove_outside', data: { workspace, path: join(outside, 'keep.ts') } },
+      });
+
+      expect(outsideAttempt.data).toMatchObject({
+        success: false,
+        error: { code: 'BRIDGE_ROUTE_FAILED' },
+      });
+      await expect(access(join(outside, 'keep.ts'))).resolves.toBeUndefined();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it('compares local git workspace changes in the AionUi fileSnapshot shape', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'aicliui-workspace-diff-'));
     try {

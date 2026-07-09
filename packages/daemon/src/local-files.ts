@@ -64,6 +64,22 @@ export async function readImageBase64(path: string): Promise<string> {
   return `data:${imageMimeType(filePath)};base64,${buffer.toString('base64')}`;
 }
 
+export async function removeWorkspaceEntry(params: Record<string, unknown>): Promise<{ success: true }> {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  const rawPath =
+    typeof params.path === 'string'
+      ? params.path
+      : typeof params.file_path === 'string'
+        ? params.file_path
+        : join(workspace, requiredString(params.relativePath));
+  const targetPath = ensurePathInsideRoot(resolveLocalPath(rawPath), workspace);
+  if (targetPath === workspace) {
+    throw new Error('Refusing to remove the workspace root');
+  }
+  await rm(targetPath, { recursive: true, force: true });
+  return { success: true };
+}
+
 export async function compareWorkspaceChanges(params: Record<string, unknown>): Promise<WorkspaceFileChangeSummary> {
   const workspace = resolveLocalPath(requiredString(params.workspace));
   const root = ensurePathInsideRoot(workspace, workspace);

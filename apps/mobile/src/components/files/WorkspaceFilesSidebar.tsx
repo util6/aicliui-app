@@ -147,6 +147,34 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
     },
     [activeConversationId, addPendingFiles, t],
   );
+  const handleDeleteEntry = useCallback(
+    (item: FlatItem) => {
+      if (!currentWorkspace) return;
+      Alert.alert(
+        item.isDir
+          ? t('files.deleteFolderTitle', { defaultValue: 'Delete folder?' })
+          : t('files.deleteFileTitle', { defaultValue: 'Delete file?' }),
+        item.relativePath || item.name,
+        [
+          { text: t('common.cancel', { defaultValue: 'Cancel' }), style: 'cancel' },
+          {
+            text: t('common.delete', { defaultValue: 'Delete' }),
+            style: 'destructive',
+            onPress: () => {
+              bridge
+                .request('workspace.removeEntry', {
+                  workspace: currentWorkspace,
+                  path: item.fullPath,
+                })
+                .then(() => fetchFiles())
+                .catch(() => Alert.alert(t('common.error'), t('files.deleteFailed', { defaultValue: 'Failed to delete' })));
+            },
+          },
+        ],
+      );
+    },
+    [currentWorkspace, fetchFiles, t],
+  );
 
   // No workspace state
   if (!currentWorkspace) {
@@ -197,6 +225,20 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
           <Ionicons name='add-circle-outline' size={20} color={tint} />
         </TouchableOpacity>
       ) : null}
+      <TouchableOpacity
+        accessibilityRole='button'
+        accessibilityLabel={t('files.deleteEntry', {
+          file: item.name,
+          defaultValue: `Delete ${item.name}`,
+        })}
+        testID={`delete-workspace-entry-${item.relativePath}`}
+        style={styles.actionButton}
+        onPress={() => handleDeleteEntry(item)}
+        activeOpacity={0.72}
+        hitSlop={6}
+      >
+        <Ionicons name='trash-outline' size={19} color={iconColor} />
+      </TouchableOpacity>
     </TouchableOpacity>
   );
 
@@ -272,6 +314,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   addButton: {
+    minWidth: 32,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionButton: {
     minWidth: 32,
     minHeight: 32,
     alignItems: 'center',

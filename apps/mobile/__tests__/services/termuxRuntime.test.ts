@@ -158,6 +158,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain("if (key === 'conversation.list-artifacts') return listArtifacts(requiredString(params.conversation_id));");
     expect(script).toContain("if (key === 'conversation.update-artifact') return await updateArtifactStatus(params, emit);");
     expect(script).toContain("if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);");
+    expect(script).toContain("if (key === 'workspace.removeEntry') return await removeWorkspaceEntry(params);");
     expect(script).toContain("if (key === 'fileSnapshot.compare') return await compareWorkspaceChanges(params);");
     expect(script).toContain("if (key === 'fileSnapshot.diff') return await readWorkspaceFileDiff(params);");
     expect(script).toContain("if (key === 'fileSnapshot.stageFile') return await stageWorkspaceFile(params);");

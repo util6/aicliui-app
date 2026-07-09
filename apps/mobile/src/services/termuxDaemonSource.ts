@@ -140,6 +140,7 @@ async function route(key, data, emit) {
   if (key === 'confirmation.list') return listConfirmations(requiredString(params.conversation_id));
   if (key === 'confirmation.confirm') return await confirmPendingPermission(params, emit);
   if (key === 'conversation.get-workspace') return await getWorkspaceTree(params);
+  if (key === 'workspace.removeEntry') return await removeWorkspaceEntry(params);
   if (key === 'fileSnapshot.compare') return await compareWorkspaceChanges(params);
   if (key === 'fileSnapshot.diff') return await readWorkspaceFileDiff(params);
   if (key === 'fileSnapshot.stageFile') return await stageWorkspaceFile(params);
@@ -350,6 +351,22 @@ async function readImageBase64(path) {
   if (!stats.isFile()) throw new Error('Path is not a file: ' + filePath);
   const buffer = await readFile(filePath);
   return 'data:' + imageMimeType(filePath) + ';base64,' + buffer.toString('base64');
+}
+
+async function removeWorkspaceEntry(params) {
+  const workspace = resolveLocalPath(requiredString(params.workspace));
+  const rawPath =
+    typeof params.path === 'string'
+      ? params.path
+      : typeof params.file_path === 'string'
+        ? params.file_path
+        : join(workspace, requiredString(params.relativePath));
+  const targetPath = ensurePathInsideRoot(resolveLocalPath(rawPath), workspace);
+  if (targetPath === workspace) {
+    throw new Error('Refusing to remove the workspace root');
+  }
+  await rm(targetPath, { recursive: true, force: true });
+  return { success: true };
 }
 
 async function compareWorkspaceChanges(params) {

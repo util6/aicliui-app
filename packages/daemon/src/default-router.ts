@@ -27,6 +27,7 @@ import {
   readImageBase64,
   readTextFile,
   readWorkspaceFileDiff,
+  removeWorkspaceEntry,
   stageWorkspace,
   stageWorkspaceFile,
   unstageWorkspace,
@@ -458,6 +459,7 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
     return result ?? { success: true };
   });
   router.register('conversation.get-workspace', async (data) => await getWorkspaceTree(asRecord(data)));
+  router.register('workspace.removeEntry', async (data) => await removeWorkspaceEntry(asRecord(data)));
   router.register('fileSnapshot.compare', async (data) => await compareWorkspaceChanges(asRecord(data)));
   router.register('fileSnapshot.diff', async (data) => await readWorkspaceFileDiff(asRecord(data)));
   router.register('fileSnapshot.stageFile', async (data) => await stageWorkspaceFile(asRecord(data)));
