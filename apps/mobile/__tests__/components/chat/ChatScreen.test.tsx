@@ -7,6 +7,7 @@ import { useChat } from '@/src/context/ChatContext';
 const mockUseConversations = jest.fn();
 const mockBridgeRequest = jest.fn();
 const mockUseFilesTabOptional = jest.fn();
+const mockUseWorkspaceAttachments = jest.fn();
 const mockRouterPush = jest.fn();
 
 jest.mock('@/src/context/ChatContext', () => ({
@@ -19,6 +20,10 @@ jest.mock('@/src/context/ConversationContext', () => ({
 
 jest.mock('@/src/context/FilesTabContext', () => ({
   useFilesTabOptional: () => mockUseFilesTabOptional(),
+}));
+
+jest.mock('@/src/context/WorkspaceAttachmentContext', () => ({
+  useWorkspaceAttachments: () => mockUseWorkspaceAttachments(),
 }));
 
 jest.mock('expo-router', () => ({
@@ -259,6 +264,9 @@ describe('ChatScreen', () => {
     mockBridgeRequest.mockReset();
     mockRouterPush.mockReset();
     mockUseFilesTabOptional.mockReturnValue({ openTab });
+    mockUseWorkspaceAttachments.mockReturnValue({
+      consumePendingFiles: jest.fn(() => []),
+    });
     mockBridgeRequest.mockImplementation((name: string, data?: Record<string, unknown>) => {
       if (name === 'conversation.ensure-runtime') {
         return Promise.resolve({
@@ -462,6 +470,20 @@ describe('ChatScreen', () => {
     await waitFor(() => {
       expect(screen.getByTestId('chat-input-attachments').props.children).toEqual(['files:', 0]);
     });
+  });
+
+  it('consumes workspace file attachments added from the Files tab', async () => {
+    const consumePendingFiles = jest.fn((conversationId: string) =>
+      conversationId === 'conv-1' ? ['/tmp/project/README.md'] : [],
+    );
+    mockUseWorkspaceAttachments.mockReturnValue({ consumePendingFiles });
+
+    const screen = render(<ChatScreen conversationId='conv-1' />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('chat-input-attachments').props.children).toEqual(['files:', 1]);
+    });
+    expect(consumePendingFiles).toHaveBeenCalledWith('conv-1');
   });
 
   it('renders visible AionUi conversation artifacts inside the chat timeline', async () => {

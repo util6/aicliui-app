@@ -31,6 +31,7 @@ import { MarkdownContent } from './MarkdownContent';
 import { useChat } from '../../context/ChatContext';
 import { useConversations } from '../../context/ConversationContext';
 import { useFilesTabOptional } from '../../context/FilesTabContext';
+import { useWorkspaceAttachments } from '../../context/WorkspaceAttachmentContext';
 import { useThemeColor } from '../../hooks/useThemeColor';
 import { useProcessedMessages, type ProcessedItem } from '../../hooks/useProcessedMessages';
 import { bridge } from '../../services/bridge';
@@ -99,6 +100,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   } = useChat();
   const { conversations, updateConversationExecutionContext } = useConversations();
   const filesTab = useFilesTabOptional();
+  const { consumePendingFiles } = useWorkspaceAttachments();
   const router = useRouter();
   const [modelInfo, setModelInfo] = useState<AcpModelInfo | null>(null);
   const [configOptionIds, setConfigOptionIds] = useState<ConfigOptionIds>({});
@@ -142,6 +144,13 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     setWorkspaceDiffError(null);
     setIsWorkspaceDiffLoading(false);
   }, [conversationId]);
+
+  useEffect(() => {
+    const pendingFiles = consumePendingFiles(conversationId);
+    if (pendingFiles.length > 0) {
+      setAttachedFiles((current) => uniqueFiles([...current, ...pendingFiles]));
+    }
+  }, [conversationId, consumePendingFiles]);
 
   useEffect(() => {
     setWorkspaceChanges(null);

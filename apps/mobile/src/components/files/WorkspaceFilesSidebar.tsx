@@ -6,6 +6,7 @@ import { ThemedText } from '../ui/ThemedText';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { useConversations } from '../../context/ConversationContext';
 import { useFilesTab } from '../../context/FilesTabContext';
+import { useWorkspaceAttachments } from '../../context/WorkspaceAttachmentContext';
 import { useThemeColor } from '../../hooks/useThemeColor';
 import { bridge } from '../../services/bridge';
 
@@ -37,6 +38,7 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
   const { currentWorkspace, workspaceDisplayName, workspaceChanged } = useWorkspace();
   const { activeConversationId } = useConversations();
   const { openTab } = useFilesTab();
+  const { addPendingFiles } = useWorkspaceAttachments();
   const background = useThemeColor({}, 'background');
   const border = useThemeColor({}, 'border');
   const tint = useThemeColor({}, 'tint');
@@ -134,6 +136,17 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
     openTab(fullPath);
     navigation.closeDrawer();
   };
+  const handleAddToChat = useCallback(
+    (item: FlatItem) => {
+      if (!activeConversationId || !item.isFile) return;
+      addPendingFiles(activeConversationId, [item.fullPath]);
+      Alert.alert(
+        t('files.addedToChat', { defaultValue: 'Added to chat' }),
+        item.relativePath || item.name,
+      );
+    },
+    [activeConversationId, addPendingFiles, t],
+  );
 
   // No workspace state
   if (!currentWorkspace) {
@@ -168,6 +181,22 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
       <ThemedText style={styles.itemName} numberOfLines={1}>
         {item.name}
       </ThemedText>
+      {item.isFile ? (
+        <TouchableOpacity
+          accessibilityRole='button'
+          accessibilityLabel={t('files.addToChat', {
+            file: item.name,
+            defaultValue: `Add ${item.name} to chat`,
+          })}
+          testID={`add-file-to-chat-${item.relativePath}`}
+          style={styles.addButton}
+          onPress={() => handleAddToChat(item)}
+          activeOpacity={0.72}
+          hitSlop={6}
+        >
+          <Ionicons name='add-circle-outline' size={20} color={tint} />
+        </TouchableOpacity>
+      ) : null}
     </TouchableOpacity>
   );
 
@@ -241,6 +270,12 @@ const styles = StyleSheet.create({
   itemName: {
     fontSize: 14,
     flex: 1,
+  },
+  addButton: {
+    minWidth: 32,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyContainer: {
     justifyContent: 'center',

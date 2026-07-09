@@ -12,6 +12,7 @@ import { WebSocketProvider } from '../src/context/WebSocketContext';
 import { ConversationProvider } from '../src/context/ConversationContext';
 import { WorkspaceProvider } from '../src/context/WorkspaceContext';
 import { FilesTabProvider } from '../src/context/FilesTabContext';
+import { WorkspaceAttachmentProvider } from '../src/context/WorkspaceAttachmentContext';
 import { initI18n } from '../src/i18n';
 
 // Prevent splash screen from auto-hiding until routing is ready
@@ -31,23 +32,25 @@ export default function RootLayout() {
           <ConversationProvider>
             <WorkspaceProvider>
               <FilesTabProvider>
-                <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-                  <Stack screenOptions={{ headerShown: false }}>
-                    <Stack.Screen name='index' />
-                    <Stack.Screen name='connect' />
-                    <Stack.Screen name='(tabs)' />
-                    <Stack.Screen
-                      name='file-preview'
-                      options={{
-                        headerShown: true,
-                        headerTitle: '',
-                        headerBackTitle: '',
-                        animation: 'slide_from_right',
-                      }}
-                    />
-                  </Stack>
-                  <StatusBar style='auto' />
-                </ThemeProvider>
+                <WorkspaceAttachmentProvider>
+                  <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+                    <Stack screenOptions={{ headerShown: false }}>
+                      <Stack.Screen name='index' />
+                      <Stack.Screen name='connect' />
+                      <Stack.Screen name='(tabs)' />
+                      <Stack.Screen
+                        name='file-preview'
+                        options={{
+                          headerShown: true,
+                          headerTitle: '',
+                          headerBackTitle: '',
+                          animation: 'slide_from_right',
+                        }}
+                      />
+                    </Stack>
+                    <StatusBar style='auto' />
+                  </ThemeProvider>
+                </WorkspaceAttachmentProvider>
               </FilesTabProvider>
             </WorkspaceProvider>
           </ConversationProvider>
