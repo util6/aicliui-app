@@ -657,11 +657,19 @@ function extractOpenCodeCommands(value) {
 
 function normalizeOpenCodeModels(models) {
   return models
-    .filter((model) => isRecord(model) && model.enabled !== false && typeof model.id === 'string' && typeof model.providerID === 'string')
-    .map((model) => ({
-      id: model.providerID + '/' + model.id,
-      label: (typeof model.name === 'string' && model.name ? model.name : model.id) + ' (' + model.providerID + ')',
-    }));
+    .filter(isRecord)
+    .map((model) => {
+      if (model.enabled === false) return null;
+      const id = stringValue(model.id);
+      const providerId = stringValue(model.providerID) || stringValue(model.providerId) || stringValue(model.provider);
+      if (!id || !providerId) return null;
+      const name = stringValue(model.name) || id;
+      return {
+        id: providerId + '/' + id,
+        label: name + ' (' + providerId + ')',
+      };
+    })
+    .filter(Boolean);
 }
 
 function normalizeConversationModel(model, extra) {

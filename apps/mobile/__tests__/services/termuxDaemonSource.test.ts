@@ -1,6 +1,6 @@
 import { TERMUX_DAEMON_SOURCE } from '@/src/services/termuxDaemonSource';
 
-function loadEmbeddedFunction<T extends (...args: any[]) => any>(name: string): T {
+function extractEmbeddedFunctionSource(name: string): string {
   const marker = `function ${name}`;
   const start = TERMUX_DAEMON_SOURCE.indexOf(marker);
   if (start === -1) throw new Error(`Embedded function ${name} was not found`);
@@ -14,12 +14,16 @@ function loadEmbeddedFunction<T extends (...args: any[]) => any>(name: string): 
     if (char === '{') depth += 1;
     if (char === '}') depth -= 1;
     if (depth === 0) {
-      const source = TERMUX_DAEMON_SOURCE.slice(start, index + 1);
-      return new Function(`${source}; return ${name};`)() as T;
+      return TERMUX_DAEMON_SOURCE.slice(start, index + 1);
     }
   }
 
   throw new Error(`Embedded function ${name} body was not closed`);
+}
+
+function loadEmbeddedFunction<T extends (...args: any[]) => any>(name: string, dependencies: string[] = []): T {
+  const source = [...dependencies, name].map(extractEmbeddedFunctionSource).join('\n');
+  return new Function(`${source}; return ${name};`)() as T;
 }
 
 describe('Termux daemon OpenCode slash commands', () => {
@@ -208,5 +212,25 @@ describe('Termux daemon OpenCode slash commands', () => {
     expect(parseOpenCodeServeUrl('server listening on 127.0.0.1:4096')).toBe('http://127.0.0.1:4096');
     expect(parseOpenCodeServeUrl('server listening on [::1]:4096')).toBe('http://[::1]:4096');
     expect(parseOpenCodeServeUrl('waiting for server')).toBeNull();
+  });
+
+  it('normalizes OpenCode model provider aliases like the package daemon', () => {
+    const normalizeOpenCodeModels = loadEmbeddedFunction<
+      (models: unknown[]) => Array<{ id: string; label: string }>
+    >('normalizeOpenCodeModels', ['isRecord', 'stringValue']);
+
+    expect(
+      normalizeOpenCodeModels([
+        { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', providerID: 'anthropic' },
+        { id: 'gpt-5', name: 'GPT-5', providerId: 'openai' },
+        { id: 'qwen3-coder', provider: 'qwen' },
+        { id: 'disabled-model', providerID: 'ignored', enabled: false },
+        { id: 'missing-provider' },
+      ]),
+    ).toEqual([
+      { id: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4 (anthropic)' },
+      { id: 'openai/gpt-5', label: 'GPT-5 (openai)' },
+      { id: 'qwen/qwen3-coder', label: 'qwen3-coder (qwen)' },
+    ]);
   });
 });
