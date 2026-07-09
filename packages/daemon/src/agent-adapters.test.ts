@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -557,7 +557,7 @@ describe('agent adapters', () => {
       ]);
       expect(calls).toEqual([
         expect.objectContaining({
-          prompt: 'review selected file',
+          prompt: 'review selected file\n\nSelected files:\n- README.md',
           directory: tempDir,
           files: [
             {
@@ -567,6 +567,48 @@ describe('agent adapters', () => {
               description: 'README.md',
             },
           ],
+        }),
+      ]);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('includes selected workspace folders in OpenCode prompt text', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'aicliui-opencode-folder-prompt-'));
+    try {
+      await mkdir(join(tempDir, 'src'));
+      await writeFile(join(tempDir, 'src', 'app.ts'), 'export const value = 1;', 'utf8');
+      const calls: unknown[] = [];
+      const adapter = createOpenCodeAdapter(
+        {
+          commandExists: async () => true,
+        },
+        {
+          client: {
+            sendPrompt: async (input) => {
+              calls.push(input);
+              return { sessionId: 'ses_folder', text: 'from selected folder' };
+            },
+            sendCommand: async () => ({ sessionId: 'unused', text: 'unused command' }),
+            listCommands: async () => [],
+          },
+        },
+      );
+
+      for await (const _event of adapter.sendMessage({
+        conversationId: 'conv-1',
+        input: 'review selected folder',
+        workspace: tempDir,
+        files: [join(tempDir, 'src')],
+      })) {
+        // Drain the stream.
+      }
+
+      expect(calls).toEqual([
+        expect.objectContaining({
+          prompt: 'review selected folder\n\nSelected files:\n- src',
+          directory: tempDir,
         }),
       ]);
     } finally {

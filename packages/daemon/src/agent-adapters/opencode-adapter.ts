@@ -115,10 +115,11 @@ export function createOpenCodeAdapter(
         }
 
         const promptFiles = await buildOpenCodePromptFiles(input.files, input.workspace);
+        const prompt = await appendSelectedFilesToPrompt(input.input, input.files, input.workspace);
         if (activeClient.streamPrompt) {
           yield* streamOpenCodeEvents(
             activeClient.streamPrompt({
-              prompt: input.input,
+              prompt,
               sessionId: cachedSessionId,
               directory: input.workspace,
               ...(input.signal ? { signal: input.signal } : {}),
@@ -132,7 +133,7 @@ export function createOpenCodeAdapter(
         }
 
         const result = await activeClient.sendPrompt({
-          prompt: input.input,
+          prompt,
           sessionId: cachedSessionId,
           directory: input.workspace,
           ...(input.signal ? { signal: input.signal } : {}),
@@ -384,6 +385,21 @@ async function buildOpenCodePromptFiles(
     }
   }
   return attachments;
+}
+
+async function appendSelectedFilesToPrompt(input: string, files: string[] = [], workspace?: string): Promise<string> {
+  const selectedPaths: string[] = [];
+  for (const filePath of files) {
+    try {
+      const fileStats = await stat(filePath);
+      if (!fileStats.isFile() && !fileStats.isDirectory()) continue;
+      selectedPaths.push(workspace ? normalizeRelativePath(relative(workspace, filePath)) : basename(filePath));
+    } catch {
+      // Ignore files that disappeared between selection and send.
+    }
+  }
+  if (selectedPaths.length === 0) return input;
+  return `${input}\n\nSelected files:\n${selectedPaths.map((filePath) => `- ${filePath}`).join('\n')}`;
 }
 
 async function isKnownOpenCodeCommand(

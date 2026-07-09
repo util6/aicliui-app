@@ -253,6 +253,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain('const selectedFiles = normalizeSelectedFiles(params.files, conversation.extra.defaultFiles, workspace);');
     expect(script).toContain("const rawPath = value.startsWith('/') || value.startsWith('~') ? value : join(root, value);");
     expect(script).toContain('const attachments = await buildOpenCodeFileAttachments(files, workspace);');
+    expect(script).toContain('const promptText = await appendExistingSelectedFilesToPrompt(input, files, workspace);');
     expect(script).toContain('const emitAssistantTool = (tool) => {');
     expect(script).toContain('upsertToolGroupMessage(conversationId, assistantMsgId, tool);');
     expect(script).toContain("type: 'tool_group'");
@@ -300,6 +301,7 @@ describe('termuxRuntime', () => {
     expect(script).toContain('uri: pathToFileURL(filePath).toString()');
     expect(script).toContain('files: attachments');
     expect(script).toContain('appendSelectedFilesToPrompt(input, files, workspace)');
+    expect(script).toContain('appendExistingSelectedFilesToPrompt(input, files, workspace)');
     expect(script).toContain("'\\n\\nSelected files:\\n'");
     expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/wait'");
     expect(script).toContain("'/api/session/' + encodeURIComponent(sessionId) + '/context'");

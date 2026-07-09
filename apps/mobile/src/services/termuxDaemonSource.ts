@@ -1368,6 +1368,7 @@ async function sendOpenCodePrompt({
 }) {
   const baseUrl = await ensureOpenCodeServer();
   const attachments = await buildOpenCodeFileAttachments(files, workspace);
+  const promptText = await appendExistingSelectedFilesToPrompt(input, files, workspace);
   const modelRef = parseOpenCodeModelRef(model);
   const agentId = parseOpenCodeAgent(agent);
   const sessionId = await ensureOpenCodeSession({ conversationId, workspace, modelRef, agentId, signal });
@@ -1413,7 +1414,7 @@ async function sendOpenCodePrompt({
         signal,
         body: JSON.stringify({
           prompt: {
-            text: input,
+            text: promptText,
             files: attachments,
             agents: [],
           },
@@ -2646,6 +2647,22 @@ function appendSelectedFilesToPrompt(input, files, workspace) {
   const root = resolveLocalPath(workspace);
   const fileList = files.map((filePath) => '- ' + normalizeRelativePath(relative(root, filePath))).join('\n');
   return input + '\n\nSelected files:\n' + fileList;
+}
+
+async function appendExistingSelectedFilesToPrompt(input, files, workspace) {
+  const root = resolveLocalPath(workspace);
+  const selectedPaths = [];
+  for (const filePath of files) {
+    try {
+      const stats = await stat(filePath);
+      if (!stats.isFile() && !stats.isDirectory()) continue;
+      selectedPaths.push(normalizeRelativePath(relative(root, filePath)));
+    } catch {
+      // Ignore files that disappeared between selection and send.
+    }
+  }
+  if (!selectedPaths.length) return input;
+  return input + '\n\nSelected files:\n' + selectedPaths.map((filePath) => '- ' + filePath).join('\n');
 }
 
 async function ensureOpenCodeServer() {
