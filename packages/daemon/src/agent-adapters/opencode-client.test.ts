@@ -1243,6 +1243,130 @@ describe('OpenCode local API client', () => {
     ]);
   });
 
+  it('streams OpenCode prompt lifecycle and interrupt events as agent status updates', async () => {
+    const client = createOpenCodeClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      fetch: async (url) => {
+        if (String(url).endsWith('/api/session')) {
+          return jsonResponse({ data: { id: 'ses_prompt_lifecycle' } });
+        }
+        if (String(url).startsWith('http://127.0.0.1:4096/api/event')) {
+          return sseResponse([
+            {
+              type: 'session.next.prompted',
+              data: {
+                sessionID: 'ses_prompt_lifecycle',
+                messageID: 'msg_prompted',
+                delivery: 'queue',
+                prompt: { text: 'queued prompt' },
+              },
+            },
+            {
+              type: 'session.next.prompt.admitted',
+              data: {
+                sessionID: 'ses_prompt_lifecycle',
+                messageID: 'msg_admitted',
+                delivery: 'steer',
+                prompt: { text: 'accepted prompt' },
+              },
+            },
+            {
+              type: 'session.next.prompt.promoted',
+              data: {
+                sessionID: 'ses_prompt_lifecycle',
+                messageID: 'msg_promoted',
+                timeCreated: '2026-07-09T03:00:00.000Z',
+                prompt: { text: 'promoted prompt' },
+              },
+            },
+            {
+              type: 'session.next.interrupt.requested',
+              data: {
+                sessionID: 'ses_prompt_lifecycle',
+              },
+            },
+          ]);
+        }
+        if (String(url).endsWith('/api/session/ses_prompt_lifecycle/prompt')) {
+          return jsonResponse({ data: { id: 'input_1' } });
+        }
+        if (String(url).endsWith('/api/session/ses_prompt_lifecycle/wait')) {
+          return emptyResponse();
+        }
+        if (String(url).endsWith('/api/session/ses_prompt_lifecycle/context')) {
+          return jsonResponse({
+            data: [{ role: 'assistant', parts: [{ type: 'text', text: 'lifecycle done' }] }],
+          });
+        }
+        return new Response('not found', { status: 404 });
+      },
+    });
+
+    const events = [];
+    for await (const event of client.streamPrompt!({ prompt: 'hello', directory: '/tmp/project' })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { type: 'session', sessionId: 'ses_prompt_lifecycle' },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          agent_name: 'OpenCode',
+          status: 'prompt_queued',
+          sessionId: 'ses_prompt_lifecycle',
+          messageId: 'msg_prompted',
+          delivery: 'queue',
+          message: 'Prompt queued',
+          detail: 'Prompt queued',
+        },
+      },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          agent_name: 'OpenCode',
+          status: 'prompt_admitted',
+          sessionId: 'ses_prompt_lifecycle',
+          messageId: 'msg_admitted',
+          delivery: 'steer',
+          message: 'Prompt admitted',
+          detail: 'Prompt admitted',
+        },
+      },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          agent_name: 'OpenCode',
+          status: 'prompt_promoted',
+          sessionId: 'ses_prompt_lifecycle',
+          messageId: 'msg_promoted',
+          timeCreated: '2026-07-09T03:00:00.000Z',
+          message: 'Queued prompt promoted',
+          detail: 'Queued prompt promoted',
+        },
+      },
+      {
+        type: 'agent_status',
+        data: {
+          backend: 'opencode',
+          agentName: 'OpenCode',
+          agent_name: 'OpenCode',
+          status: 'interrupt_requested',
+          sessionId: 'ses_prompt_lifecycle',
+          message: 'Interrupt requested',
+          detail: 'Interrupt requested',
+        },
+      },
+      { type: 'content', content: 'lifecycle done' },
+    ]);
+  });
+
   it('falls back to context text when the OpenCode SSE stream is unavailable', async () => {
     const client = createOpenCodeClient({
       baseUrl: 'http://127.0.0.1:4096',

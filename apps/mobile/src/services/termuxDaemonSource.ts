@@ -1449,6 +1449,10 @@ function extractOpenCodeAgentStatus(event, sessionId) {
   if (type === 'session.next.step.started') return openCodeStepStartedStatus(data, sessionId);
   if (type === 'session.next.step.failed') return openCodeStepFailedStatus(data, sessionId);
   if (type === 'session.next.retried') return openCodeRetriedStatus(data, sessionId);
+  if (type === 'session.next.prompted') return openCodePromptedStatus(data, sessionId);
+  if (type === 'session.next.prompt.admitted') return openCodePromptAdmittedStatus(data, sessionId);
+  if (type === 'session.next.prompt.promoted') return openCodePromptPromotedStatus(data, sessionId);
+  if (type === 'session.next.interrupt.requested') return openCodeInterruptRequestedStatus(sessionId);
   return null;
 }
 
@@ -1560,6 +1564,63 @@ function openCodeRetriedStatus(data, sessionId) {
       detail: message,
       ...(retryable !== undefined ? { retryable } : {}),
       ...(statusCode !== undefined ? { statusCode } : {}),
+    },
+  };
+}
+
+function openCodePromptedStatus(data, sessionId) {
+  const messageId = stringValue(data.messageID);
+  const delivery = stringValue(data.delivery);
+  const status = delivery === 'queue' ? 'prompt_queued' : 'prompt_requested';
+  const message = delivery === 'queue' ? 'Prompt queued' : 'Prompt requested';
+  return {
+    data: {
+      ...openCodeAgentStatusBase(status, sessionId),
+      ...(messageId ? { messageId } : {}),
+      ...(delivery ? { delivery } : {}),
+      message,
+      detail: message,
+    },
+  };
+}
+
+function openCodePromptAdmittedStatus(data, sessionId) {
+  const messageId = stringValue(data.messageID);
+  const delivery = stringValue(data.delivery);
+  const message = 'Prompt admitted';
+  return {
+    data: {
+      ...openCodeAgentStatusBase('prompt_admitted', sessionId),
+      ...(messageId ? { messageId } : {}),
+      ...(delivery ? { delivery } : {}),
+      message,
+      detail: message,
+    },
+  };
+}
+
+function openCodePromptPromotedStatus(data, sessionId) {
+  const messageId = stringValue(data.messageID);
+  const timeCreated = stringValue(data.timeCreated);
+  const message = 'Queued prompt promoted';
+  return {
+    data: {
+      ...openCodeAgentStatusBase('prompt_promoted', sessionId),
+      ...(messageId ? { messageId } : {}),
+      ...(timeCreated ? { timeCreated } : {}),
+      message,
+      detail: message,
+    },
+  };
+}
+
+function openCodeInterruptRequestedStatus(sessionId) {
+  const message = 'Interrupt requested';
+  return {
+    data: {
+      ...openCodeAgentStatusBase('interrupt_requested', sessionId),
+      message,
+      detail: message,
     },
   };
 }
