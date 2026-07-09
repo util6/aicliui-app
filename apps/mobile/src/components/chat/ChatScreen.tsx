@@ -15,6 +15,7 @@ import { useConversations } from '../../context/ConversationContext';
 import { useThemeColor } from '../../hooks/useThemeColor';
 import { useProcessedMessages, type ProcessedItem } from '../../hooks/useProcessedMessages';
 import { bridge } from '../../services/bridge';
+import { getAgentModes } from '../../constants/agentModes';
 
 type AcpModelInfo = {
   currentModelId: string | null;
@@ -91,6 +92,7 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     [conversations, conversationId],
   );
   const activeBackend = activeConversation?.extra.backend;
+  const modes = useMemo(() => getAgentModes(activeBackend), [activeBackend]);
   const filePickerRoot = useMemo(
     () =>
       activeConversation?.extra.workspace ??
@@ -223,8 +225,6 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         conversation={activeConversation}
         availableModels={modelInfo?.availableModels ?? []}
         canSwitchModel={Boolean(modelInfo?.canSwitch && modelInfo.availableModels.length > 0)}
-        onModelSelect={handleSessionModelSelect}
-        onModeSelect={handleSessionModeSelect}
       />
       <FlatList
         ref={flatListRef}
@@ -269,6 +269,13 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         onRemoveAttachedFile={handleRemoveAttachedFile}
         onClearAttachedFiles={clearAttachedFiles}
         slashCommands={slashCommands}
+        availableModels={modelInfo?.availableModels ?? []}
+        currentModelId={activeConversation?.extra.currentModelId ?? modelInfo?.currentModelId ?? null}
+        canSwitchModel={Boolean(modelInfo?.canSwitch && modelInfo.availableModels.length > 0)}
+        onModelSelect={handleSessionModelSelect}
+        modes={modes}
+        currentMode={activeConversation?.extra.sessionMode ?? modes[0]?.value ?? 'default'}
+        onModeSelect={handleSessionModeSelect}
       />
       <FilePickerSheet
         visible={isFilePickerVisible}

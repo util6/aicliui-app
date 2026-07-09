@@ -14,6 +14,55 @@ jest.mock('react-i18next', () => ({
 }));
 
 describe('ChatInputBar slash commands', () => {
+  it('opens a compact AionUi-style action sheet for attachments, model, and mode', () => {
+    const onAttachPress = jest.fn();
+    const onModelSelect = jest.fn();
+    const onModeSelect = jest.fn();
+    const screen = render(
+      <ChatInputBar
+        onSend={jest.fn()}
+        onAttachPress={onAttachPress}
+        availableModels={[
+          { id: 'gpt-5-codex', label: 'GPT-5 Codex' },
+          { id: 'claude-sonnet-4', label: 'Claude Sonnet 4' },
+        ]}
+        currentModelId='gpt-5-codex'
+        canSwitchModel
+        onModelSelect={onModelSelect}
+        modes={[
+          { value: 'default', label: 'Plan' },
+          { value: 'yolo', label: 'Full Auto' },
+        ]}
+        currentMode='default'
+        onModeSelect={onModeSelect}
+      />,
+    );
+
+    fireEvent.press(screen.getByLabelText('Open chat actions'));
+
+    expect(screen.getByText('Attach files')).toBeTruthy();
+    expect(screen.getByText('Model')).toBeTruthy();
+    expect(screen.getByText('GPT-5 Codex')).toBeTruthy();
+    expect(screen.getByText('Permission')).toBeTruthy();
+    expect(screen.getByText('Plan')).toBeTruthy();
+
+    fireEvent.press(screen.getByText('Attach files'));
+    expect(onAttachPress).toHaveBeenCalledTimes(1);
+
+    fireEvent.press(screen.getByLabelText('Open chat actions'));
+    fireEvent.press(screen.getByText('Model'));
+    fireEvent.press(screen.getByText('Claude Sonnet 4'));
+    expect(onModelSelect).toHaveBeenCalledWith({
+      id: 'claude-sonnet-4',
+      label: 'Claude Sonnet 4',
+    });
+
+    fireEvent.press(screen.getByLabelText('Open chat actions'));
+    fireEvent.press(screen.getByText('Permission'));
+    fireEvent.press(screen.getByText('Full Auto'));
+    expect(onModeSelect).toHaveBeenCalledWith('yolo');
+  });
+
   it('shows matching slash commands and inserts the selected command', () => {
     const screen = render(
       <ChatInputBar
@@ -142,7 +191,8 @@ describe('ChatInputBar slash commands', () => {
     expect(screen.getByText('App.tsx')).toBeTruthy();
     expect(screen.getByText('README.md')).toBeTruthy();
 
-    fireEvent.press(screen.getByLabelText('Attach files'));
+    fireEvent.press(screen.getByLabelText('Open chat actions'));
+    fireEvent.press(screen.getByText('Attach files'));
     expect(onAttachPress).toHaveBeenCalledTimes(1);
 
     fireEvent.press(screen.getByLabelText('Remove attached file App.tsx'));

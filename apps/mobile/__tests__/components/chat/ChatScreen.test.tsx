@@ -35,6 +35,10 @@ jest.mock('@/src/components/chat/ChatInputBar', () => ({
     onAttachPress,
     onClearAttachedFiles,
     onSend,
+    availableModels,
+    onModelSelect,
+    modes,
+    onModeSelect,
   }: {
     queuedCount?: number;
     draft?: { id: string; text: string; files?: string[] } | null;
@@ -43,6 +47,10 @@ jest.mock('@/src/components/chat/ChatInputBar', () => ({
     onAttachPress?: () => void;
     onClearAttachedFiles?: () => void;
     onSend: (text: string, files?: string[]) => void;
+    availableModels?: Array<{ id: string; label: string }>;
+    onModelSelect?: (model: { id: string; label: string }) => void;
+    modes?: Array<{ value: string; label: string }>;
+    onModeSelect?: (mode: string) => void;
   }) => {
     const { Text } = require('react-native');
     return (
@@ -50,6 +58,17 @@ jest.mock('@/src/components/chat/ChatInputBar', () => ({
         <Text testID='chat-input-queued-count'>queued:{queuedCount ?? 'missing'}</Text>
         <Text testID='chat-input-draft'>{draft ? `${draft.text}:${draft.files?.length ?? 0}` : ''}</Text>
         <Text testID='chat-input-attachments'>files:{attachedFiles?.length ?? 0}</Text>
+        <Text testID='chat-input-model-count'>models:{availableModels?.length ?? 0}</Text>
+        <Text testID='chat-input-mode-count'>modes:{modes?.length ?? 0}</Text>
+        <Text testID='select-input-model' onPress={() => {
+          const [model] = availableModels ?? [];
+          if (model) onModelSelect?.(model);
+        }}>
+          select-input-model
+        </Text>
+        <Text testID='select-input-mode' onPress={() => onModeSelect?.('autoEdit')}>
+          select-input-mode
+        </Text>
         <Text testID='open-file-picker' onPress={onAttachPress}>
           open-file-picker
         </Text>
@@ -100,28 +119,11 @@ jest.mock('@/src/components/chat/FilePickerSheet', () => ({
 }));
 
 jest.mock('@/src/components/chat/ChatSessionBar', () => ({
-  ChatSessionBar: ({
-    availableModels,
-    onModelSelect,
-    onModeSelect,
-  }: {
-    availableModels?: Array<{ id: string; label: string }>;
-    onModelSelect?: (model: { id: string; label: string }) => void;
-    onModeSelect?: (mode: string) => void;
-  }) => {
+  ChatSessionBar: ({ availableModels }: { availableModels?: Array<{ id: string; label: string }> }) => {
     const { Text } = require('react-native');
     return (
       <>
         <Text testID='session-model-count'>models:{availableModels?.length ?? 0}</Text>
-        <Text testID='select-session-model' onPress={() => {
-          const [model] = availableModels ?? [];
-          if (model) onModelSelect?.(model);
-        }}>
-          select-session-model
-        </Text>
-        <Text testID='select-session-mode' onPress={() => onModeSelect?.('autoEdit')}>
-          select-session-mode
-        </Text>
       </>
     );
   },
@@ -311,16 +313,18 @@ describe('ChatScreen', () => {
     expect(chat.clearQueuedCommandDraft).toHaveBeenCalledWith('queue-1');
   });
 
-  it('warms the active runtime and persists session bar model and mode selections through config options', async () => {
+  it('warms the active runtime and persists input action sheet model and mode selections through config options', async () => {
     const screen = render(<ChatScreen conversationId='conv-1' />);
     const conversations = mockUseConversations.mock.results.at(-1)?.value;
 
     await waitFor(() => {
       expect(screen.getByTestId('session-model-count').props.children).toEqual(['models:', 1]);
+      expect(screen.getByTestId('chat-input-model-count').props.children).toEqual(['models:', 1]);
+      expect(screen.getByTestId('chat-input-mode-count').props.children).toEqual(['modes:', 3]);
     });
     expect(mockBridgeRequest).toHaveBeenCalledWith('conversation.ensure-runtime', { conversation_id: 'conv-1' });
 
-    fireEvent.press(screen.getByTestId('select-session-model'));
+    fireEvent.press(screen.getByTestId('select-input-model'));
     await waitFor(() => {
       expect(mockBridgeRequest).toHaveBeenCalledWith('conversation.set-config-option', {
         conversation_id: 'conv-1',
@@ -333,7 +337,7 @@ describe('ChatScreen', () => {
       });
     });
 
-    fireEvent.press(screen.getByTestId('select-session-mode'));
+    fireEvent.press(screen.getByTestId('select-input-mode'));
     await waitFor(() => {
       expect(mockBridgeRequest).toHaveBeenCalledWith('conversation.set-config-option', {
         conversation_id: 'conv-1',

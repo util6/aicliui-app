@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { View, TextInput, TouchableOpacity, StyleSheet, Platform, ScrollView } from 'react-native';
+import { View, TextInput, TouchableOpacity, StyleSheet, Platform, ScrollView, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
 import { useThemeColor } from '../../hooks/useThemeColor';
 import { filterSlashCommands, matchSlashQuery, type SlashCommandItem } from '../../utils/slashCommands';
+import type { AgentModeOption } from '../../constants/agentModes';
+import { ModelPickerSheet } from './ModelPickerSheet';
+import { ModePickerSheet } from './ModePickerSheet';
 
 type ChatInputBarProps = {
   onSend: (text: string, files?: string[]) => void;
@@ -21,6 +24,13 @@ type ChatInputBarProps = {
   onClearAttachedFiles?: () => void;
   disabled?: boolean;
   slashCommands?: SlashCommandItem[];
+  availableModels?: ModelItem[];
+  currentModelId?: string | null;
+  canSwitchModel?: boolean;
+  onModelSelect?: (model: ModelItem) => void;
+  modes?: AgentModeOption[];
+  currentMode?: string;
+  onModeSelect?: (mode: string) => void;
 };
 
 type QueueWarningReason = 'emptyInput' | 'inputTooLong' | 'tooManyFiles' | 'queueFull' | 'queueTooLarge';
@@ -29,6 +39,7 @@ type ChatInputDraft = {
   text: string;
   files?: string[];
 };
+type ModelItem = { id: string; label: string };
 
 export function ChatInputBar({
   onSend,
@@ -45,6 +56,13 @@ export function ChatInputBar({
   onClearAttachedFiles,
   disabled,
   slashCommands = [],
+  availableModels = [],
+  currentModelId = null,
+  canSwitchModel = false,
+  onModelSelect,
+  modes = [],
+  currentMode,
+  onModeSelect,
 }: ChatInputBarProps) {
   const { t } = useTranslation();
   const tint = useThemeColor({}, 'tint');
@@ -58,6 +76,9 @@ export function ChatInputBar({
   const [text, setText] = useState('');
   const [draftFiles, setDraftFiles] = useState<string[]>([]);
   const [loadedDraftId, setLoadedDraftId] = useState<string | null>(null);
+  const [isActionSheetVisible, setIsActionSheetVisible] = useState(false);
+  const [isModelPickerVisible, setIsModelPickerVisible] = useState(false);
+  const [isModePickerVisible, setIsModePickerVisible] = useState(false);
   const isDisabled = disabled === true;
   const canQueue = !isDisabled && !canSend && isStreaming === true;
   const sendBlocked = isDisabled || (!canSend && !canQueue);
@@ -66,6 +87,13 @@ export function ChatInputBar({
     slashQuery === null ? [] : filterSlashCommands(slashCommands, slashQuery).slice(0, 6);
   const showSlashCommands = canSend && !sendBlocked && matchingSlashCommands.length > 0;
   const visibleAttachedFiles = uniqueFiles([...attachedFiles, ...draftFiles]);
+  const canOpenModelPicker = canSwitchModel && availableModels.length > 0 && Boolean(onModelSelect);
+  const canOpenModePicker = modes.length > 0 && Boolean(onModeSelect);
+  const hasActionEntries = Boolean(onAttachPress) || canOpenModelPicker || canOpenModePicker;
+  const currentModelLabel =
+    availableModels.find((model) => model.id === currentModelId)?.label ?? currentModelId ?? undefined;
+  const resolvedCurrentMode = currentMode ?? modes[0]?.value ?? 'default';
+  const currentModeLabel = modes.find((mode) => mode.value === resolvedCurrentMode)?.label ?? resolvedCurrentMode;
 
   useEffect(() => {
     if (!draft || draft.id === loadedDraftId) return;
@@ -190,16 +218,16 @@ export function ChatInputBar({
         </ScrollView>
       )}
       <View style={[styles.inputRow, { backgroundColor: surface }]}>
-        {onAttachPress && (
+        {hasActionEntries && (
           <TouchableOpacity
             accessibilityRole='button'
-            accessibilityLabel={t('chat.attachFiles', { defaultValue: 'Attach files' })}
+            accessibilityLabel={t('chat.openActions', { defaultValue: 'Open chat actions' })}
             style={styles.attachButton}
-            onPress={onAttachPress}
+            onPress={() => setIsActionSheetVisible(true)}
             disabled={isDisabled}
             activeOpacity={0.72}
           >
-            <Ionicons name='attach' size={24} color={isDisabled ? textSecondary : tint} />
+            <Ionicons name='add' size={24} color={isDisabled ? textSecondary : tint} />
           </TouchableOpacity>
         )}
         <TextInput
@@ -229,7 +257,121 @@ export function ChatInputBar({
           </TouchableOpacity>
         ) : null}
       </View>
+      <Modal visible={isActionSheetVisible} animationType='slide' transparent onRequestClose={() => setIsActionSheetVisible(false)}>
+        <View style={styles.sheetOverlay}>
+          <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={() => setIsActionSheetVisible(false)} />
+          <View style={[styles.actionSheet, { backgroundColor: background }]}>
+            <View style={[styles.sheetHandle, { backgroundColor: border }]} />
+            <View style={styles.sheetList}>
+              {onAttachPress && (
+                <ActionSheetRow
+                  icon='attach'
+                  title={t('chat.attachFiles', { defaultValue: 'Attach files' })}
+                  onPress={() => {
+                    setIsActionSheetVisible(false);
+                    onAttachPress();
+                  }}
+                  iconColor={tint}
+                  textColor={textColor}
+                  secondaryColor={textSecondary}
+                  borderColor={border}
+                />
+              )}
+              {canOpenModelPicker && (
+                <ActionSheetRow
+                  icon='hardware-chip-outline'
+                  title={t('chat.model', { defaultValue: 'Model' })}
+                  subtitle={currentModelLabel}
+                  onPress={() => {
+                    setIsActionSheetVisible(false);
+                    setIsModelPickerVisible(true);
+                  }}
+                  iconColor={tint}
+                  textColor={textColor}
+                  secondaryColor={textSecondary}
+                  borderColor={border}
+                />
+              )}
+              {canOpenModePicker && (
+                <ActionSheetRow
+                  icon='flash-outline'
+                  title={t('chat.permissionMode', { defaultValue: 'Permission' })}
+                  subtitle={currentModeLabel}
+                  onPress={() => {
+                    setIsActionSheetVisible(false);
+                    setIsModePickerVisible(true);
+                  }}
+                  iconColor={tint}
+                  textColor={textColor}
+                  secondaryColor={textSecondary}
+                  borderColor={border}
+                />
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+      {canOpenModelPicker && (
+        <ModelPickerSheet
+          visible={isModelPickerVisible}
+          models={availableModels}
+          currentModelId={currentModelId}
+          onSelect={(modelId) => {
+            const selectedModel = availableModels.find((model) => model.id === modelId);
+            if (selectedModel) {
+              onModelSelect?.(selectedModel);
+            }
+          }}
+          onClose={() => setIsModelPickerVisible(false)}
+        />
+      )}
+      {canOpenModePicker && (
+        <ModePickerSheet
+          visible={isModePickerVisible}
+          modes={modes}
+          currentMode={resolvedCurrentMode}
+          onSelect={(mode) => onModeSelect?.(mode)}
+          onClose={() => setIsModePickerVisible(false)}
+        />
+      )}
     </View>
+  );
+}
+
+function ActionSheetRow({
+  icon,
+  title,
+  subtitle,
+  onPress,
+  iconColor,
+  textColor,
+  secondaryColor,
+  borderColor,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle?: string;
+  onPress: () => void;
+  iconColor: string;
+  textColor: string;
+  secondaryColor: string;
+  borderColor: string;
+}) {
+  return (
+    <TouchableOpacity style={[styles.sheetRow, { borderBottomColor: borderColor }]} onPress={onPress} activeOpacity={0.72}>
+      <View style={styles.sheetRowIcon}>
+        <Ionicons name={icon} size={20} color={iconColor} />
+      </View>
+      <View style={styles.sheetRowBody}>
+        <ThemedText style={[styles.sheetRowTitle, { color: textColor }]}>{title}</ThemedText>
+        {subtitle ? (
+          <ThemedText style={[styles.sheetRowSubtitle, { color: secondaryColor }]} numberOfLines={1}>
+            {subtitle}
+          </ThemedText>
+        ) : null}
+      </View>
+      <Ionicons name='chevron-forward' size={16} color={secondaryColor} />
+    </TouchableOpacity>
   );
 }
 
@@ -385,5 +527,55 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingBottom: 2,
+  },
+  sheetOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.36)',
+  },
+  actionSheet: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 12,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    marginBottom: 8,
+  },
+  sheetList: {
+    paddingHorizontal: 8,
+  },
+  sheetRow: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  sheetRowIcon: {
+    width: 30,
+    alignItems: 'center',
+  },
+  sheetRowBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  sheetRowTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  sheetRowSubtitle: {
+    fontSize: 12,
+    lineHeight: 16,
   },
 });
