@@ -185,6 +185,84 @@ describe('WorkspaceFilesSidebar', () => {
     });
   });
 
+  it('refreshes workspace files with the current search text', async () => {
+    mockBridgeRequest
+      .mockResolvedValueOnce([
+        {
+          name: 'project',
+          fullPath: '/tmp/project',
+          relativePath: '',
+          isDir: true,
+          isFile: false,
+          children: [
+            {
+              name: 'README.md',
+              fullPath: '/tmp/project/README.md',
+              relativePath: 'README.md',
+              isDir: false,
+              isFile: true,
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          name: 'project',
+          fullPath: '/tmp/project',
+          relativePath: '',
+          isDir: true,
+          isFile: false,
+          children: [
+            {
+              name: 'app.ts',
+              fullPath: '/tmp/project/src/app.ts',
+              relativePath: 'src/app.ts',
+              isDir: false,
+              isFile: true,
+            },
+          ],
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          name: 'project',
+          fullPath: '/tmp/project',
+          relativePath: '',
+          isDir: true,
+          isFile: false,
+          children: [
+            {
+              name: 'app.ts',
+              fullPath: '/tmp/project/src/app.ts',
+              relativePath: 'src/app.ts',
+              isDir: false,
+              isFile: true,
+            },
+          ],
+        },
+      ]);
+
+    const screen = render(<WorkspaceFilesSidebar navigation={{ closeDrawer: jest.fn(), openDrawer: jest.fn() }} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('README.md')).toBeTruthy();
+    });
+    fireEvent.changeText(screen.getByTestId('workspace-file-search-input'), 'app');
+    await waitFor(() => {
+      expect(screen.getByText('app.ts')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('refresh-workspace-files'));
+
+    await waitFor(() => {
+      expect(mockBridgeRequest).toHaveBeenLastCalledWith('conversation.get-workspace', {
+        conversation_id: 'conv-1',
+        workspace: '/tmp/project',
+        path: '/tmp/project',
+        search: 'app',
+      });
+    });
+  });
+
   it('confirms before deleting a workspace file and refreshes the tree', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
       buttons?.find((button) => button.style === 'destructive')?.onPress?.();

@@ -190,6 +190,9 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
     setRenameTarget(null);
     setRenameText('');
   }, []);
+  const handleRefresh = useCallback(() => {
+    void fetchFiles(searchText);
+  }, [fetchFiles, searchText]);
   const handleSubmitRename = useCallback(async () => {
     if (!currentWorkspace || !renameTarget) return;
     const nextName = renameText.trim();
@@ -367,6 +370,17 @@ export function WorkspaceFilesSidebar({ navigation }: WorkspaceFilesSidebarProps
             <Ionicons name='close-circle' size={18} color={iconColor} />
           </TouchableOpacity>
         )}
+        <TouchableOpacity
+          accessibilityRole='button'
+          accessibilityLabel={t('files.refresh', { defaultValue: 'Refresh files' })}
+          testID='refresh-workspace-files'
+          style={styles.refreshButton}
+          onPress={handleRefresh}
+          disabled={loading}
+          activeOpacity={0.72}
+        >
+          <Ionicons name='refresh-outline' size={19} color={iconColor} />
+        </TouchableOpacity>
       </View>
 
       {loading ? (
@@ -426,6 +440,12 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   clearSearchButton: {
+    minWidth: 30,
+    minHeight: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  refreshButton: {
     minWidth: 30,
     minHeight: 30,
     alignItems: 'center',
