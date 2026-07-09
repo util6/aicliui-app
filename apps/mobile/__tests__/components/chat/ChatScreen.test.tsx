@@ -5,6 +5,8 @@ import { useChat } from '@/src/context/ChatContext';
 
 const mockUseConversations = jest.fn();
 const mockBridgeRequest = jest.fn();
+const mockUseFilesTabOptional = jest.fn();
+const mockRouterPush = jest.fn();
 
 jest.mock('@/src/context/ChatContext', () => ({
   useChat: jest.fn(),
@@ -12,6 +14,16 @@ jest.mock('@/src/context/ChatContext', () => ({
 
 jest.mock('@/src/context/ConversationContext', () => ({
   useConversations: () => mockUseConversations(),
+}));
+
+jest.mock('@/src/context/FilesTabContext', () => ({
+  useFilesTabOptional: () => mockUseFilesTabOptional(),
+}));
+
+jest.mock('expo-router', () => ({
+  useRouter: () => ({
+    push: (...args: unknown[]) => mockRouterPush(...args),
+  }),
 }));
 
 jest.mock('@/src/services/bridge', () => ({
@@ -165,9 +177,28 @@ jest.mock('@/src/components/chat/ConversationArtifactCard', () => ({
 }));
 
 jest.mock('@/src/components/chat/WorkspaceChangeSummaryCard', () => ({
-  WorkspaceChangeSummaryCard: ({ summary }: { summary: { staged: unknown[]; unstaged: unknown[] } }) => {
+  WorkspaceChangeSummaryCard: ({
+    summary,
+    onOpenFile,
+  }: {
+    summary: {
+      staged: Array<{ file_path: string; relativePath: string }>;
+      unstaged: Array<{ file_path: string; relativePath: string }>;
+    };
+    onOpenFile?: (change: { file_path: string; relativePath: string }) => void;
+  }) => {
     const { Text } = require('react-native');
-    return <Text testID='workspace-change-summary'>changes:{summary.staged.length + summary.unstaged.length}</Text>;
+    const [firstChange] = [...summary.staged, ...summary.unstaged];
+    return (
+      <>
+        <Text testID='workspace-change-summary'>changes:{summary.staged.length + summary.unstaged.length}</Text>
+        {firstChange ? (
+          <Text testID='open-workspace-change' onPress={() => onOpenFile?.(firstChange)}>
+            {firstChange.relativePath}
+          </Text>
+        ) : null}
+      </>
+    );
   },
 }));
 
@@ -178,7 +209,10 @@ describe('ChatScreen', () => {
     const editQueuedCommand = jest.fn();
     const clearQueuedCommandDraft = jest.fn();
     const updateConversationExecutionContext = jest.fn();
+    const openTab = jest.fn();
     mockBridgeRequest.mockReset();
+    mockRouterPush.mockReset();
+    mockUseFilesTabOptional.mockReturnValue({ openTab });
     mockBridgeRequest.mockImplementation((name: string, data?: Record<string, unknown>) => {
       if (name === 'conversation.ensure-runtime') {
         return Promise.resolve({
@@ -478,5 +512,46 @@ describe('ChatScreen', () => {
     await waitFor(() => {
       expect(screen.getByTestId('workspace-change-summary').props.children).toEqual(['changes:', 2]);
     });
+  });
+
+  it('opens a changed workspace file in the Files tab from the chat summary', async () => {
+    mockUseChat.mockReturnValue({
+      ...mockUseChat.mock.results.at(-1)?.value,
+      isStreaming: false,
+    });
+    const filesTab = { openTab: jest.fn() };
+    mockUseFilesTabOptional.mockReturnValue(filesTab);
+    mockBridgeRequest.mockImplementation((name: string) => {
+      if (name === 'conversation.ensure-runtime') {
+        return Promise.resolve({ recovered: false, runtime: null, config_options: [] });
+      }
+      if (name === 'fileSnapshot.compare') {
+        return Promise.resolve({
+          mode: 'git-repo',
+          branch: 'main',
+          staged: [],
+          unstaged: [
+            {
+              file_path: '/tmp/project/src/App.tsx',
+              relativePath: 'src/App.tsx',
+              operation: 'modify',
+              additions: 2,
+              deletions: 1,
+            },
+          ],
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    const screen = render(<ChatScreen conversationId='conv-1' />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('open-workspace-change')).toBeTruthy();
+    });
+    fireEvent.press(screen.getByTestId('open-workspace-change'));
+
+    expect(filesTab.openTab).toHaveBeenCalledWith('/tmp/project/src/App.tsx');
+    expect(mockRouterPush).toHaveBeenCalledWith('/(tabs)/files');
   });
 });

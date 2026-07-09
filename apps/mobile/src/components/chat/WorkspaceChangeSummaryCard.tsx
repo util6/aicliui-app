@@ -21,9 +21,10 @@ export type WorkspaceFileChangeSummary = {
 
 type WorkspaceChangeSummaryCardProps = {
   summary: WorkspaceFileChangeSummary;
+  onOpenFile?: (change: WorkspaceFileChange) => void;
 };
 
-export function WorkspaceChangeSummaryCard({ summary }: WorkspaceChangeSummaryCardProps) {
+export function WorkspaceChangeSummaryCard({ summary, onOpenFile }: WorkspaceChangeSummaryCardProps) {
   const [expanded, setExpanded] = useState(true);
   const surface = useThemeColor({}, 'surface');
   const border = useThemeColor({}, 'border');
@@ -77,10 +78,15 @@ export function WorkspaceChangeSummaryCard({ summary }: WorkspaceChangeSummaryCa
         {expanded ? (
           <View style={[styles.fileList, { borderTopColor: border }]}>
             {summary.staged.map((change) => (
-              <ChangeRow key={`staged:${change.relativePath}`} change={change} label='staged' />
+              <ChangeRow key={`staged:${change.relativePath}`} change={change} label='staged' onOpenFile={onOpenFile} />
             ))}
             {summary.unstaged.map((change) => (
-              <ChangeRow key={`unstaged:${change.relativePath}`} change={change} label='worktree' />
+              <ChangeRow
+                key={`unstaged:${change.relativePath}`}
+                change={change}
+                label='worktree'
+                onOpenFile={onOpenFile}
+              />
             ))}
           </View>
         ) : null}
@@ -89,7 +95,15 @@ export function WorkspaceChangeSummaryCard({ summary }: WorkspaceChangeSummaryCa
   );
 }
 
-function ChangeRow({ change, label }: { change: WorkspaceFileChange; label: string }) {
+function ChangeRow({
+  change,
+  label,
+  onOpenFile,
+}: {
+  change: WorkspaceFileChange;
+  label: string;
+  onOpenFile?: (change: WorkspaceFileChange) => void;
+}) {
   const success = useThemeColor({}, 'success');
   const warning = useThemeColor({}, 'warning');
   const error = useThemeColor({}, 'error');
@@ -97,7 +111,12 @@ function ChangeRow({ change, label }: { change: WorkspaceFileChange; label: stri
   const statusColor = change.operation === 'create' ? success : change.operation === 'delete' ? error : warning;
 
   return (
-    <View style={styles.fileRow}>
+    <TouchableOpacity
+      accessibilityRole='button'
+      style={styles.fileRow}
+      onPress={onOpenFile ? () => onOpenFile(change) : undefined}
+      activeOpacity={onOpenFile ? 0.72 : 1}
+    >
       <ThemedText style={[styles.operation, { color: statusColor }]}>{operationLabel(change.operation)}</ThemedText>
       <View style={styles.fileBody}>
         <ThemedText style={styles.filePath} numberOfLines={1}>
@@ -119,7 +138,7 @@ function ChangeRow({ change, label }: { change: WorkspaceFileChange; label: stri
           </ThemedText>
         ) : null}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 

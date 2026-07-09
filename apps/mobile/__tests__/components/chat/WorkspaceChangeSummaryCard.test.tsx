@@ -76,4 +76,37 @@ describe('WorkspaceChangeSummaryCard', () => {
     expect(screen.getByText('1 changed file')).toBeTruthy();
     expect(screen.queryByText('new.md')).toBeNull();
   });
+
+  it('opens a changed file from the summary list', () => {
+    const onOpenFile = jest.fn();
+    const screen = render(
+      <WorkspaceChangeSummaryCard
+        onOpenFile={onOpenFile}
+        summary={{
+          mode: 'git-repo',
+          branch: null,
+          staged: [],
+          unstaged: [
+            {
+              file_path: '/tmp/project/src/App.tsx',
+              relativePath: 'src/App.tsx',
+              operation: 'modify',
+              additions: 3,
+              deletions: 1,
+            },
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.press(screen.getByText('src/App.tsx'));
+
+    expect(onOpenFile).toHaveBeenCalledWith({
+      file_path: '/tmp/project/src/App.tsx',
+      relativePath: 'src/App.tsx',
+      operation: 'modify',
+      additions: 3,
+      deletions: 1,
+    });
+  });
 });

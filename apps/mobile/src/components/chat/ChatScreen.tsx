@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../ui/ThemedText';
 import { MessageBubble } from './MessageBubble';
@@ -13,6 +14,7 @@ import { ConversationArtifactCard } from './ConversationArtifactCard';
 import { WorkspaceChangeSummaryCard, type WorkspaceFileChangeSummary } from './WorkspaceChangeSummaryCard';
 import { useChat } from '../../context/ChatContext';
 import { useConversations } from '../../context/ConversationContext';
+import { useFilesTabOptional } from '../../context/FilesTabContext';
 import { useThemeColor } from '../../hooks/useThemeColor';
 import { useProcessedMessages, type ProcessedItem } from '../../hooks/useProcessedMessages';
 import { bridge } from '../../services/bridge';
@@ -80,6 +82,8 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
     stopGeneration,
   } = useChat();
   const { conversations, updateConversationExecutionContext } = useConversations();
+  const filesTab = useFilesTabOptional();
+  const router = useRouter();
   const [modelInfo, setModelInfo] = useState<AcpModelInfo | null>(null);
   const [configOptionIds, setConfigOptionIds] = useState<ConfigOptionIds>({});
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
@@ -244,6 +248,13 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
   const clearAttachedFiles = useCallback(() => {
     setAttachedFiles([]);
   }, []);
+  const handleOpenWorkspaceChange = useCallback(
+    (change: { file_path: string }) => {
+      filesTab?.openTab(change.file_path);
+      router.push('/(tabs)/files');
+    },
+    [filesTab, router],
+  );
 
   return (
     <KeyboardAvoidingView
@@ -263,7 +274,9 @@ export function ChatScreen({ conversationId }: ChatScreenProps) {
         keyExtractor={keyExtractor}
         contentContainerStyle={styles.list}
         ListFooterComponent={
-          workspaceChanges ? <WorkspaceChangeSummaryCard summary={workspaceChanges} /> : null
+          workspaceChanges ? (
+            <WorkspaceChangeSummaryCard summary={workspaceChanges} onOpenFile={handleOpenWorkspaceChange} />
+          ) : null
         }
         ListEmptyComponent={
           <View style={styles.empty}>
