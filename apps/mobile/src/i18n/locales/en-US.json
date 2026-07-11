@@ -34,6 +34,7 @@
     "nativeModuleUnavailable": "Rebuild the Android dev client to enable Termux integration.",
     "termuxMissing": "Install Termux first, then return to AICLIUI.",
     "runCommandPermissionMissing": "Grant AICLIUI the Run commands in Termux permission in Android settings.",
+    "openAppSettings": "Open app settings",
     "statusConnected": "Connected",
     "statusConnecting": "Connecting",
     "statusAuthFailed": "Auth failed",

@@ -2,6 +2,7 @@ import {
   hasRunCommandPermissionAsync,
   isTermuxInstalledAsync,
   openTermuxAppAsync,
+  requestRunCommandPermissionAsync,
   runCommandAsync,
   type TermuxRunCommandOptions,
 } from '@aicliui/termux';
@@ -69,7 +70,15 @@ export async function installOrStartLocalRuntime(): Promise<RuntimeInstallResult
   const probe = await probeTermuxRuntime();
   if (probe.nativeModule === 'unavailable') return { status: 'native_unavailable' };
   if (probe.termuxInstalled === 'no') return { status: 'termux_missing' };
-  if (probe.runCommandPermission === 'no') return { status: 'permission_missing' };
+  if (probe.runCommandPermission === 'no') {
+    let granted = false;
+    try {
+      granted = await requestRunCommandPermissionAsync();
+    } catch {
+      return { status: 'permission_missing' };
+    }
+    if (!granted) return { status: 'permission_missing' };
+  }
 
   const config = await getOrCreateLocalDaemonConfig();
   const started = await runTermuxCommand({

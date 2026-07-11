@@ -2,6 +2,7 @@ import {
   hasRunCommandPermissionAsync,
   isTermuxInstalledAsync,
   openTermuxAppAsync,
+  requestRunCommandPermissionAsync,
   runCommandAsync,
 } from '@aicliui/termux';
 import { spawnSync } from 'node:child_process';
@@ -19,17 +20,20 @@ jest.mock('@aicliui/termux', () => ({
   hasRunCommandPermissionAsync: jest.fn(),
   isTermuxInstalledAsync: jest.fn(),
   openTermuxAppAsync: jest.fn(),
+  requestRunCommandPermissionAsync: jest.fn(),
   runCommandAsync: jest.fn(),
 }));
 
 const mockIsTermuxInstalled = isTermuxInstalledAsync as jest.Mock;
 const mockHasRunCommandPermission = hasRunCommandPermissionAsync as jest.Mock;
 const mockOpenTermux = openTermuxAppAsync as jest.Mock;
+const mockRequestRunCommandPermission = requestRunCommandPermissionAsync as jest.Mock;
 const mockRunCommand = runCommandAsync as jest.Mock;
 
 describe('termuxRuntime', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockRequestRunCommandPermission.mockResolvedValue(false);
   });
 
   it('reports installed Termux and granted RUN_COMMAND permission', async () => {
@@ -161,12 +165,31 @@ describe('termuxRuntime', () => {
     });
   });
 
-  it('does not start Termux command when permission is missing', async () => {
+  it('requests RUN_COMMAND permission and does not start when the user denies it', async () => {
     mockIsTermuxInstalled.mockResolvedValueOnce(true);
     mockHasRunCommandPermission.mockResolvedValueOnce(false);
 
     await expect(installOrStartLocalRuntime()).resolves.toEqual({ status: 'permission_missing' });
+    expect(mockRequestRunCommandPermission).toHaveBeenCalledTimes(1);
     expect(mockRunCommand).not.toHaveBeenCalled();
+  });
+
+  it('continues runtime installation after RUN_COMMAND permission is granted', async () => {
+    jest.spyOn(localRuntime, 'getOrCreateLocalDaemonConfig').mockResolvedValueOnce({
+      host: '127.0.0.1',
+      port: '43117',
+      token: 'runtime-token',
+    });
+    mockIsTermuxInstalled.mockResolvedValueOnce(true);
+    mockHasRunCommandPermission.mockResolvedValueOnce(false);
+    mockRequestRunCommandPermission.mockResolvedValueOnce(true);
+    mockRunCommand.mockResolvedValueOnce(true);
+
+    await expect(installOrStartLocalRuntime()).resolves.toEqual({
+      status: 'started',
+      config: { host: '127.0.0.1', port: '43117', token: 'runtime-token' },
+    });
+    expect(mockRunCommand).toHaveBeenCalledTimes(1);
   });
 
   it('reports a start failure when Termux rejects the RUN_COMMAND request', async () => {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useTranslation } from 'react-i18next';
@@ -80,7 +80,15 @@ export function RuntimeStatusCard() {
         return;
       }
       if (result.status === 'permission_missing') {
-        Alert.alert(t('connect.termux'), t('connect.runCommandPermissionMissing'));
+        Alert.alert(t('connect.termux'), t('connect.runCommandPermissionMissing'), [
+          { text: t('common.cancel'), style: 'cancel' },
+          {
+            text: t('connect.openAppSettings'),
+            onPress: () => {
+              void Linking.openSettings();
+            },
+          },
+        ]);
         return;
       }
       if (result.status === 'start_failed') {

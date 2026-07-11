@@ -34,6 +34,7 @@
     "nativeModuleUnavailable": "需要重新构建 Android dev client 后才能启用 Termux 集成。",
     "termuxMissing": "请先安装 Termux，然后回到 AICLIUI。",
     "runCommandPermissionMissing": "请在安卓设置中授予 AICLIUI 在 Termux 中运行命令的权限。",
+    "openAppSettings": "打开应用设置",
     "statusConnected": "已连接",
     "statusConnecting": "连接中",
     "statusAuthFailed": "认证失败",

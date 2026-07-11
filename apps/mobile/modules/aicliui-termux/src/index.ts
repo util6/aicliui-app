@@ -3,6 +3,7 @@ import { requireNativeModule } from 'expo-modules-core';
 type AicliuiTermuxNativeModule = {
   isTermuxInstalledAsync(): Promise<boolean>;
   hasRunCommandPermissionAsync(): Promise<boolean>;
+  requestRunCommandPermissionAsync(): Promise<boolean>;
   openTermuxAppAsync(): Promise<boolean>;
   runCommandAsync(
     commandPath: string,
@@ -31,6 +32,10 @@ export function isTermuxInstalledAsync(): Promise<boolean> {
 
 export function hasRunCommandPermissionAsync(): Promise<boolean> {
   return getNativeModule().hasRunCommandPermissionAsync();
+}
+
+export function requestRunCommandPermissionAsync(): Promise<boolean> {
+  return getNativeModule().requestRunCommandPermissionAsync();
 }
 
 export function openTermuxAppAsync(): Promise<boolean> {

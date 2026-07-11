@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -108,7 +108,7 @@ export default function ConnectScreen() {
       }
 
       if (result.status === 'permission_missing') {
-        Alert.alert(t('connect.termux'), t('connect.runCommandPermissionMissing'));
+        showPermissionSettingsAlert(t);
         return;
       }
 
@@ -232,6 +232,18 @@ export default function ConnectScreen() {
       </View>
     </SafeAreaView>
   );
+}
+
+function showPermissionSettingsAlert(t: (key: string) => string): void {
+  Alert.alert(t('connect.termux'), t('connect.runCommandPermissionMissing'), [
+    { text: t('common.cancel'), style: 'cancel' },
+    {
+      text: t('connect.openAppSettings'),
+      onPress: () => {
+        void Linking.openSettings();
+      },
+    },
+  ]);
 }
 
 function agentRows(status: RuntimeStatus | null): RuntimeAgentHealth[] {

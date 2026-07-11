@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, Linking } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { RuntimeStatusCard } from '@/src/components/settings/RuntimeStatusCard';
 import { getRuntimeStatus } from '@/src/services/runtimeStatus';
@@ -38,6 +38,7 @@ jest.mock('react-i18next', () => ({
         'connect.termux': 'Termux',
         'connect.termuxMissing': 'Termux missing',
         'connect.runCommandPermissionMissing': 'Permission missing',
+        'connect.openAppSettings': 'Open app settings',
         'common.retry': 'Retry',
         'common.copied': 'Copied',
         'common.error': 'Error',
@@ -186,6 +187,28 @@ describe('RuntimeStatusCard', () => {
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Error', 'Runtime bootstrap failed'));
     alertSpy.mockRestore();
+  });
+
+  it('opens Android app settings when RUN_COMMAND permission remains denied', async () => {
+    const openSettingsSpy = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_title, _message, buttons) => {
+      buttons?.find((button) => button.text === 'Open app settings')?.onPress?.();
+    });
+    mockInstallOrStartLocalRuntime.mockResolvedValueOnce({ status: 'permission_missing' });
+    mockGetRuntimeStatus.mockResolvedValueOnce({
+      daemon: { version: '0.1.0', startedAt: 1000, pid: 123 },
+      termux: { runCommandPermission: 'denied', allowExternalApps: 'enabled' },
+      agents: [],
+    });
+
+    const screen = render(<RuntimeStatusCard />);
+
+    await waitFor(() => expect(screen.getByText('Repair local runtime')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('repair-local-runtime'));
+
+    await waitFor(() => expect(openSettingsSpy).toHaveBeenCalledTimes(1));
+    alertSpy.mockRestore();
+    openSettingsSpy.mockRestore();
   });
 
   it('shows an error state and retries through the refresh action', async () => {

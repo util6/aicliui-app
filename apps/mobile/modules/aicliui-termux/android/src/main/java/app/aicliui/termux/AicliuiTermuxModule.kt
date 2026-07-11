@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.Promise
 
 private const val TERMUX_PACKAGE = "com.termux"
 private const val RUN_COMMAND_SERVICE = "com.termux.app.RunCommandService"
@@ -28,6 +29,20 @@ class AicliuiTermuxModule : Module() {
     AsyncFunction<Boolean>("hasRunCommandPermissionAsync") {
       val context = appContext.reactContext ?: throw TermuxUnavailableException("React context is unavailable")
       context.checkSelfPermission(RUN_COMMAND_PERMISSION) == PackageManager.PERMISSION_GRANTED
+    }
+
+    AsyncFunction("requestRunCommandPermissionAsync") { promise: Promise ->
+      val context = appContext.reactContext ?: throw TermuxUnavailableException("React context is unavailable")
+      val permissions = appContext.permissions
+        ?: throw TermuxUnavailableException("Permissions manager is unavailable")
+      permissions.askForPermissions(
+        {
+          promise.resolve(
+            context.checkSelfPermission(RUN_COMMAND_PERMISSION) == PackageManager.PERMISSION_GRANTED
+          )
+        },
+        RUN_COMMAND_PERMISSION
+      )
     }
 
     AsyncFunction<Boolean>("openTermuxAppAsync") {
