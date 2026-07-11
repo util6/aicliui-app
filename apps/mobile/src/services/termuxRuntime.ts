@@ -154,6 +154,8 @@ export AICLIUI_DAEMON_TOKEN="$(cat "$AICLIUI_HOME/daemon/token")"
 export AICLIUI_DAEMON_PORT="$(cat "$AICLIUI_HOME/daemon/port")"
 export AICLIUI_BOOTSTRAP_STATUS="$AICLIUI_HOME/daemon/bootstrap.status"
 export AICLIUI_WORKSPACE="$AICLIUI_HOME/workspaces/default"
+export AICLIUI_TERMUX_RUN_COMMAND_PERMISSION="granted"
+export AICLIUI_TERMUX_ALLOW_EXTERNAL_APPS="enabled"
 
 cd "$AICLIUI_HOME/daemon"
 exec node ./aicliui-daemon.mjs >> "$AICLIUI_HOME/logs/daemon.log" 2>&1

@@ -15,10 +15,17 @@ import type {
   SetConfigOptionResponse,
 } from '@aicliui/shared';
 import { getAgentModes } from '@aicliui/shared';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { createDefaultAgentAdapterRegistry } from './agent-adapters/default-registry.js';
 import type { AgentAdapterRegistry } from './agent-adapters/registry.js';
 import { BridgeRouter } from './bridge-router.js';
-import { InMemoryConversationStore, type CreateConversationInput, type StoredMessage } from './conversation-store.js';
+import {
+  InMemoryConversationStore,
+  type CreateConversationInput,
+  type StoredTextMessage,
+} from './conversation-store.js';
 import {
   compareWorkspaceChanges,
   discardWorkspaceFile,
@@ -253,18 +260,49 @@ export function createDefaultRouter(options?: DefaultRouterOptions): BridgeRoute
               });
               break;
             case 'tool_call':
+              store.upsertStructuredMessage({
+                conversationId,
+                msgId: assistantMsgId,
+                type: 'tool_call',
+                content: event.data,
+                identityKeys: ['callId', 'toolCallId'],
+              });
               emitChatStream(context, conversationId, assistantMsgId, 'tool_call', event.data);
               break;
             case 'tool_group':
+              for (const tool of event.tools) {
+                store.upsertToolGroupMessage({ conversationId, msgId: assistantMsgId, tool });
+              }
               emitChatStream(context, conversationId, assistantMsgId, 'tool_group', event.tools);
               break;
             case 'acp_tool_call':
+              store.upsertStructuredMessage({
+                conversationId,
+                msgId: assistantMsgId,
+                type: 'acp_tool_call',
+                content: event.data,
+                identityKeys: ['toolCallId', 'callId'],
+              });
               emitChatStream(context, conversationId, assistantMsgId, 'acp_tool_call', event.data);
               break;
             case 'codex_tool_call':
+              store.upsertStructuredMessage({
+                conversationId,
+                msgId: assistantMsgId,
+                type: 'codex_tool_call',
+                content: event.data,
+                identityKeys: ['toolCallId', 'callId'],
+              });
               emitChatStream(context, conversationId, assistantMsgId, 'codex_tool_call', event.data);
               break;
             case 'plan':
+              store.upsertStructuredMessage({
+                conversationId,
+                msgId: assistantMsgId,
+                type: 'plan',
+                content: event.data,
+                identityKeys: ['sessionId'],
+              });
               emitChatStream(context, conversationId, assistantMsgId, 'plan', event.data);
               break;
             case 'context_usage':
@@ -616,7 +654,7 @@ function buildTurnCompletedEvent({
   conversationId: string;
   turnId: string;
   backend: string;
-  assistantMessage: StoredMessage;
+  assistantMessage: StoredTextMessage;
 }): ConversationTurnCompletedEvent {
   const runtime = conversation.runtime ?? idleRuntimeSummary('finished', 0);
   return {
@@ -643,7 +681,7 @@ function buildTurnCompletedEvent({
   };
 }
 
-function buildUserCreatedEvent(message: StoredMessage): ConversationUserCreatedEvent {
+function buildUserCreatedEvent(message: StoredTextMessage): ConversationUserCreatedEvent {
   return {
     conversation_id: message.conversation_id,
     msg_id: message.msg_id,
@@ -806,19 +844,59 @@ function getConfigOptionConversationUpdates(
   return {};
 }
 
-export async function getRuntimeStatus(adapters = createDefaultAgentAdapterRegistry()): Promise<RuntimeStatus> {
+export async function getRuntimeStatus(
+  adapters = createDefaultAgentAdapterRegistry(),
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<RuntimeStatus> {
+  const dataRoot = environment.AICLIUI_HOME ?? join(homedir(), '.aicliui');
+  const bootstrap = await readBootstrapStatus(
+    environment.AICLIUI_BOOTSTRAP_STATUS ?? join(dataRoot, 'daemon', 'bootstrap.status'),
+  );
   return {
     daemon: {
       version: '0.1.0',
       startedAt,
       pid: process.pid,
     },
+    ...(bootstrap ? { bootstrap } : {}),
     termux: {
-      runCommandPermission: 'unknown',
-      allowExternalApps: 'unknown',
+      runCommandPermission: runtimePermissionValue(environment.AICLIUI_TERMUX_RUN_COMMAND_PERMISSION),
+      allowExternalApps: externalAppsValue(environment.AICLIUI_TERMUX_ALLOW_EXTERNAL_APPS),
     },
     agents: await adapters.probeAll(),
   };
+}
+
+async function readBootstrapStatus(path: string): Promise<RuntimeStatus['bootstrap'] | undefined> {
+  try {
+    const values = Object.fromEntries(
+      (await readFile(path, 'utf8'))
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => {
+          const separator = line.indexOf('=');
+          return separator === -1 ? [line, ''] : [line.slice(0, separator), line.slice(separator + 1)];
+        }),
+    );
+    const updatedAt = Number(values.updatedAt);
+    return {
+      phase: typeof values.phase === 'string' && values.phase ? values.phase : 'unknown',
+      ...(typeof values.detail === 'string' && values.detail ? { detail: values.detail } : {}),
+      ...(Number.isFinite(updatedAt) ? { updatedAt } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function runtimePermissionValue(value: string | undefined): RuntimeStatus['termux']['runCommandPermission'] {
+  if (value === 'granted' || value === 'denied') return value;
+  return 'unknown';
+}
+
+function externalAppsValue(value: string | undefined): RuntimeStatus['termux']['allowExternalApps'] {
+  if (value === 'enabled' || value === 'disabled') return value;
+  return 'unknown';
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

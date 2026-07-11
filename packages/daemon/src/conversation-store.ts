@@ -10,15 +10,27 @@ type StoreOptions = {
   initialSnapshot?: ConversationStoreSnapshot;
 };
 
-export type StoredMessage = {
+type StoredMessageBase = {
   id: string;
   msg_id: string;
   conversation_id: string;
+  type: string;
+  position?: 'left' | 'right' | 'center' | 'pop';
+  content: unknown;
+  createdAt: number;
+};
+
+export type StoredTextMessage = StoredMessageBase & {
   type: 'text';
   position: 'left' | 'right';
   content: { content: string };
-  createdAt: number;
 };
+
+export type StoredStructuredMessage = StoredMessageBase & {
+  type: 'tool_call' | 'tool_group' | 'acp_tool_call' | 'codex_tool_call' | 'plan';
+};
+
+export type StoredMessage = StoredTextMessage | StoredStructuredMessage;
 
 export type CreateConversationInput = {
   type?: string;
@@ -138,12 +150,12 @@ export class InMemoryConversationStore {
   addTextMessage(input: {
     conversationId: string;
     msgId?: string;
-    position: StoredMessage['position'];
+    position: StoredTextMessage['position'];
     content: string;
-  }): StoredMessage {
+  }): StoredTextMessage {
     const conversation = this.requireConversation(input.conversationId);
     const timestamp = this.now();
-    const message: StoredMessage = {
+    const message: StoredTextMessage = {
       id: this.id(),
       msg_id: input.msgId || this.id(),
       conversation_id: input.conversationId,
@@ -153,6 +165,85 @@ export class InMemoryConversationStore {
       createdAt: timestamp,
     };
     this.messages.get(input.conversationId)?.push(message);
+    conversation.modifyTime = timestamp;
+    this.didMutate();
+    return message;
+  }
+
+  upsertToolGroupMessage(input: {
+    conversationId: string;
+    msgId: string;
+    tool: unknown;
+  }): StoredStructuredMessage | null {
+    const tool = isRecord(input.tool) ? input.tool : null;
+    const callId = tool && typeof tool.callId === 'string' ? tool.callId : null;
+    if (!tool || !callId) return null;
+    const conversation = this.requireConversation(input.conversationId);
+    const list = this.messages.get(input.conversationId) ?? [];
+    const timestamp = this.now();
+
+    for (const message of list) {
+      if (message.type !== 'tool_group' || !Array.isArray(message.content)) continue;
+      const toolIndex = message.content.findIndex(
+        (candidate) => isRecord(candidate) && candidate.callId === callId,
+      );
+      if (toolIndex === -1) continue;
+      const current = message.content[toolIndex];
+      message.content[toolIndex] = isRecord(current) ? { ...current, ...tool } : tool;
+      conversation.modifyTime = timestamp;
+      this.didMutate();
+      return message;
+    }
+
+    const message: StoredStructuredMessage = {
+      id: this.id(),
+      msg_id: input.msgId,
+      conversation_id: input.conversationId,
+      type: 'tool_group',
+      content: [tool],
+      createdAt: timestamp,
+    };
+    list.push(message);
+    this.messages.set(input.conversationId, list);
+    conversation.modifyTime = timestamp;
+    this.didMutate();
+    return message;
+  }
+
+  upsertStructuredMessage(input: {
+    conversationId: string;
+    msgId: string;
+    type: Exclude<StoredStructuredMessage['type'], 'tool_group'>;
+    content: unknown;
+    identityKeys: string[];
+  }): StoredStructuredMessage | null {
+    const content = isRecord(input.content) ? input.content : null;
+    const identity = content ? firstStringProperty(content, input.identityKeys) : null;
+    if (!content || !identity) return null;
+    const conversation = this.requireConversation(input.conversationId);
+    const list = this.messages.get(input.conversationId) ?? [];
+    const timestamp = this.now();
+
+    for (const message of list) {
+      if (message.type !== input.type || !isRecord(message.content)) continue;
+      if (firstStringProperty(message.content, input.identityKeys) !== identity) continue;
+      message.content = { ...message.content, ...content };
+      conversation.modifyTime = timestamp;
+      this.didMutate();
+      return message;
+    }
+
+    const message: StoredStructuredMessage = {
+      id: this.id(),
+      msg_id: input.msgId,
+      conversation_id: input.conversationId,
+      type: input.type,
+      position: 'left',
+      content,
+      createdAt: timestamp,
+    };
+    list.push(message);
+    this.messages.set(input.conversationId, list);
     conversation.modifyTime = timestamp;
     this.didMutate();
     return message;
@@ -262,18 +353,37 @@ function isConversation(value: unknown): value is Conversation {
 
 function validMessages(value: unknown, conversationId: string): StoredMessage[] {
   if (!Array.isArray(value)) return [];
-  return value.filter(
-    (message): message is StoredMessage =>
-      isRecord(message) &&
-      message.conversation_id === conversationId &&
-      typeof message.id === 'string' &&
-      typeof message.msg_id === 'string' &&
-      message.type === 'text' &&
-      (message.position === 'left' || message.position === 'right') &&
-      isRecord(message.content) &&
-      typeof message.content.content === 'string' &&
-      typeof message.createdAt === 'number',
-  );
+  return value.filter((message): message is StoredMessage => isStoredMessage(message, conversationId));
+}
+
+function isStoredMessage(value: unknown, conversationId: string): value is StoredMessage {
+  if (
+    !isRecord(value) ||
+    value.conversation_id !== conversationId ||
+    typeof value.id !== 'string' ||
+    typeof value.msg_id !== 'string' ||
+    typeof value.type !== 'string' ||
+    typeof value.createdAt !== 'number'
+  ) {
+    return false;
+  }
+  if (value.type === 'text') {
+    return (
+      (value.position === 'left' || value.position === 'right') &&
+      isRecord(value.content) &&
+      typeof value.content.content === 'string'
+    );
+  }
+  if (value.type === 'tool_group') return Array.isArray(value.content);
+  if (
+    value.type === 'tool_call' ||
+    value.type === 'acp_tool_call' ||
+    value.type === 'codex_tool_call' ||
+    value.type === 'plan'
+  ) {
+    return isRecord(value.content);
+  }
+  return false;
 }
 
 function validArtifacts(value: unknown, conversationId: string): ConversationArtifact[] {
@@ -319,6 +429,13 @@ function normalizeRestoredConversation(conversation: Conversation): Conversation
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function firstStringProperty(value: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    if (typeof value[key] === 'string' && value[key]) return value[key];
+  }
+  return null;
 }
 
 function randomId(): string {

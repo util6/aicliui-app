@@ -77,6 +77,61 @@ describe('JsonConversationStore', () => {
     expect(new JsonConversationStore(storePath).listConversations()).toEqual([]);
   });
 
+  it('merges and restores structured tool and plan timeline messages', () => {
+    const storePath = createStorePath();
+    const store = new JsonConversationStore(storePath, {
+      now: () => 1750,
+      id: sequentialIds('conversation-timeline', 'tool-message', 'codex-message', 'plan-message'),
+    });
+    const conversation = store.createConversation({ name: 'Timeline task' });
+
+    store.upsertToolGroupMessage({
+      conversationId: conversation.id,
+      msgId: 'assistant-1',
+      tool: { callId: 'call-1', name: 'shell', status: 'Executing' },
+    });
+    store.upsertToolGroupMessage({
+      conversationId: conversation.id,
+      msgId: 'assistant-1',
+      tool: { callId: 'call-1', status: 'Success', resultDisplay: 'done' },
+    });
+    store.upsertStructuredMessage({
+      conversationId: conversation.id,
+      msgId: 'assistant-1',
+      type: 'codex_tool_call',
+      content: { toolCallId: 'codex-1', status: 'running', title: 'Run tests' },
+      identityKeys: ['toolCallId'],
+    });
+    store.upsertStructuredMessage({
+      conversationId: conversation.id,
+      msgId: 'assistant-1',
+      type: 'codex_tool_call',
+      content: { toolCallId: 'codex-1', status: 'completed', result: 'passed' },
+      identityKeys: ['toolCallId'],
+    });
+    store.upsertStructuredMessage({
+      conversationId: conversation.id,
+      msgId: 'assistant-1',
+      type: 'plan',
+      content: { sessionId: 'session-1', entries: [{ title: 'Verify', status: 'completed' }] },
+      identityKeys: ['sessionId'],
+    });
+
+    expect(new JsonConversationStore(storePath).getMessages(conversation.id)).toEqual([
+      expect.objectContaining({
+        id: 'tool-message',
+        type: 'tool_group',
+        content: [expect.objectContaining({ callId: 'call-1', status: 'Success', resultDisplay: 'done' })],
+      }),
+      expect.objectContaining({
+        id: 'codex-message',
+        type: 'codex_tool_call',
+        content: expect.objectContaining({ toolCallId: 'codex-1', status: 'completed', result: 'passed' }),
+      }),
+      expect.objectContaining({ id: 'plan-message', type: 'plan' }),
+    ]);
+  });
+
   it('normalizes an interrupted running conversation to an idle runtime on restart', () => {
     const storePath = createStorePath();
     const store = new JsonConversationStore(storePath, {

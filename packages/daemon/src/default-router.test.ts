@@ -4,7 +4,7 @@ import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
-import { createDefaultRouter } from './default-router.js';
+import { createDefaultRouter, getRuntimeStatus } from './default-router.js';
 import { InMemoryConversationStore } from './conversation-store.js';
 import { createFallbackAgentAdapterRegistry } from './agent-adapters/default-registry.js';
 import { createAgentAdapterRegistry } from './agent-adapters/registry.js';
@@ -14,6 +14,37 @@ import type { ConversationArtifact } from '@aicliui/shared';
 const execFileAsync = promisify(execFile);
 
 describe('default bridge routes', () => {
+  it('reports injected Termux state and bootstrap progress', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'aicliui-runtime-status-'));
+    const statusPath = join(directory, 'bootstrap.status');
+    await writeFile(
+      statusPath,
+      'phase=daemon_start_requested\ndetail=Starting local daemon\nupdatedAt=1234000\n',
+      'utf8',
+    );
+    try {
+      const status = await getRuntimeStatus(createFallbackAgentAdapterRegistry(), {
+        AICLIUI_HOME: directory,
+        AICLIUI_BOOTSTRAP_STATUS: statusPath,
+        AICLIUI_TERMUX_RUN_COMMAND_PERMISSION: 'granted',
+        AICLIUI_TERMUX_ALLOW_EXTERNAL_APPS: 'enabled',
+      });
+
+      expect(status.daemon.pid).toBe(process.pid);
+      expect(status.bootstrap).toEqual({
+        phase: 'daemon_start_requested',
+        detail: 'Starting local daemon',
+        updatedAt: 1234000,
+      });
+      expect(status.termux).toEqual({
+        runCommandPermission: 'granted',
+        allowExternalApps: 'enabled',
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('creates conversations and lists them in AionUi mobile shape', async () => {
     const store = new InMemoryConversationStore({ now: () => 1000, id: () => 'conv-1' });
     const router = createDefaultRouter({ store, adapters: createFallbackAgentAdapterRegistry() });

@@ -10,6 +10,8 @@
     "dev": "tsx src/index.ts",
     "prebuild": "npm --workspace @aicliui/shared run build",
     "build": "tsc -p tsconfig.json",
+    "build:mobile-bundle": "node scripts/build-mobile-bundle.mjs",
+    "check:mobile-bundle": "node scripts/build-mobile-bundle.mjs --check",
     "pretest": "npm --workspace @aicliui/shared run build",
     "test": "vitest run",
     "prets:check": "npm --workspace @aicliui/shared run build",
@@ -22,6 +24,7 @@
   "devDependencies": {
     "@types/node": "^24.3.1",
     "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.1",
     "tsx": "^4.19.1",
     "typescript": "~5.9.2",
     "vitest": "^4.0.18"
