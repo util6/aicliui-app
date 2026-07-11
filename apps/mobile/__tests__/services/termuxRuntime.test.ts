@@ -384,4 +384,17 @@ describe('termuxRuntime', () => {
     await expect(installOrStartLocalRuntime()).resolves.toEqual({ status: 'permission_missing' });
     expect(mockRunCommand).not.toHaveBeenCalled();
   });
+
+  it('reports a start failure when Termux rejects the RUN_COMMAND request', async () => {
+    jest.spyOn(localRuntime, 'getOrCreateLocalDaemonConfig').mockResolvedValueOnce({
+      host: '127.0.0.1',
+      port: '43117',
+      token: 'runtime-token',
+    });
+    mockIsTermuxInstalled.mockResolvedValueOnce(true);
+    mockHasRunCommandPermission.mockResolvedValueOnce(true);
+    mockRunCommand.mockResolvedValueOnce(false);
+
+    await expect(installOrStartLocalRuntime()).resolves.toEqual({ status: 'start_failed' });
+  });
 });

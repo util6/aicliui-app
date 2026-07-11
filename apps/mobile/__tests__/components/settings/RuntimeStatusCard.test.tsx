@@ -144,6 +144,24 @@ describe('RuntimeStatusCard', () => {
     alertSpy.mockRestore();
   });
 
+  it('reports when Termux rejects the runtime repair command', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    mockInstallOrStartLocalRuntime.mockResolvedValueOnce({ status: 'start_failed' });
+    mockGetRuntimeStatus.mockResolvedValueOnce({
+      daemon: { version: '0.1.0', startedAt: 1000, pid: 123 },
+      termux: { runCommandPermission: 'granted', allowExternalApps: 'enabled' },
+      agents: [{ backend: 'codex', state: 'missing', detail: 'codex command not found' }],
+    });
+
+    const screen = render(<RuntimeStatusCard />);
+
+    await waitFor(() => expect(screen.getByText('Repair local runtime')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('repair-local-runtime'));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Error', 'Runtime bootstrap failed'));
+    alertSpy.mockRestore();
+  });
+
   it('shows an error state and retries through the refresh action', async () => {
     mockGetRuntimeStatus
       .mockRejectedValueOnce(new Error('offline'))

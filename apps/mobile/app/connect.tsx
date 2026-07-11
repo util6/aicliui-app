@@ -112,6 +112,11 @@ export default function ConnectScreen() {
         return;
       }
 
+      if (result.status === 'start_failed') {
+        Alert.alert(t('common.error'), t('connect.runtimeStartFailed'));
+        return;
+      }
+
       Alert.alert(t('connect.installRuntime'), t('connect.runtimeStartRequested'));
     } catch {
       Alert.alert(t('common.error'), t('connect.runtimeStartFailed'));

@@ -20,7 +20,8 @@ export type RuntimeInstallResult =
   | { status: 'started'; config: LocalDaemonConfig }
   | { status: 'native_unavailable' }
   | { status: 'termux_missing' }
-  | { status: 'permission_missing' };
+  | { status: 'permission_missing' }
+  | { status: 'start_failed' };
 
 export async function probeTermuxRuntime(): Promise<TermuxRuntimeProbe> {
   try {
@@ -59,7 +60,7 @@ export async function installOrStartLocalRuntime(): Promise<RuntimeInstallResult
   if (probe.runCommandPermission === 'no') return { status: 'permission_missing' };
 
   const config = await getOrCreateLocalDaemonConfig();
-  await runTermuxCommand({
+  const started = await runTermuxCommand({
     commandPath: '$PREFIX/bin/bash',
     args: ['-s'],
     stdin: buildTermuxBootstrapScript(config),
@@ -67,6 +68,7 @@ export async function installOrStartLocalRuntime(): Promise<RuntimeInstallResult
     background: true,
     label: 'AICLIUI runtime bootstrap',
   });
+  if (!started) return { status: 'start_failed' };
 
   return { status: 'started', config };
 }
