@@ -33,7 +33,8 @@ versionData.buildNumber = previousBuildNumber + 1;
 fs.writeFileSync(versionPath, `${JSON.stringify(versionData, null, 2)}\n`);
 
 try {
-  execFileSync('eas', ['build', ...args], {
+  const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+  execFileSync(npxCommand, ['--yes', 'eas-cli@20.5.1', 'build', ...args], {
     stdio: 'inherit',
     env: process.env,
   });
