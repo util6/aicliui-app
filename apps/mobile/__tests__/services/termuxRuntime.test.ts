@@ -78,11 +78,16 @@ describe('termuxRuntime', () => {
     expect(script).toContain('mkdir -p "$AICLIUI_HOME/bin" "$AICLIUI_HOME/daemon"');
     expect(script).toContain('export AICLIUI_BOOTSTRAP_LOG="$AICLIUI_HOME/logs/bootstrap.log"');
     expect(script).toContain('export AICLIUI_BOOTSTRAP_STATUS="$AICLIUI_HOME/daemon/bootstrap.status"');
+    expect(script).toContain('pkg install -y proot-distro');
+    expect(script).toContain('proot-distro install debian:bookworm --name aicliui');
+    expect(script).toContain('proot-distro login aicliui --shared-tmp --bind "$AICLIUI_HOME:/root/.aicliui"');
+    expect(script).toContain('https://deb.nodesource.com/setup_22.x');
+    expect(script).toContain('export AICLIUI_HOME="/root/.aicliui"');
     expect(script).toContain('write_bootstrap_status preparing "Preparing AICLIUI Termux runtime"');
-    expect(script).toContain('write_bootstrap_status installing_daemon_deps "Installing daemon npm dependencies"');
+    expect(script).toContain('write_guest_status installing_daemon_deps "Installing daemon npm dependencies"');
     expect(script).toContain('write_bootstrap_status daemon_start_requested "Starting local daemon"');
     expect(script).toContain("printf %s 'tok'\\''en' > \"$AICLIUI_HOME/daemon/token\"");
-    expect(script).toContain('pkg install -y nodejs');
+    expect(script).toContain('apt-get install -y nodejs');
     expect(script).toContain('npm install --omit=dev --prefix "$AICLIUI_HOME/daemon"');
     expect(script).toContain('npm install -g opencode-ai@latest');
     expect(script).toContain('npm install -g @google/gemini-cli@latest');
@@ -332,6 +337,21 @@ describe('termuxRuntime', () => {
     expect(script).toContain('kill "$OLD_PID" >/dev/null 2>&1 || true');
     expect(script).toContain('printf %s "$$" > "$AICLIUI_DAEMON_PID_FILE"');
     expect(script).toContain('nohup "$AICLIUI_HOME/bin/start-daemon.sh"');
+  });
+
+  it('generates a syntactically valid Termux bootstrap shell script', () => {
+    const script = buildTermuxBootstrapScript({
+      host: '127.0.0.1',
+      port: '43117',
+      token: 'runtime-token',
+    });
+    const result = spawnSync('/bin/bash', ['-n'], {
+      input: script,
+      encoding: 'utf8',
+    });
+
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
   });
 
   it('generates a syntactically valid ESM daemon script', () => {
