@@ -34,6 +34,8 @@ type RuntimeRowProps = {
   tone: 'ready' | 'pending' | 'missing';
 };
 
+const BOOTSTRAP_CONNECTION_TIMEOUT_MS = 10 * 60 * 1000;
+
 export default function ConnectScreen() {
   const { t } = useTranslation();
   const { connect, connectionState } = useConnection();
@@ -119,7 +121,14 @@ export default function ConnectScreen() {
         return;
       }
 
-      Alert.alert(t('connect.installRuntime'), t('connect.runtimeStartRequested'));
+      await connect(result.config.host, result.config.port, result.config.token);
+      try {
+        await waitForConnected(BOOTSTRAP_CONNECTION_TIMEOUT_MS);
+        setDaemonStatus(await getRuntimeStatus());
+        router.replace('/(tabs)/chat');
+      } catch {
+        Alert.alert(t('connect.installRuntime'), t('connect.runtimeStillStarting'));
+      }
     } catch {
       Alert.alert(t('common.error'), t('connect.runtimeStartFailed'));
     } finally {
@@ -217,7 +226,12 @@ export default function ConnectScreen() {
           disabled={isInstalling}
         >
           {isInstalling ? (
-            <ActivityIndicator color={tint} />
+            <>
+              <ActivityIndicator color={tint} />
+              <ThemedText style={[styles.secondaryButtonText, { color: tint }]}>
+                {t('connect.preparingRuntime')}
+              </ThemedText>
+            </>
           ) : (
             <>
               <Ionicons name='download-outline' size={20} color={tint} />
@@ -353,7 +367,7 @@ function RuntimeRow({ icon, label, value, tone }: RuntimeRowProps) {
   );
 }
 
-function waitForConnected(): Promise<void> {
+function waitForConnected(timeoutMs = 5000): Promise<void> {
   if (wsService.state === 'connected') {
     return Promise.resolve();
   }
@@ -362,7 +376,7 @@ function waitForConnected(): Promise<void> {
     const timeout = setTimeout(() => {
       unsubscribe();
       reject(new Error('timeout'));
-    }, 5000);
+    }, timeoutMs);
 
     const unsubscribe = wsService.onStateChange((state) => {
       if (state === 'connected') {

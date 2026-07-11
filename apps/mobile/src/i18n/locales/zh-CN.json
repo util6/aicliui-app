@@ -30,6 +30,8 @@
     "refreshRuntimeStatus": "刷新运行状态",
     "installComingSoon": "Termux 初始化和内置 daemon 安装会在下一批实现中接入。",
     "runtimeStartRequested": "已向 Termux 发送运行环境启动命令。稍等片刻后连接本地 daemon。",
+    "preparingRuntime": "正在准备运行环境",
+    "runtimeStillStarting": "Termux 仍在准备运行环境。AICLIUI 会在后台继续尝试连接。",
     "runtimeStartFailed": "通过 Termux 启动运行环境失败。",
     "nativeModuleUnavailable": "需要重新构建 Android dev client 后才能启用 Termux 集成。",
     "termuxMissing": "请先安装 Termux，然后回到 AICLIUI。",

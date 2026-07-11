@@ -30,6 +30,8 @@
     "refreshRuntimeStatus": "Refresh Runtime Status",
     "installComingSoon": "Termux bootstrap and bundled daemon installation will be wired in the next implementation slice.",
     "runtimeStartRequested": "Runtime bootstrap was sent to Termux. Wait a moment, then connect the local daemon.",
+    "preparingRuntime": "Preparing runtime",
+    "runtimeStillStarting": "The runtime is still preparing in Termux. AICLIUI will keep reconnecting in the background.",
     "runtimeStartFailed": "Failed to start the runtime through Termux.",
     "nativeModuleUnavailable": "Rebuild the Android dev client to enable Termux integration.",
     "termuxMissing": "Install Termux first, then return to AICLIUI.",
