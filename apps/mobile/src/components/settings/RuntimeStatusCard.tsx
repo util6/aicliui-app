@@ -12,6 +12,7 @@ import {
   type RuntimeAgentHealth,
   type RuntimeStatus,
 } from '../../services/runtimeStatus';
+import { installOrStartLocalRuntime, openTermuxIfAvailable } from '../../services/termuxRuntime';
 
 type RuntimeTone = 'ready' | 'pending' | 'missing';
 const DAEMON_LOG_PATH = '~/.aicliui/logs/daemon.log';
@@ -32,6 +33,7 @@ export function RuntimeStatusCard() {
   const textSecondary = useThemeColor({}, 'textSecondary');
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRepairing, setIsRepairing] = useState(false);
   const [hasError, setHasError] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -58,6 +60,33 @@ export function RuntimeStatusCard() {
       Alert.alert(t('common.error'), DAEMON_LOG_PATH);
     }
   }, [t]);
+
+  const repairRuntime = useCallback(async () => {
+    setIsRepairing(true);
+    try {
+      const result = await installOrStartLocalRuntime();
+      if (result.status === 'native_unavailable') {
+        Alert.alert(t('connect.installRuntime'), t('connect.nativeModuleUnavailable'));
+        return;
+      }
+      if (result.status === 'termux_missing') {
+        Alert.alert(t('connect.termux'), t('connect.termuxMissing'));
+        await openTermuxIfAvailable();
+        return;
+      }
+      if (result.status === 'permission_missing') {
+        Alert.alert(t('connect.termux'), t('connect.runCommandPermissionMissing'));
+        return;
+      }
+      Alert.alert(t('connect.installRuntime'), t('connect.runtimeStartRequested'));
+    } catch {
+      Alert.alert(t('common.error'), t('connect.runtimeStartFailed'));
+    } finally {
+      setIsRepairing(false);
+    }
+  }, [t]);
+
+  const showRepairAction = shouldOfferRuntimeRepair(status, hasError);
 
   return (
     <View style={styles.section}>
@@ -159,8 +188,34 @@ export function RuntimeStatusCard() {
           </View>
         )}
       </View>
+      {showRepairAction && (
+        <TouchableOpacity
+          accessibilityRole='button'
+          accessibilityLabel={t('settings.repairRuntime')}
+          testID='repair-local-runtime'
+          style={[styles.repairButton, { backgroundColor: surface, borderColor: border }]}
+          onPress={repairRuntime}
+          activeOpacity={0.75}
+          disabled={isRepairing}
+        >
+          {isRepairing ? (
+            <ActivityIndicator size='small' color={tint} />
+          ) : (
+            <Ionicons name='construct-outline' size={18} color={tint} />
+          )}
+          <ThemedText style={[styles.repairButtonText, { color: tint }]}>{t('settings.repairRuntime')}</ThemedText>
+        </TouchableOpacity>
+      )}
     </View>
   );
+}
+
+function shouldOfferRuntimeRepair(status: RuntimeStatus | null, hasError: boolean): boolean {
+  if (hasError) return true;
+  if (!status) return false;
+  if (status.termux.runCommandPermission === 'denied' || status.termux.allowExternalApps === 'disabled') return true;
+  if (status.bootstrap && (status.bootstrap.phase.endsWith('_failed') || status.bootstrap.phase === 'error')) return true;
+  return status.agents.some((agent) => agent.state === 'missing' || agent.state === 'error');
 }
 
 function RuntimeRow({ icon, label, value, tone }: RuntimeRowProps) {
@@ -308,5 +363,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 10,
+  },
+  repairButton: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+  },
+  repairButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

@@ -165,6 +165,7 @@
     "termuxExternalApps": "Allow external apps",
     "copyDaemonLogPath": "Copy daemon log path",
     "openRuntimeSettings": "Open runtime settings",
+    "repairRuntime": "Repair local runtime",
     "updatedJustNow": "Updated just now",
     "updatedMinutesAgo": "Updated {{count}}m ago",
     "updatedHoursAgo": "Updated {{count}}h ago",

@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { RuntimeStatusCard } from '@/src/components/settings/RuntimeStatusCard';
 import { getRuntimeStatus } from '@/src/services/runtimeStatus';
+import { installOrStartLocalRuntime } from '@/src/services/termuxRuntime';
 
 const mockSetStringAsync = jest.fn();
 
@@ -24,7 +25,15 @@ jest.mock('react-i18next', () => ({
         'settings.runtimeUnavailable': 'Runtime status unavailable',
         'settings.termuxExternalApps': 'Allow external apps',
         'settings.copyDaemonLogPath': 'Copy daemon log path',
+        'settings.repairRuntime': 'Repair local runtime',
         'settings.updatedJustNow': 'Updated just now',
+        'connect.installRuntime': 'Install Runtime',
+        'connect.runtimeStartRequested': 'Runtime bootstrap requested',
+        'connect.runtimeStartFailed': 'Runtime bootstrap failed',
+        'connect.nativeModuleUnavailable': 'Native module unavailable',
+        'connect.termux': 'Termux',
+        'connect.termuxMissing': 'Termux missing',
+        'connect.runCommandPermissionMissing': 'Permission missing',
         'common.retry': 'Retry',
         'common.copied': 'Copied',
         'common.error': 'Error',
@@ -54,12 +63,22 @@ jest.mock('@/src/services/runtimeStatus', () => ({
   },
 }));
 
+jest.mock('@/src/services/termuxRuntime', () => ({
+  installOrStartLocalRuntime: jest.fn(),
+  openTermuxIfAvailable: jest.fn(),
+}));
+
 const mockGetRuntimeStatus = getRuntimeStatus as jest.Mock;
+const mockInstallOrStartLocalRuntime = installOrStartLocalRuntime as jest.Mock;
 
 describe('RuntimeStatusCard', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockSetStringAsync.mockResolvedValue(undefined);
+    mockInstallOrStartLocalRuntime.mockResolvedValue({
+      status: 'started',
+      config: { host: '127.0.0.1', port: '43117', token: 'token' },
+    });
   });
 
   it('loads and renders daemon, Termux, and CLI agent status', async () => {
@@ -104,6 +123,24 @@ describe('RuntimeStatusCard', () => {
       expect(mockSetStringAsync).toHaveBeenCalledWith('~/.aicliui/logs/daemon.log');
     });
     expect(alertSpy).toHaveBeenCalledWith('Copied', '~/.aicliui/logs/daemon.log');
+    alertSpy.mockRestore();
+  });
+
+  it('repairs the local runtime when an agent is missing', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    mockGetRuntimeStatus.mockResolvedValueOnce({
+      daemon: { version: '0.1.0', startedAt: 1000, pid: 123 },
+      termux: { runCommandPermission: 'granted', allowExternalApps: 'enabled' },
+      agents: [{ backend: 'opencode', state: 'missing', detail: 'opencode command not found' }],
+    });
+
+    const screen = render(<RuntimeStatusCard />);
+
+    await waitFor(() => expect(screen.getByText('Repair local runtime')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('repair-local-runtime'));
+
+    await waitFor(() => expect(mockInstallOrStartLocalRuntime).toHaveBeenCalledTimes(1));
+    expect(alertSpy).toHaveBeenCalledWith('Install Runtime', 'Runtime bootstrap requested');
     alertSpy.mockRestore();
   });
 
