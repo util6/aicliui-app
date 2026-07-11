@@ -11,6 +11,7 @@ import * as localRuntime from '@/src/services/localRuntime';
 import {
   buildTermuxBootstrapScript,
   getAgentLoginCommand,
+  getTermuxExternalAppsSetupCommand,
   installOrStartLocalRuntime,
   openTermuxIfAvailable,
   probeTermuxRuntime,
@@ -84,6 +85,16 @@ describe('termuxRuntime', () => {
     expect(command).toContain('--bind "$HOME/.aicliui:/root/.aicliui"');
     expect(command).toContain('cd /root/.aicliui/workspaces/default');
     expect(command).toContain(expectedCommand);
+  });
+
+  it('builds an idempotent Termux external-apps setup command', () => {
+    const command = getTermuxExternalAppsSetupCommand();
+
+    expect(command).toContain('mkdir -p "$HOME/.termux"');
+    expect(command).toContain("grep -q '^allow-external-apps='");
+    expect(command).toContain('allow-external-apps=true');
+    expect(command).toContain('termux-reload-settings');
+    expect(spawnSync('/bin/bash', ['-n'], { input: command }).status).toBe(0);
   });
 
   it('builds the Debian bootstrap and daemon launch chain', () => {

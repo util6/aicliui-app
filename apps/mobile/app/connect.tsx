@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, Linking, StyleSheet, TouchableOpacity, View }
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { useTranslation } from 'react-i18next';
 import { ThemedText } from '../src/components/ui/ThemedText';
 import { useConnection } from '../src/context/ConnectionContext';
@@ -18,8 +19,10 @@ import { wsService } from '../src/services/websocket';
 import { getOrCreateLocalDaemonConfig, LOCAL_DAEMON_PORT } from '../src/services/localRuntime';
 import {
   installOrStartLocalRuntime,
+  getTermuxExternalAppsSetupCommand,
   openTermuxIfAvailable,
   probeTermuxRuntime,
+  TERMUX_DOWNLOAD_URL,
   type ProbeState,
   type TermuxRuntimeProbe,
 } from '../src/services/termuxRuntime';
@@ -102,8 +105,7 @@ export default function ConnectScreen() {
       }
 
       if (result.status === 'termux_missing') {
-        Alert.alert(t('connect.termux'), t('connect.termuxMissing'));
-        await openTermuxIfAvailable();
+        showTermuxInstallAlert(t);
         return;
       }
 
@@ -122,6 +124,20 @@ export default function ConnectScreen() {
       Alert.alert(t('common.error'), t('connect.runtimeStartFailed'));
     } finally {
       setIsInstalling(false);
+    }
+  };
+
+  const handleConfigureTermux = async () => {
+    try {
+      await Clipboard.setStringAsync(getTermuxExternalAppsSetupCommand());
+      const opened = await openTermuxIfAvailable();
+      if (!opened) {
+        showTermuxInstallAlert(t);
+        return;
+      }
+      Alert.alert(t('connect.configureTermux'), t('connect.configureTermuxCopied'));
+    } catch {
+      Alert.alert(t('common.error'), t('connect.configureTermuxFailed'));
     }
   };
 
@@ -214,6 +230,17 @@ export default function ConnectScreen() {
 
         <TouchableOpacity
           style={[styles.secondaryButton, { borderColor: border }]}
+          onPress={handleConfigureTermux}
+          activeOpacity={0.8}
+        >
+          <Ionicons name='settings-outline' size={20} color={tint} />
+          <ThemedText style={[styles.secondaryButtonText, { color: tint }]}>
+            {t('connect.configureTermux')}
+          </ThemedText>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.secondaryButton, { borderColor: border }]}
           onPress={refreshRuntimeStatus}
           activeOpacity={0.8}
           disabled={isCheckingRuntime}
@@ -241,6 +268,18 @@ function showPermissionSettingsAlert(t: (key: string) => string): void {
       text: t('connect.openAppSettings'),
       onPress: () => {
         void Linking.openSettings();
+      },
+    },
+  ]);
+}
+
+function showTermuxInstallAlert(t: (key: string) => string): void {
+  Alert.alert(t('connect.termux'), t('connect.termuxMissing'), [
+    { text: t('common.cancel'), style: 'cancel' },
+    {
+      text: t('connect.getTermux'),
+      onPress: () => {
+        void Linking.openURL(TERMUX_DOWNLOAD_URL);
       },
     },
   ]);

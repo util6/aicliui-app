@@ -10,6 +10,7 @@ import { TERMUX_DAEMON_SOURCE } from './termuxDaemonSource';
 import { getOrCreateLocalDaemonConfig, LOCAL_DAEMON_PORT, type LocalDaemonConfig } from './localRuntime';
 
 export type LocalAgentBackend = 'opencode' | 'gemini' | 'codex';
+export const TERMUX_DOWNLOAD_URL = 'https://f-droid.org/packages/com.termux/';
 
 export type ProbeState = 'unknown' | 'yes' | 'no';
 
@@ -64,6 +65,19 @@ export function getAgentLoginCommand(backend: LocalAgentBackend): string {
   };
 
   return `proot-distro login aicliui --shared-tmp --bind "$HOME/.aicliui:/root/.aicliui" -- /bin/bash -lc 'cd /root/.aicliui/workspaces/default && exec ${loginCommand[backend]}'`;
+}
+
+export function getTermuxExternalAppsSetupCommand(): string {
+  return [
+    'mkdir -p "$HOME/.termux"',
+    'touch "$HOME/.termux/termux.properties"',
+    "if grep -q '^allow-external-apps=' \"$HOME/.termux/termux.properties\"; then",
+    "  sed -i 's/^allow-external-apps=.*/allow-external-apps=true/' \"$HOME/.termux/termux.properties\"",
+    'else',
+    "  printf '\\nallow-external-apps=true\\n' >> \"$HOME/.termux/termux.properties\"",
+    'fi',
+    'termux-reload-settings',
+  ].join('\n');
 }
 
 export async function installOrStartLocalRuntime(): Promise<RuntimeInstallResult> {
