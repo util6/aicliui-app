@@ -1,10 +1,15 @@
 import { WebSocketServer } from 'ws';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { createDefaultRouter } from './default-router.js';
+import { JsonConversationStore } from './conversation-store.js';
 import type { BridgeMessage } from '@aicliui/shared';
 
 const port = Number.parseInt(process.env.AICLIUI_DAEMON_PORT ?? '43117', 10);
 const token = process.env.AICLIUI_DAEMON_TOKEN;
-const router = createDefaultRouter();
+const dataRoot = process.env.AICLIUI_HOME ?? join(homedir(), '.aicliui');
+const storePath = process.env.AICLIUI_STORE_PATH ?? join(dataRoot, 'daemon', 'store.json');
+const router = createDefaultRouter({ store: new JsonConversationStore(storePath) });
 
 const server = new WebSocketServer({
   host: '127.0.0.1',

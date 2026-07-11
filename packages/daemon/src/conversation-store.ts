@@ -1,7 +1,14 @@
 import type { Conversation, ConversationArtifact, ConversationArtifactStatus } from '@aicliui/shared';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 type Clock = () => number;
 type IdGenerator = () => string;
+type StoreOptions = {
+  now?: Clock;
+  id?: IdGenerator;
+  initialSnapshot?: ConversationStoreSnapshot;
+};
 
 export type StoredMessage = {
   id: string;
@@ -20,6 +27,13 @@ export type CreateConversationInput = {
   extra?: Conversation['extra'];
 };
 
+export type ConversationStoreSnapshot = {
+  version: 1;
+  conversations: Conversation[];
+  messages: Record<string, StoredMessage[]>;
+  artifacts: Record<string, ConversationArtifact[]>;
+};
+
 export class InMemoryConversationStore {
   private readonly conversations = new Map<string, Conversation>();
   private readonly messages = new Map<string, StoredMessage[]>();
@@ -27,9 +41,12 @@ export class InMemoryConversationStore {
   private readonly now: Clock;
   private readonly id: IdGenerator;
 
-  constructor(options?: { now?: Clock; id?: IdGenerator }) {
+  constructor(options?: StoreOptions) {
     this.now = options?.now ?? Date.now;
     this.id = options?.id ?? randomId;
+    if (options?.initialSnapshot) {
+      this.restoreSnapshot(options.initialSnapshot);
+    }
   }
 
   createConversation(input: CreateConversationInput): Conversation {
@@ -56,6 +73,7 @@ export class InMemoryConversationStore {
     this.conversations.set(conversation.id, conversation);
     this.messages.set(conversation.id, []);
     this.artifacts.set(conversation.id, []);
+    this.didMutate();
     return conversation;
   }
 
@@ -91,6 +109,7 @@ export class InMemoryConversationStore {
       next[index] = artifact;
     }
     this.artifacts.set(artifact.conversation_id, next);
+    this.didMutate();
     return artifact;
   }
 
@@ -112,6 +131,7 @@ export class InMemoryConversationStore {
     const next = [...current];
     next[index] = updated;
     this.artifacts.set(conversationId, next);
+    this.didMutate();
     return updated;
   }
 
@@ -134,6 +154,7 @@ export class InMemoryConversationStore {
     };
     this.messages.get(input.conversationId)?.push(message);
     conversation.modifyTime = timestamp;
+    this.didMutate();
     return message;
   }
 
@@ -141,6 +162,7 @@ export class InMemoryConversationStore {
     const existed = this.conversations.delete(id);
     this.messages.delete(id);
     this.artifacts.delete(id);
+    if (existed) this.didMutate();
     return existed;
   }
 
@@ -153,7 +175,29 @@ export class InMemoryConversationStore {
       extra: updates.extra ? { ...conversation.extra, ...updates.extra } : conversation.extra,
       modifyTime: this.now(),
     });
+    this.didMutate();
     return true;
+  }
+
+  exportSnapshot(): ConversationStoreSnapshot {
+    return {
+      version: 1,
+      conversations: [...this.conversations.values()],
+      messages: Object.fromEntries(this.messages.entries()),
+      artifacts: Object.fromEntries(this.artifacts.entries()),
+    };
+  }
+
+  protected didMutate(): void {}
+
+  private restoreSnapshot(snapshot: ConversationStoreSnapshot): void {
+    for (const rawConversation of snapshot.conversations) {
+      if (!isConversation(rawConversation)) continue;
+      const conversation = normalizeRestoredConversation(rawConversation);
+      this.conversations.set(conversation.id, conversation);
+      this.messages.set(conversation.id, validMessages(snapshot.messages[conversation.id], conversation.id));
+      this.artifacts.set(conversation.id, validArtifacts(snapshot.artifacts[conversation.id], conversation.id));
+    }
   }
 
   private requireConversation(id: string): Conversation {
@@ -163,6 +207,118 @@ export class InMemoryConversationStore {
     }
     return conversation;
   }
+}
+
+export class JsonConversationStore extends InMemoryConversationStore {
+  private readonly filePath: string;
+
+  constructor(filePath: string, options?: Omit<StoreOptions, 'initialSnapshot'>) {
+    super({ ...options, initialSnapshot: readSnapshot(filePath) });
+    this.filePath = filePath;
+  }
+
+  protected override didMutate(): void {
+    const directory = dirname(this.filePath);
+    const temporaryPath = `${this.filePath}.${process.pid}.tmp`;
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    try {
+      writeFileSync(temporaryPath, `${JSON.stringify(this.exportSnapshot(), null, 2)}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      renameSync(temporaryPath, this.filePath);
+    } catch (error) {
+      rmSync(temporaryPath, { force: true });
+      throw error;
+    }
+  }
+}
+
+function readSnapshot(filePath: string): ConversationStoreSnapshot | undefined {
+  try {
+    const value = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
+    return isConversationStoreSnapshot(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isConversationStoreSnapshot(value: unknown): value is ConversationStoreSnapshot {
+  if (!isRecord(value) || value.version !== 1) return false;
+  return Array.isArray(value.conversations) && isRecord(value.messages) && isRecord(value.artifacts);
+}
+
+function isConversation(value: unknown): value is Conversation {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.createTime === 'number' &&
+    typeof value.modifyTime === 'number' &&
+    isRecord(value.model) &&
+    isRecord(value.extra)
+  );
+}
+
+function validMessages(value: unknown, conversationId: string): StoredMessage[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (message): message is StoredMessage =>
+      isRecord(message) &&
+      message.conversation_id === conversationId &&
+      typeof message.id === 'string' &&
+      typeof message.msg_id === 'string' &&
+      message.type === 'text' &&
+      (message.position === 'left' || message.position === 'right') &&
+      isRecord(message.content) &&
+      typeof message.content.content === 'string' &&
+      typeof message.createdAt === 'number',
+  );
+}
+
+function validArtifacts(value: unknown, conversationId: string): ConversationArtifact[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (artifact): artifact is ConversationArtifact =>
+      isRecord(artifact) &&
+      artifact.conversation_id === conversationId &&
+      typeof artifact.id === 'string' &&
+      (artifact.kind === 'cron_trigger' || artifact.kind === 'skill_suggest') &&
+      (artifact.status === 'active' ||
+        artifact.status === 'pending' ||
+        artifact.status === 'dismissed' ||
+        artifact.status === 'saved') &&
+      isRecord(artifact.payload) &&
+      typeof artifact.created_at === 'number' &&
+      typeof artifact.updated_at === 'number',
+  );
+}
+
+function normalizeRestoredConversation(conversation: Conversation): Conversation {
+  const runtime = conversation.runtime;
+  const wasInterrupted =
+    conversation.status === 'running' ||
+    conversation.status === 'waiting_confirmation' ||
+    Boolean(runtime && (runtime.state !== 'idle' || runtime.is_processing || runtime.has_task));
+  if (!wasInterrupted) return conversation;
+
+  return {
+    ...conversation,
+    status: 'finished',
+    runtime: {
+      state: 'idle',
+      can_send_message: true,
+      has_task: false,
+      task_status: 'finished',
+      is_processing: false,
+      pending_confirmations: 0,
+      turn_id: null,
+    },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function randomId(): string {

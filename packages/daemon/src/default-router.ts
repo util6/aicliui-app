@@ -811,6 +811,7 @@ export async function getRuntimeStatus(adapters = createDefaultAgentAdapterRegis
     daemon: {
       version: '0.1.0',
       startedAt,
+      pid: process.pid,
     },
     termux: {
       runCommandPermission: 'unknown',
