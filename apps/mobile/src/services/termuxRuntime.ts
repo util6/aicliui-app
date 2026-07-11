@@ -8,6 +8,8 @@ import {
 import { TERMUX_DAEMON_SOURCE } from './termuxDaemonSource';
 import { getOrCreateLocalDaemonConfig, LOCAL_DAEMON_PORT, type LocalDaemonConfig } from './localRuntime';
 
+export type LocalAgentBackend = 'opencode' | 'gemini' | 'codex';
+
 export type ProbeState = 'unknown' | 'yes' | 'no';
 
 export type TermuxRuntimeProbe = {
@@ -51,6 +53,16 @@ export async function openTermuxIfAvailable(): Promise<boolean> {
 
 export async function runTermuxCommand(options: TermuxRunCommandOptions): Promise<boolean> {
   return runCommandAsync(options);
+}
+
+export function getAgentLoginCommand(backend: LocalAgentBackend): string {
+  const loginCommand: Record<LocalAgentBackend, string> = {
+    opencode: 'opencode auth login',
+    gemini: 'gemini',
+    codex: 'codex login',
+  };
+
+  return `proot-distro login aicliui --shared-tmp --bind "$HOME/.aicliui:/root/.aicliui" -- /bin/bash -lc 'cd /root/.aicliui/workspaces/default && exec ${loginCommand[backend]}'`;
 }
 
 export async function installOrStartLocalRuntime(): Promise<RuntimeInstallResult> {

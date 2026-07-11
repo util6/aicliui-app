@@ -3,7 +3,7 @@ import { Alert } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import { RuntimeStatusCard } from '@/src/components/settings/RuntimeStatusCard';
 import { getRuntimeStatus } from '@/src/services/runtimeStatus';
-import { installOrStartLocalRuntime } from '@/src/services/termuxRuntime';
+import { installOrStartLocalRuntime, openTermuxIfAvailable } from '@/src/services/termuxRuntime';
 
 const mockSetStringAsync = jest.fn();
 
@@ -18,7 +18,7 @@ jest.mock('expo-clipboard', () => ({
 
 jest.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => {
+    t: (key: string, options?: Record<string, unknown>) => {
       const labels: Record<string, string> = {
         'settings.runtime': 'Runtime',
         'settings.refreshRuntime': 'Refresh',
@@ -26,6 +26,10 @@ jest.mock('react-i18next', () => ({
         'settings.termuxExternalApps': 'Allow external apps',
         'settings.copyDaemonLogPath': 'Copy daemon log path',
         'settings.repairRuntime': 'Repair local runtime',
+        'settings.configureAgentLogin': `Configure ${String(options?.agent ?? '')}`,
+        'settings.agentLoginTitle': `${String(options?.agent ?? '')} login`,
+        'settings.agentLoginOpened': 'Login command copied. Run it in Termux.',
+        'settings.agentLoginOpenFailed': 'Login command copied. Open Termux and run it.',
         'settings.updatedJustNow': 'Updated just now',
         'connect.installRuntime': 'Install Runtime',
         'connect.runtimeStartRequested': 'Runtime bootstrap requested',
@@ -64,12 +68,14 @@ jest.mock('@/src/services/runtimeStatus', () => ({
 }));
 
 jest.mock('@/src/services/termuxRuntime', () => ({
+  getAgentLoginCommand: (backend: string) => `login ${backend}`,
   installOrStartLocalRuntime: jest.fn(),
   openTermuxIfAvailable: jest.fn(),
 }));
 
 const mockGetRuntimeStatus = getRuntimeStatus as jest.Mock;
 const mockInstallOrStartLocalRuntime = installOrStartLocalRuntime as jest.Mock;
+const mockOpenTermuxIfAvailable = openTermuxIfAvailable as jest.Mock;
 
 describe('RuntimeStatusCard', () => {
   beforeEach(() => {
@@ -79,6 +85,7 @@ describe('RuntimeStatusCard', () => {
       status: 'started',
       config: { host: '127.0.0.1', port: '43117', token: 'token' },
     });
+    mockOpenTermuxIfAvailable.mockResolvedValue(true);
   });
 
   it('loads and renders daemon, Termux, and CLI agent status', async () => {
@@ -123,6 +130,25 @@ describe('RuntimeStatusCard', () => {
       expect(mockSetStringAsync).toHaveBeenCalledWith('~/.aicliui/logs/daemon.log');
     });
     expect(alertSpy).toHaveBeenCalledWith('Copied', '~/.aicliui/logs/daemon.log');
+    alertSpy.mockRestore();
+  });
+
+  it('copies an agent login command and opens Termux', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    mockGetRuntimeStatus.mockResolvedValueOnce({
+      daemon: { version: '0.1.0', startedAt: 1000, pid: 123 },
+      termux: { runCommandPermission: 'granted', allowExternalApps: 'enabled' },
+      agents: [{ backend: 'codex', state: 'ready', version: '0.2.0' }],
+    });
+
+    const screen = render(<RuntimeStatusCard />);
+
+    await waitFor(() => expect(screen.getByText('Codex CLI')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('configure-agent-codex'));
+
+    await waitFor(() => expect(mockSetStringAsync).toHaveBeenCalledWith('login codex'));
+    expect(mockOpenTermuxIfAvailable).toHaveBeenCalledTimes(1);
+    expect(alertSpy).toHaveBeenCalledWith('Codex CLI login', 'Login command copied. Run it in Termux.');
     alertSpy.mockRestore();
   });
 

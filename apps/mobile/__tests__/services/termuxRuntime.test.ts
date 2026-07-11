@@ -9,6 +9,7 @@ import { TERMUX_DAEMON_SOURCE } from '@/src/services/termuxDaemonSource';
 import * as localRuntime from '@/src/services/localRuntime';
 import {
   buildTermuxBootstrapScript,
+  getAgentLoginCommand,
   installOrStartLocalRuntime,
   openTermuxIfAvailable,
   probeTermuxRuntime,
@@ -66,6 +67,19 @@ describe('termuxRuntime', () => {
   it('opens Termux when the native call succeeds', async () => {
     mockOpenTermux.mockResolvedValueOnce(true);
     await expect(openTermuxIfAvailable()).resolves.toBe(true);
+  });
+
+  it.each([
+    ['opencode', 'opencode auth login'],
+    ['gemini', 'exec gemini'],
+    ['codex', 'codex login'],
+  ] as const)('builds the %s login command inside the app Debian runtime', (backend, expectedCommand) => {
+    const command = getAgentLoginCommand(backend);
+
+    expect(command).toContain('proot-distro login aicliui --shared-tmp');
+    expect(command).toContain('--bind "$HOME/.aicliui:/root/.aicliui"');
+    expect(command).toContain('cd /root/.aicliui/workspaces/default');
+    expect(command).toContain(expectedCommand);
   });
 
   it('builds a bootstrap script that prepares daemon directories and start command', () => {

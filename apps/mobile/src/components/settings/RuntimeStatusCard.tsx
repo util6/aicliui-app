@@ -12,7 +12,12 @@ import {
   type RuntimeAgentHealth,
   type RuntimeStatus,
 } from '../../services/runtimeStatus';
-import { installOrStartLocalRuntime, openTermuxIfAvailable } from '../../services/termuxRuntime';
+import {
+  getAgentLoginCommand,
+  installOrStartLocalRuntime,
+  openTermuxIfAvailable,
+  type LocalAgentBackend,
+} from '../../services/termuxRuntime';
 
 type RuntimeTone = 'ready' | 'pending' | 'missing';
 const DAEMON_LOG_PATH = '~/.aicliui/logs/daemon.log';
@@ -90,6 +95,23 @@ export function RuntimeStatusCard() {
     }
   }, [t]);
 
+  const openAgentLogin = useCallback(
+    async (backend: LocalAgentBackend) => {
+      const command = getAgentLoginCommand(backend);
+      try {
+        await Clipboard.setStringAsync(command);
+        const opened = await openTermuxIfAvailable();
+        Alert.alert(
+          t('settings.agentLoginTitle', { agent: getAgentDisplayName(backend) }),
+          opened ? t('settings.agentLoginOpened') : t('settings.agentLoginOpenFailed'),
+        );
+      } catch {
+        Alert.alert(t('common.error'), t('settings.agentLoginOpenFailed'));
+      }
+    },
+    [t],
+  );
+
   const showRepairAction = shouldOfferRuntimeRepair(status, hasError);
 
   return (
@@ -154,15 +176,37 @@ export function RuntimeStatusCard() {
                 tone={bootstrapTone(status.bootstrap.phase)}
               />
             )}
-            {status.agents.map((agent) => (
-              <RuntimeRow
-                key={agent.backend}
-                icon={agent.backend === 'opencode' ? 'code-slash-outline' : 'sparkles-outline'}
-                label={getAgentDisplayName(agent.backend)}
-                value={agentLabel(agent, t)}
-                tone={agentTone(agent.state)}
-              />
-            ))}
+            {status.agents.map((agent) => {
+              const row = (
+                <RuntimeRow
+                  icon={agent.backend === 'opencode' ? 'code-slash-outline' : 'sparkles-outline'}
+                  label={getAgentDisplayName(agent.backend)}
+                  value={agentLabel(agent, t)}
+                  tone={agentTone(agent.state)}
+                />
+              );
+              if (!isLocalAgentBackend(agent.backend)) {
+                return <React.Fragment key={agent.backend}>{row}</React.Fragment>;
+              }
+
+              const backend = agent.backend;
+              return (
+                <TouchableOpacity
+                  key={backend}
+                  accessibilityRole='button'
+                  accessibilityLabel={t('settings.configureAgentLogin', {
+                    agent: getAgentDisplayName(backend),
+                  })}
+                  testID={`configure-agent-${backend}`}
+                  style={styles.agentAction}
+                  onPress={() => openAgentLogin(backend)}
+                  activeOpacity={0.72}
+                >
+                  <View style={styles.agentActionContent}>{row}</View>
+                  <Ionicons name='chevron-forward-outline' size={18} color={textSecondary} />
+                </TouchableOpacity>
+              );
+            })}
             <TouchableOpacity
               accessibilityRole='button'
               accessibilityLabel={t('settings.copyDaemonLogPath')}
@@ -220,6 +264,10 @@ function shouldOfferRuntimeRepair(status: RuntimeStatus | null, hasError: boolea
   if (status.termux.runCommandPermission === 'denied' || status.termux.allowExternalApps === 'disabled') return true;
   if (status.bootstrap && (status.bootstrap.phase.endsWith('_failed') || status.bootstrap.phase === 'error')) return true;
   return status.agents.some((agent) => agent.state === 'missing' || agent.state === 'error');
+}
+
+function isLocalAgentBackend(backend: string): backend is LocalAgentBackend {
+  return backend === 'opencode' || backend === 'gemini' || backend === 'codex';
 }
 
 function RuntimeRow({ icon, label, value, tone }: RuntimeRowProps) {
@@ -349,6 +397,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 10,
+  },
+  agentAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: 12,
+  },
+  agentActionContent: {
+    flex: 1,
+    minWidth: 0,
   },
   rowIcon: {
     width: 22,
