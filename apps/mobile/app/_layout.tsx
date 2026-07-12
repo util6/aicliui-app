@@ -2,7 +2,6 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useColorScheme } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import 'react-native-reanimated';
@@ -13,6 +12,7 @@ import { ConversationProvider } from '../src/context/ConversationContext';
 import { WorkspaceProvider } from '../src/context/WorkspaceContext';
 import { FilesTabProvider } from '../src/context/FilesTabContext';
 import { WorkspaceAttachmentProvider } from '../src/context/WorkspaceAttachmentContext';
+import { AppearanceProvider, useAppearance } from '../src/context/AppearanceContext';
 import { initI18n } from '../src/i18n';
 
 // Prevent splash screen from auto-hiding until routing is ready
@@ -22,21 +22,31 @@ SplashScreen.preventAutoHideAsync();
 initI18n();
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
+      <AppearanceProvider>
+        <RootProviders />
+      </AppearanceProvider>
+    </GestureHandlerRootView>
+  );
+}
+
+function RootProviders() {
+  const { resolvedAppearance } = useAppearance();
+
+  return (
+    <SafeAreaProvider>
       <ConnectionProvider>
         <WebSocketProvider>
           <ConversationProvider>
             <WorkspaceProvider>
               <FilesTabProvider>
                 <WorkspaceAttachmentProvider>
-                  <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+                  <ThemeProvider value={resolvedAppearance === 'dark' ? DarkTheme : DefaultTheme}>
                     <Stack screenOptions={{ headerShown: false }}>
                       <Stack.Screen name='index' />
                       <Stack.Screen name='connect' />
+                      <Stack.Screen name='agents' />
                       <Stack.Screen name='(tabs)' />
                       <Stack.Screen
                         name='file-preview'
@@ -48,7 +58,7 @@ export default function RootLayout() {
                         }}
                       />
                     </Stack>
-                    <StatusBar style='auto' />
+                    <StatusBar style={resolvedAppearance === 'dark' ? 'light' : 'dark'} />
                   </ThemeProvider>
                 </WorkspaceAttachmentProvider>
               </FilesTabProvider>
@@ -56,7 +66,6 @@ export default function RootLayout() {
           </ConversationProvider>
         </WebSocketProvider>
       </ConnectionProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }

@@ -6,7 +6,6 @@ import {
   runCommandAsync,
 } from '@aicliui/termux';
 import { spawnSync } from 'node:child_process';
-import { TERMUX_DAEMON_SOURCE } from '@/src/services/termuxDaemonSource';
 import * as localRuntime from '@/src/services/localRuntime';
 import {
   buildTermuxBootstrapScript,
@@ -97,54 +96,42 @@ describe('termuxRuntime', () => {
     expect(spawnSync('/bin/bash', ['-n'], { input: command }).status).toBe(0);
   });
 
-  it('builds the Debian bootstrap and daemon launch chain', () => {
+  it('builds the Debian bootstrap and AionCore launch chain', () => {
     const script = buildTermuxBootstrapScript({
       host: '127.0.0.1',
       port: '43117',
-      token: "tok'en",
+      token: '',
+      transport: 'aioncore',
     });
 
-    expect(script).toContain('mkdir -p "$AICLIUI_HOME/bin" "$AICLIUI_HOME/daemon"');
+    expect(script).toContain('mkdir -p "$AICLIUI_HOME/bin" "$AICLIUI_HOME/aioncore"');
     expect(script).toContain('pkg install -y proot-distro');
     expect(script).toContain('proot-distro install debian:bookworm --name aicliui');
     expect(script).toContain('https://deb.nodesource.com/setup_22.x');
-    expect(script).toContain("printf %s 'tok'\\''en' > \"$AICLIUI_HOME/daemon/token\"");
-    expect(script).toContain('npm install --omit=dev --prefix "$AICLIUI_HOME/daemon"');
+    expect(script).toContain('iOfficeAI/AionCore/releases/download/v0.1.43');
+    expect(script).toContain('aioncore-v0.1.43-aarch64-unknown-linux-gnu.tar.gz');
+    expect(script).toContain('d8f86dc1538b85f136466c0e9ef011ceb5357276e9beb5a3715673ff1d28594b');
+    expect(script).toContain('sha256sum -c');
+    expect(script).toContain('Unsupported Android CPU architecture');
     expect(script).toContain('npm install -g opencode-ai@latest');
     expect(script).toContain('npm install -g @google/gemini-cli@latest');
     expect(script).toContain('npm install -g @openai/codex@latest');
-    expect(script).toContain(TERMUX_DAEMON_SOURCE);
-    expect(script).toContain('exec node ./aicliui-daemon.mjs');
+    expect(script).toContain('exec "$AICLIUI_HOME/aioncore/aioncore"');
+    expect(script).toContain('--local');
+    expect(script).toContain('--port "$AICLIUI_AIONCORE_PORT"');
     expect(script).toContain('exec proot-distro login aicliui --shared-tmp');
-    expect(script).toContain('nohup "$AICLIUI_HOME/bin/start-daemon.sh"');
+    expect(script).toContain('nohup "$AICLIUI_HOME/bin/start-aioncore.sh"');
   });
 
   it('generates a syntactically valid Termux bootstrap shell script', () => {
     const script = buildTermuxBootstrapScript({
       host: '127.0.0.1',
       port: '43117',
-      token: 'runtime-token',
+      token: '',
+      transport: 'aioncore',
     });
     const result = spawnSync('/bin/bash', ['-n'], {
       input: script,
-      encoding: 'utf8',
-    });
-
-    expect(result.stderr).toBe('');
-    expect(result.status).toBe(0);
-  });
-
-  it('embeds a syntactically valid ESM daemon script', () => {
-    const script = buildTermuxBootstrapScript({
-      host: '127.0.0.1',
-      port: '43117',
-      token: 'runtime-token',
-    });
-    const match = script.match(/AICLIUI_DAEMON_SOURCE'\n([\s\S]*?)\nAICLIUI_DAEMON_SOURCE/);
-    expect(match?.[1]).toBe(TERMUX_DAEMON_SOURCE);
-
-    const result = spawnSync(process.execPath, ['--input-type=module', '--check', '-'], {
-      input: match?.[1] ?? '',
       encoding: 'utf8',
     });
 
@@ -156,7 +143,8 @@ describe('termuxRuntime', () => {
     jest.spyOn(localRuntime, 'getOrCreateLocalDaemonConfig').mockResolvedValueOnce({
       host: '127.0.0.1',
       port: '43117',
-      token: 'runtime-token',
+      token: '',
+      transport: 'aioncore',
     });
     mockIsTermuxInstalled.mockResolvedValueOnce(true);
     mockHasRunCommandPermission.mockResolvedValueOnce(true);
@@ -164,7 +152,7 @@ describe('termuxRuntime', () => {
 
     await expect(installOrStartLocalRuntime()).resolves.toEqual({
       status: 'started',
-      config: { host: '127.0.0.1', port: '43117', token: 'runtime-token' },
+      config: { host: '127.0.0.1', port: '43117', token: '', transport: 'aioncore' },
     });
     expect(mockRunCommand).toHaveBeenCalledWith({
       commandPath: '$PREFIX/bin/bash',
@@ -189,7 +177,8 @@ describe('termuxRuntime', () => {
     jest.spyOn(localRuntime, 'getOrCreateLocalDaemonConfig').mockResolvedValueOnce({
       host: '127.0.0.1',
       port: '43117',
-      token: 'runtime-token',
+      token: '',
+      transport: 'aioncore',
     });
     mockIsTermuxInstalled.mockResolvedValueOnce(true);
     mockHasRunCommandPermission.mockResolvedValueOnce(false);
@@ -198,7 +187,7 @@ describe('termuxRuntime', () => {
 
     await expect(installOrStartLocalRuntime()).resolves.toEqual({
       status: 'started',
-      config: { host: '127.0.0.1', port: '43117', token: 'runtime-token' },
+      config: { host: '127.0.0.1', port: '43117', token: '', transport: 'aioncore' },
     });
     expect(mockRunCommand).toHaveBeenCalledTimes(1);
   });
@@ -207,7 +196,8 @@ describe('termuxRuntime', () => {
     jest.spyOn(localRuntime, 'getOrCreateLocalDaemonConfig').mockResolvedValueOnce({
       host: '127.0.0.1',
       port: '43117',
-      token: 'runtime-token',
+      token: '',
+      transport: 'aioncore',
     });
     mockIsTermuxInstalled.mockResolvedValueOnce(true);
     mockHasRunCommandPermission.mockResolvedValueOnce(true);

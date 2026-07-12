@@ -1,21 +1,24 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import * as SecureStore from 'expo-secure-store';
 import { wsService, type ConnectionState } from '../services/websocket';
-import { configureApi, resetApi, refreshToken } from '../services/api';
+import { configureApi, resetApi, refreshToken, type ApiTransport } from '../services/api';
+import {
+  clearStoredConnection,
+  readStoredConnection,
+  writeStoredConnection,
+} from '../services/connectionStorage';
 import { decodeJwtPayload } from '../utils/jwt';
-
-const STORAGE_KEY = 'aionui_connection';
 
 type ConnectionConfig = {
   host: string;
   port: string;
   token: string;
+  transport?: ApiTransport;
 };
 
 type ConnectionContextType = {
   config: ConnectionConfig | null;
   connectionState: ConnectionState;
-  connect: (host: string, port: string, token: string) => Promise<void>;
+  connect: (host: string, port: string, token: string, transport?: ApiTransport) => Promise<void>;
   disconnect: () => void;
   tryReconnect: () => void;
   isConfigured: boolean;
@@ -53,12 +56,12 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     if (!newToken) return false;
 
     const newConfig = { ...currentConfig, token: newToken };
-    await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(newConfig));
+    await writeStoredConnection(JSON.stringify(newConfig));
     setConfig(newConfig);
 
-    configureApi(newConfig.host, newConfig.port, newConfig.token);
+    configureApi(newConfig.host, newConfig.port, newConfig.token, newConfig.transport);
     wsService.updateToken(newToken);
-    wsService.configure(newConfig.host, newConfig.port, newConfig.token);
+    wsService.configure(newConfig.host, newConfig.port, newConfig.token, newConfig.transport);
     wsService.reconnect();
     return true;
   }, []);
@@ -83,12 +86,12 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
         }
 
         const newConfig = { ...currentConfig, token: newToken };
-        await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(newConfig));
+        await writeStoredConnection(JSON.stringify(newConfig));
         setConfig(newConfig);
 
-        configureApi(newConfig.host, newConfig.port, newConfig.token);
+        configureApi(newConfig.host, newConfig.port, newConfig.token, newConfig.transport);
         wsService.updateToken(newToken);
-        wsService.configure(newConfig.host, newConfig.port, newConfig.token);
+        wsService.configure(newConfig.host, newConfig.port, newConfig.token, newConfig.transport);
       })
       .catch(() => {
         console.warn('[Connection] Heartbeat token refresh error, will retry next heartbeat');
@@ -144,12 +147,12 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     (async () => {
       try {
-        const saved = await SecureStore.getItemAsync(STORAGE_KEY);
+        const saved = await readStoredConnection();
         if (saved) {
           const parsed = JSON.parse(saved) as ConnectionConfig;
           setConfig(parsed);
-          configureApi(parsed.host, parsed.port, parsed.token);
-          wsService.configure(parsed.host, parsed.port, parsed.token);
+          configureApi(parsed.host, parsed.port, parsed.token, parsed.transport);
+          wsService.configure(parsed.host, parsed.port, parsed.token, parsed.transport);
           wsService.connect();
         }
       } catch {
@@ -161,16 +164,16 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const connect = useCallback(
-    async (host: string, port: string, token: string) => {
-      const newConfig: ConnectionConfig = { host, port, token };
+    async (host: string, port: string, token: string, transport: ApiTransport = 'legacy-bridge') => {
+      const newConfig: ConnectionConfig = { host, port, token, transport };
 
       // Persist to secure storage
-      await SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(newConfig));
+      await writeStoredConnection(JSON.stringify(newConfig));
 
       // Configure services
       setConfig(newConfig);
-      configureApi(host, port, token);
-      wsService.configure(host, port, token);
+      configureApi(host, port, token, transport);
+      wsService.configure(host, port, token, transport);
       wsService.connect();
     },
     [],
@@ -180,7 +183,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     wsService.disconnect();
     resetApi();
     setConfig(null);
-    SecureStore.deleteItemAsync(STORAGE_KEY).catch(() => {});
+    clearStoredConnection().catch(() => {});
   }, []);
 
   return (

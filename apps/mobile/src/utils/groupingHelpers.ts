@@ -40,11 +40,11 @@ const getConversationTimelineLabel = (conversation: Conversation, t: (key: strin
 };
 
 const isConversationPinned = (conversation: Conversation): boolean => {
-  return Boolean(conversation.extra?.pinned);
+  return conversation.pinned ?? Boolean(conversation.extra?.pinned);
 };
 
 const getConversationPinnedAt = (conversation: Conversation): number => {
-  const pinnedAt = conversation.extra?.pinnedAt;
+  const pinnedAt = conversation.pinnedAt ?? conversation.extra?.pinnedAt;
   return typeof pinnedAt === 'number' ? pinnedAt : 0;
 };
 

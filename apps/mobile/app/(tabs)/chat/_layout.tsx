@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { DrawerActions } from '@react-navigation/routers';
+import { useTranslation } from 'react-i18next';
 import { ChatSidebar } from '../../../src/components/chat/ChatSidebar';
 import { useThemeColor } from '../../../src/hooks/useThemeColor';
 import { useConversations } from '../../../src/context/ConversationContext';
@@ -10,12 +11,15 @@ import { useWorkspace } from '../../../src/context/WorkspaceContext';
 import { ThemedText } from '../../../src/components/ui/ThemedText';
 
 function DrawerMenuButton() {
+  const { t } = useTranslation();
   const navigation = useNavigation();
   const tint = useThemeColor({}, 'tint');
   return (
     <TouchableOpacity
       onPress={() => navigation.dispatch(DrawerActions.toggleDrawer())}
       style={{ marginLeft: 16 }}
+      accessibilityRole='button'
+      accessibilityLabel={t('conversations.openSidebar')}
     >
       <Ionicons name='menu' size={24} color={tint} />
     </TouchableOpacity>

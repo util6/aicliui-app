@@ -69,7 +69,7 @@ export default function ConnectScreen() {
     setIsConnecting(true);
     try {
       const config = await getOrCreateLocalDaemonConfig();
-      await connect(config.host, config.port, config.token);
+      await connect(config.host, config.port, config.token, config.transport);
       await waitForConnected();
       setDaemonStatus(await getRuntimeStatus());
       router.replace('/(tabs)/chat');
@@ -84,7 +84,7 @@ export default function ConnectScreen() {
     setIsCheckingRuntime(true);
     try {
       const config = await getOrCreateLocalDaemonConfig();
-      await connect(config.host, config.port, config.token);
+      await connect(config.host, config.port, config.token, config.transport);
       await waitForConnected();
       setDaemonStatus(await getRuntimeStatus());
     } catch {
@@ -121,7 +121,7 @@ export default function ConnectScreen() {
         return;
       }
 
-      await connect(result.config.host, result.config.port, result.config.token);
+      await connect(result.config.host, result.config.port, result.config.token, result.config.transport);
       try {
         await waitForConnected(BOOTSTRAP_CONNECTION_TIMEOUT_MS);
         setDaemonStatus(await getRuntimeStatus());
@@ -330,7 +330,7 @@ function bootstrapLabel(bootstrap: NonNullable<RuntimeStatus['bootstrap']>): str
 }
 
 function bootstrapTone(phase: string): RuntimeRowProps['tone'] {
-  if (phase === 'daemon_start_requested') return 'ready';
+  if (phase === 'daemon_start_requested' || phase === 'aioncore_start_requested') return 'ready';
   if (phase.endsWith('_failed') || phase === 'error') return 'missing';
   return 'pending';
 }

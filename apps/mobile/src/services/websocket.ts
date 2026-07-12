@@ -8,6 +8,7 @@
  */
 
 import { decodeJwtPayload } from '../utils/jwt';
+import type { ApiTransport } from './api';
 
 type WSMessage = { name: string; data: unknown };
 type MessageHandler = (name: string, data: unknown) => void;
@@ -28,6 +29,7 @@ export class WebSocketService {
   private host = '';
   private port = '';
   private token = '';
+  private transport: ApiTransport = 'legacy-bridge';
   private lastPingReceived = 0;
   private deadConnectionTimer: ReturnType<typeof setInterval> | null = null;
   private authChallengeHandler: (() => Promise<boolean>) | null = null;
@@ -52,10 +54,11 @@ export class WebSocketService {
     this.messageHandler = handler;
   }
 
-  configure(host: string, port: string, token: string) {
+  configure(host: string, port: string, token: string, transport: ApiTransport = 'legacy-bridge') {
     this.host = host;
     this.port = port;
     this.token = token;
+    this.transport = transport;
   }
 
   setAuthChallengeHandler(handler: (() => Promise<boolean>) | null) {
@@ -85,11 +88,11 @@ export class WebSocketService {
     this.shouldReconnect = true;
     this.setState('connecting');
 
-    const url = `ws://${this.host}:${this.port}`;
+    const url = `ws://${this.host}:${this.port}${this.transport === 'aioncore' ? '/ws' : ''}`;
 
     try {
       // Pass token via Sec-WebSocket-Protocol header (server supports this)
-      this.socket = new WebSocket(url, [this.token]);
+      this.socket = this.token ? new WebSocket(url, [this.token]) : new WebSocket(url);
     } catch {
       this.scheduleReconnect();
       return;
@@ -118,6 +121,15 @@ export class WebSocketService {
         // Handle auth expiration
         if (payload.name === 'auth-expired') {
           console.warn('[WS] Authentication expired');
+          void this.handleAuthChallenge();
+          return;
+        }
+
+        if (
+          payload.name === 'realtime.error' &&
+          isRecord(payload.data) &&
+          (payload.data.code === 'REALTIME_AUTH_MISSING' || payload.data.code === 'REALTIME_AUTH_EXPIRED')
+        ) {
           void this.handleAuthChallenge();
           return;
         }
@@ -259,6 +271,10 @@ export class WebSocketService {
     if (!payload?.exp) return false;
     return payload.exp * 1000 < Date.now();
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 // Singleton instance

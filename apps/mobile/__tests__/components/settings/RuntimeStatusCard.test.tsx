@@ -128,9 +128,9 @@ describe('RuntimeStatusCard', () => {
     fireEvent.press(screen.getByTestId('copy-daemon-log-path'));
 
     await waitFor(() => {
-      expect(mockSetStringAsync).toHaveBeenCalledWith('~/.aicliui/logs/daemon.log');
+      expect(mockSetStringAsync).toHaveBeenCalledWith('~/.aicliui/logs/aioncore.log');
     });
-    expect(alertSpy).toHaveBeenCalledWith('Copied', '~/.aicliui/logs/daemon.log');
+    expect(alertSpy).toHaveBeenCalledWith('Copied', '~/.aicliui/logs/aioncore.log');
     alertSpy.mockRestore();
   });
 

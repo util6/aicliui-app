@@ -27,7 +27,12 @@ export function ChatEmptyState() {
       <ThemedText type='caption' style={styles.subHint}>
         {t('chat.startChatHint')}
       </ThemedText>
-      <TouchableOpacity style={[styles.button, { backgroundColor: tint }]} onPress={() => setShowNewModal(true)}>
+      <TouchableOpacity
+        accessibilityRole='button'
+        accessibilityLabel={t('chat.newChat')}
+        style={[styles.button, { backgroundColor: tint }]}
+        onPress={() => setShowNewModal(true)}
+      >
         <Ionicons name='add' size={20} color='#fff' />
         <ThemedText style={styles.buttonText}>{t('chat.newChat')}</ThemedText>
       </TouchableOpacity>

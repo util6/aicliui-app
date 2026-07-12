@@ -28,6 +28,7 @@ export function ChatSidebar({ navigation }: DrawerContentComponentProps) {
     startNewChat,
     deleteConversation,
     renameConversation,
+    setConversationPinned,
   } = useConversations();
   const [showNewModal, setShowNewModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -121,21 +122,32 @@ export function ChatSidebar({ navigation }: DrawerContentComponentProps) {
   };
 
   const handleLongPress = (conversation: Conversation) => {
+    const pinned = conversation.pinned ?? Boolean(conversation.extra?.pinned);
+    const pinLabel = pinned ? t('conversations.unpin') : t('conversations.pin');
+    const togglePin = async () => {
+      const ok = await setConversationPinned(conversation.id, !pinned);
+      if (!ok) {
+        Alert.alert(t('conversations.pinFailed'));
+      }
+    };
+
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: [t('common.cancel'), t('conversations.rename'), t('common.delete')],
-          destructiveButtonIndex: 2,
+          options: [t('common.cancel'), pinLabel, t('conversations.rename'), t('common.delete')],
+          destructiveButtonIndex: 3,
           cancelButtonIndex: 0,
         },
         (index) => {
-          if (index === 1) promptRename(conversation);
-          if (index === 2) confirmDelete(conversation);
+          if (index === 1) void togglePin();
+          if (index === 2) promptRename(conversation);
+          if (index === 3) confirmDelete(conversation);
         }
       );
     } else {
       Alert.alert(conversation.name || t('conversations.untitled'), undefined, [
         { text: t('common.cancel'), style: 'cancel' },
+        { text: pinLabel, onPress: () => void togglePin() },
         { text: t('conversations.rename'), onPress: () => promptRenameAndroid(conversation) },
         { text: t('common.delete'), style: 'destructive', onPress: () => confirmDelete(conversation) },
       ]);
@@ -202,7 +214,12 @@ export function ChatSidebar({ navigation }: DrawerContentComponentProps) {
     <View style={[styles.container, { backgroundColor: background }]}>
       <View style={[styles.header, { borderBottomColor: border }]}>
         <ThemedText style={styles.headerTitle}>{t('tabs.chat')}</ThemedText>
-        <TouchableOpacity onPress={() => setShowNewModal(true)} activeOpacity={0.7}>
+        <TouchableOpacity
+          onPress={() => setShowNewModal(true)}
+          activeOpacity={0.7}
+          accessibilityRole='button'
+          accessibilityLabel={t('conversations.newConversation')}
+        >
           <Ionicons name='add-circle-outline' size={26} color={tint} />
         </TouchableOpacity>
       </View>
@@ -222,7 +239,11 @@ export function ChatSidebar({ navigation }: DrawerContentComponentProps) {
             autoCapitalize='none'
           />
           {searchQuery.length > 0 && Platform.OS !== 'ios' && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <TouchableOpacity
+              onPress={() => setSearchQuery('')}
+              accessibilityRole='button'
+              accessibilityLabel={t('common.close')}
+            >
               <Ionicons name='close-circle' size={16} color={textSecondary} />
             </TouchableOpacity>
           )}

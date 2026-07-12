@@ -13,6 +13,8 @@ export type Conversation = {
   id: string;
   name: string;
   type: string;
+  pinned?: boolean;
+  pinnedAt?: number;
   status?: 'pending' | 'running' | 'waiting_confirmation' | 'finished';
   runtime?: {
     state: 'idle' | 'starting' | 'running' | 'cancelling' | 'waiting_confirmation';
@@ -45,7 +47,9 @@ export type Conversation = {
 };
 
 export type AgentInfo = {
+  id?: string;
   backend: string;
+  source?: string;
   name: string;
   label?: string;
   state?: RuntimeAgentHealth['state'];
@@ -55,6 +59,8 @@ export type AgentInfo = {
 
 type CreateConversationParams = {
   agentBackend: string;
+  agentId?: string;
+  agentSource?: string;
   agentName?: string;
   cliPath?: string;
   workspace?: string;
@@ -101,6 +107,7 @@ type ConversationContextType = {
   ) => Promise<boolean>;
   deleteConversation: (id: string) => Promise<boolean>;
   renameConversation: (id: string, name: string) => Promise<boolean>;
+  setConversationPinned: (id: string, pinned: boolean) => Promise<boolean>;
 };
 
 type StreamStatusMessage = {
@@ -140,6 +147,7 @@ const ConversationContext = createContext<ConversationContextType>({
   updateConversationExecutionContext: async () => false,
   deleteConversation: async () => false,
   renameConversation: async () => false,
+  setConversationPinned: async () => false,
 });
 
 export function ConversationProvider({ children }: { children: React.ReactNode }) {
@@ -338,6 +346,8 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
           model: params.model || { id: '', useModel: '' },
           extra: {
             backend: params.agentBackend,
+            ...(params.agentId ? { agent_id: params.agentId } : {}),
+            ...(params.agentSource ? { agent_source: params.agentSource } : {}),
             agentName: params.agentName,
             ...(workspace ? { workspace, customWorkspace: params.customWorkspace ?? true } : {}),
             ...(params.cliPath ? { cliPath: params.cliPath } : {}),
@@ -371,6 +381,8 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
       const agent = pendingAgent;
       const result = await createConversation({
         agentBackend: agent.backend,
+        agentId: agent.id,
+        agentSource: agent.source,
         agentName: agent.name,
         input: message,
         ...options,
@@ -456,6 +468,25 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
     [refresh]
   );
 
+  const setConversationPinned = useCallback(
+    async (id: string, pinned: boolean) => {
+      try {
+        const success = await bridge.request<boolean>('update-conversation', {
+          id,
+          updates: { pinned },
+        });
+        if (success) {
+          await refresh();
+        }
+        return !!success;
+      } catch (e) {
+        console.warn('[Conversations] Failed to update pin:', e);
+        return false;
+      }
+    },
+    [refresh],
+  );
+
   return (
     <ConversationContext.Provider
       value={{
@@ -474,6 +505,7 @@ export function ConversationProvider({ children }: { children: React.ReactNode }
         updateConversationExecutionContext,
         deleteConversation,
         renameConversation,
+        setConversationPinned,
       }}
     >
       {children}

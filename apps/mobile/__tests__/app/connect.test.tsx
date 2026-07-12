@@ -92,11 +92,12 @@ describe('ConnectScreen', () => {
     mockGetOrCreateLocalDaemonConfig.mockResolvedValue({
       host: '127.0.0.1',
       port: '43117',
-      token: 'runtime-token',
+      token: '',
+      transport: 'aioncore',
     });
     mockInstallOrStartLocalRuntime.mockResolvedValue({
       status: 'started',
-      config: { host: '127.0.0.1', port: '43117', token: 'runtime-token' },
+      config: { host: '127.0.0.1', port: '43117', token: '', transport: 'aioncore' },
     });
     mockGetRuntimeStatus.mockResolvedValue({
       daemon: { version: '0.1.0', startedAt: 1000, pid: 42 },
@@ -114,7 +115,7 @@ describe('ConnectScreen', () => {
     fireEvent.press(screen.getByText('connect.installRuntime'));
 
     await waitFor(() => {
-      expect(mockConnect).toHaveBeenCalledWith('127.0.0.1', '43117', 'runtime-token');
+      expect(mockConnect).toHaveBeenCalledWith('127.0.0.1', '43117', '', 'aioncore');
       expect(mockGetRuntimeStatus).toHaveBeenCalledTimes(1);
       expect(mockReplace).toHaveBeenCalledWith('/(tabs)/chat');
     });

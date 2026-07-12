@@ -1,4 +1,4 @@
-import { api, configureApi, getBaseURL, getAuthToken, resetApi } from '@/src/services/api';
+import { api, configureApi, getApiTransport, getBaseURL, getAuthToken, resetApi } from '@/src/services/api';
 
 describe('api service', () => {
   afterEach(() => {
@@ -24,6 +24,12 @@ describe('api service', () => {
       expect(getBaseURL()).toBe('http://host-b:2222');
       expect(getAuthToken()).toBe('token-b');
     });
+
+    it('stores the selected backend transport', () => {
+      configureApi('localhost', '43117', '', 'aioncore');
+      expect(getApiTransport()).toBe('aioncore');
+      expect(api.defaults.headers.common['Authorization']).toBeUndefined();
+    });
   });
 
   describe('resetApi', () => {
@@ -34,6 +40,7 @@ describe('api service', () => {
       expect(getAuthToken()).toBeNull();
       expect(api.defaults.baseURL).toBe('');
       expect(api.defaults.headers.common['Authorization']).toBeUndefined();
+      expect(getApiTransport()).toBe('legacy-bridge');
     });
   });
 });

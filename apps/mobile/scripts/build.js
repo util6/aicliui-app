@@ -19,13 +19,6 @@ if (profileIndex === -1 || !args[profileIndex + 1]) {
   process.exit(1);
 }
 
-const repositoryRoot = path.resolve(__dirname, '../../..');
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-execFileSync(npmCommand, ['--workspace', '@aicliui/daemon', 'run', 'build:mobile-bundle'], {
-  cwd: repositoryRoot,
-  stdio: 'inherit',
-});
-
 const versionPath = path.join(__dirname, '..', 'versions', 'version.json');
 const versionData = JSON.parse(fs.readFileSync(versionPath, 'utf8'));
 const previousBuildNumber = versionData.buildNumber;

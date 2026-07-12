@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemedText } from '../../../src/components/ui/ThemedText';
 import { RuntimeStatusCard } from '../../../src/components/settings/RuntimeStatusCard';
+import { PreferenceSettingsCard } from '../../../src/components/settings/PreferenceSettingsCard';
+import { AgentSettingsCard } from '../../../src/components/settings/AgentSettingsCard';
 import { useConnection } from '../../../src/context/ConnectionContext';
 import { useThemeColor } from '../../../src/hooks/useThemeColor';
 
@@ -80,6 +82,10 @@ export default function SettingsScreen() {
       </View>
 
       <RuntimeStatusCard />
+
+      <AgentSettingsCard />
+
+      <PreferenceSettingsCard />
 
       {/* Actions */}
       <View style={styles.section}>

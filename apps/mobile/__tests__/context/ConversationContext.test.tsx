@@ -112,6 +112,22 @@ function NewChatProbe() {
   );
 }
 
+function CustomAgentNewChatProbe() {
+  const { startNewChat, commitNewChat } = useConversations();
+
+  React.useEffect(() => {
+    startNewChat({
+      id: 'custom-1',
+      backend: 'custom-1',
+      source: 'custom',
+      name: 'My CLI',
+      label: 'My CLI',
+    });
+  }, [startNewChat]);
+
+  return <Text testID='commit-custom' onPress={() => void commitNewChat('Run custom task')}>commit</Text>;
+}
+
 function ExecutionContextProbe() {
   const { conversations, updateConversationExecutionContext } = useConversations();
   const conversation = conversations.find((item) => item.id === 'conv-1');
@@ -134,6 +150,25 @@ function ExecutionContextProbe() {
         }}
       >
         update-execution-context
+      </Text>
+    </>
+  );
+}
+
+function PinProbe() {
+  const { conversations, setConversationPinned } = useConversations();
+  const conversation = conversations.find((item) => item.id === 'conv-1');
+
+  return (
+    <>
+      <Text testID='pin-state'>{String(conversation?.pinned ?? false)}</Text>
+      <Text
+        testID='pin-conversation'
+        onPress={() => {
+          void setConversationPinned('conv-1', true);
+        }}
+      >
+        pin-conversation
       </Text>
     </>
   );
@@ -567,6 +602,47 @@ describe('ConversationContext new chat context', () => {
     );
   });
 
+  it('persists the catalog id and source required to launch a custom ACP agent', async () => {
+    mockRequest.mockImplementation((name: string, data?: unknown) => {
+      if (name === 'database.get-user-conversations') return Promise.resolve([]);
+      if (name === 'create-conversation') {
+        return Promise.resolve({
+          id: 'custom-chat-1',
+          name: 'Run custom task',
+          type: 'acp',
+          status: 'pending',
+          createTime: 1000,
+          modifyTime: 1000,
+          model: { id: '', useModel: '' },
+          extra: (data as { extra?: unknown }).extra,
+        });
+      }
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <CustomAgentNewChatProbe />
+      </ConversationProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('commit-custom'));
+    });
+
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledWith(
+      'create-conversation',
+      expect.objectContaining({
+        type: 'acp',
+        extra: expect.objectContaining({
+          backend: 'custom-1',
+          agent_id: 'custom-1',
+          agent_source: 'custom',
+        }),
+      }),
+    ));
+  });
+
   it('merges local runtime health into available agent rows', async () => {
     mockRequest.mockImplementation((name: string) => {
       if (name === 'database.get-user-conversations') return Promise.resolve([]);
@@ -678,5 +754,37 @@ describe('ConversationContext execution context updates', () => {
       },
     });
     await waitFor(() => expect(screen.getByTestId('execution-context').props.children).toBe('GPT-5 Codex|autoEdit|/tmp/project'));
+  });
+
+  it('updates the canonical pinned field through the conversation endpoint', async () => {
+    let conversation = conversationWithStatus('finished');
+
+    mockRequest.mockImplementation((name: string, data?: unknown) => {
+      if (name === 'database.get-user-conversations') return Promise.resolve([conversation]);
+      if (name === 'update-conversation') {
+        const updates = (data as { updates?: Partial<Conversation> }).updates ?? {};
+        conversation = { ...conversation, ...updates };
+        return Promise.resolve(true);
+      }
+      return Promise.reject(new Error(`Unexpected bridge request ${name}`));
+    });
+
+    const screen = render(
+      <ConversationProvider>
+        <PinProbe />
+      </ConversationProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('pin-state').props.children).toBe('false'));
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('pin-conversation'));
+    });
+
+    expect(mockRequest).toHaveBeenCalledWith('update-conversation', {
+      id: 'conv-1',
+      updates: { pinned: true },
+    });
+    await waitFor(() => expect(screen.getByTestId('pin-state').props.children).toBe('true'));
   });
 });

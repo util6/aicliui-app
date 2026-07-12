@@ -28,7 +28,7 @@ describe('groupingHelpers', () => {
   describe('buildGroupedHistory', () => {
     it('separates pinned from normal conversations', () => {
       const convs = [
-        makeConv({ id: '1', extra: { pinned: true, pinnedAt: now } }),
+        makeConv({ id: '1', pinned: true, pinnedAt: now }),
         makeConv({ id: '2' }),
         makeConv({ id: '3', extra: { pinned: true, pinnedAt: now - 100 } }),
       ];

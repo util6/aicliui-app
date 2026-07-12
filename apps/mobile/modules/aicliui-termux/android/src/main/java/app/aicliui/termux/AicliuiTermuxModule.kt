@@ -54,7 +54,7 @@ class AicliuiTermuxModule : Module() {
       true
     }
 
-    AsyncFunction<Boolean>("runCommandAsync") {
+    AsyncFunction("runCommandAsync") {
       commandPath: String,
       arguments: List<String>,
       stdin: String?,

@@ -92,6 +92,14 @@ describe('WebSocketService', () => {
       expect(ws.protocols).toEqual(['test-token']);
     });
 
+    it('uses the AionCore /ws endpoint without an empty subprotocol', () => {
+      service.configure('localhost', '43117', '', 'aioncore');
+      service.connect();
+      const ws = latestWS();
+      expect(ws.url).toBe('ws://localhost:43117/ws');
+      expect(ws.protocols).toBe('');
+    });
+
     it('transitions to connecting then connected on open', () => {
       const states: string[] = [];
       service.onStateChange((s) => states.push(s));
@@ -170,6 +178,19 @@ describe('WebSocketService', () => {
       ws.close = jest.fn();
 
       simulateMessage(ws, { name: 'auth-expired', data: {} });
+      expect(service.state).toBe('auth_failed');
+    });
+
+    it('sets auth_failed on terminal AionCore realtime errors', () => {
+      service.connect();
+      const ws = latestWS();
+      simulateOpen(ws);
+      ws.close = jest.fn();
+
+      simulateMessage(ws, {
+        name: 'realtime.error',
+        data: { code: 'REALTIME_AUTH_EXPIRED', recoverable: false },
+      });
       expect(service.state).toBe('auth_failed');
     });
   });

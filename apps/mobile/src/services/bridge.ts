@@ -7,6 +7,8 @@
  */
 
 import { wsService } from './websocket';
+import { getApiTransport } from './api';
+import { requestAionCore } from './aionCoreClient';
 
 type BridgeCallback = (data: unknown) => void;
 
@@ -22,10 +24,12 @@ class BridgeService {
   constructor() {
     // Route all WebSocket messages through the bridge
     wsService.onMessage((name, data) => {
-      // Broadcast to event listeners (including pending request handlers)
-      const callbacks = this.listeners.get(name);
-      if (callbacks) {
-        callbacks.forEach((cb) => cb(data));
+      const names = name === 'message.stream' ? ['message.stream', 'chat.response.stream'] : [name];
+      for (const eventName of names) {
+        const callbacks = this.listeners.get(eventName);
+        if (callbacks) {
+          callbacks.forEach((cb) => cb(data));
+        }
       }
     });
   }
@@ -35,6 +39,10 @@ class BridgeService {
    * Uses subscribe protocol: subscribe-{name} → subscribe.callback-{name}{id}
    */
   request<T = unknown>(name: string, data?: unknown, timeoutMs = 30000): Promise<T> {
+    if (getApiTransport() === 'aioncore') {
+      return requestAionCore<T>(name, data);
+    }
+
     const id = generateRequestId();
     const callbackName = `subscribe.callback-${name}${id}`;
 

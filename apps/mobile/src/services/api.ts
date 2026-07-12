@@ -3,6 +3,10 @@ import axios from 'axios';
 let baseURL = '';
 let authToken: string | null = null;
 
+export type ApiTransport = 'legacy-bridge' | 'aioncore';
+
+let apiTransport: ApiTransport = 'legacy-bridge';
+
 export const api = axios.create({
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
@@ -12,19 +16,31 @@ export const api = axios.create({
  * Configure the API base URL and auth token.
  * Called when the user provides connection settings.
  */
-export const configureApi = (host: string, port: string, token: string) => {
+export const configureApi = (
+  host: string,
+  port: string,
+  token: string,
+  transport: ApiTransport = 'legacy-bridge',
+) => {
   baseURL = `http://${host}:${port}`;
-  authToken = token;
+  authToken = token || null;
+  apiTransport = transport;
   api.defaults.baseURL = baseURL;
-  api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  if (token) {
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+  } else {
+    delete api.defaults.headers.common['Authorization'];
+  }
 };
 
 export const getBaseURL = () => baseURL;
 export const getAuthToken = () => authToken;
+export const getApiTransport = () => apiTransport;
 
 export const resetApi = () => {
   baseURL = '';
   authToken = null;
+  apiTransport = 'legacy-bridge';
   api.defaults.baseURL = '';
   delete api.defaults.headers.common['Authorization'];
 };

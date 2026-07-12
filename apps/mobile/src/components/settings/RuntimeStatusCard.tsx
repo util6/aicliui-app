@@ -20,7 +20,7 @@ import {
 } from '../../services/termuxRuntime';
 
 type RuntimeTone = 'ready' | 'pending' | 'missing';
-const DAEMON_LOG_PATH = '~/.aicliui/logs/daemon.log';
+const DAEMON_LOG_PATH = '~/.aicliui/logs/aioncore.log';
 
 type RuntimeRowProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -325,7 +325,7 @@ function bootstrapLabel(
 }
 
 function bootstrapTone(phase: string): RuntimeTone {
-  if (phase === 'daemon_start_requested') return 'ready';
+  if (phase === 'daemon_start_requested' || phase === 'aioncore_start_requested') return 'ready';
   if (phase.endsWith('_failed') || phase === 'error') return 'missing';
   return 'pending';
 }

@@ -1,7 +1,13 @@
+# Dependencies
 node_modules/
+
+# Build and Outputs
 dist/
 build/
 coverage/
+*.tsbuildinfo
+
+# Expo / React Native
 .expo/
 .expo-shared/
 /android/
@@ -11,11 +17,35 @@ apps/mobile/ios/
 *.apk
 *.aab
 *.ipa
+build-*.ipa
+build-*.apk
+build-*.aab
+
+# Environments
 .env
 .env.*
 !.env.example
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+*.log
+logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# AI Assistant Tooling
+.specstory/
