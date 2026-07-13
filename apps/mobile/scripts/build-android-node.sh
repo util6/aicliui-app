@@ -20,6 +20,8 @@ ASSET_ROOT="$MOBILE_DIR/modules/aicliui-runtime/android/src/main/assets/aicliui-
 MANIFEST="$MOBILE_DIR/modules/aicliui-runtime/android/src/main/assets/aicliui-runtime.json"
 
 pushd "$SOURCE_DIR" >/dev/null
+export CC_host="${CC_host:-cc}"
+export CXX_host="${CXX_host:-c++}"
 PATCH="$MOBILE_DIR/patches/node-android-api24.patch"
 if git apply --reverse --check "$PATCH" >/dev/null 2>&1; then
   echo "Node Android API 24 patch is already applied"
