@@ -1,0 +1,62 @@
+name: Codex ACP Android feasibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/android-bundled-runtime]
+    paths:
+      - '.github/workflows/codex-acp-android.yml'
+      - 'apps/mobile/scripts/build-android-codex-acp.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  build-codex-acp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CODEX_ACP_VERSION: v0.16.0
+      ANDROID_NDK_VERSION: 27.1.12297006
+    steps:
+      - name: Check out AICLIUI
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Check out Codex ACP
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: zed-industries/codex-acp
+          ref: ${{ env.CODEX_ACP_VERSION }}
+          path: .runtime-src/codex-acp
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;$ANDROID_NDK_VERSION"
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Cache Rust build
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .runtime-src/codex-acp/target
+          key: codex-acp-android-${{ env.CODEX_ACP_VERSION }}-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('apps/mobile/scripts/build-android-codex-acp.sh') }}
+
+      - name: Cross-compile Codex ACP
+        run: >-
+          ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          bash apps/mobile/scripts/build-android-codex-acp.sh .runtime-src/codex-acp
+
+      - name: Upload Android binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: codex-acp-android-arm64
+          path: apps/mobile/modules/aicliui-runtime/android/src/main/jniLibs/arm64-v8a/libcodex_acp.so
+          if-no-files-found: error
