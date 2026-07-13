@@ -85,6 +85,16 @@ describe('WebSocketService', () => {
   });
 
   describe('connect', () => {
+    it('does not create a WebSocket before a host and port are configured', () => {
+      const unconfiguredService = new WebSocketService();
+
+      unconfiguredService.connect();
+
+      expect(mockWSInstances).toHaveLength(0);
+      expect(unconfiguredService.state).toBe('disconnected');
+      unconfiguredService.disconnect();
+    });
+
     it('creates WebSocket with correct URL and token protocol', () => {
       service.connect();
       const ws = latestWS();

@@ -78,6 +78,14 @@ export class WebSocketService {
       return;
     }
 
+    const host = this.host.trim();
+    const port = this.port.trim();
+    if (!host || !port) {
+      this.clearReconnectTimer();
+      this.setState('disconnected');
+      return;
+    }
+
     // If token is already expired, go through auth challenge instead of attempting connection
     if (this.isTokenExpired()) {
       console.warn('[WS] Token expired before connect, triggering auth challenge');
@@ -88,7 +96,7 @@ export class WebSocketService {
     this.shouldReconnect = true;
     this.setState('connecting');
 
-    const url = `ws://${this.host}:${this.port}${this.transport === 'aioncore' ? '/ws' : ''}`;
+    const url = `ws://${host}:${port}${this.transport === 'aioncore' ? '/ws' : ''}`;
 
     try {
       // Pass token via Sec-WebSocket-Protocol header (server supports this)

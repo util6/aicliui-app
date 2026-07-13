@@ -19,12 +19,12 @@ const WebSocketContext = createContext<WebSocketContextType>({
  * Wrap your app with this so components can access the bridge.
  */
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
-  const { tryReconnect } = useConnection();
+  const { isConfigured, tryReconnect } = useConnection();
 
   // Reconnect when app returns to foreground if disconnected or auth_failed
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active') {
+      if (nextState === 'active' && isConfigured) {
         if (wsService.state === 'auth_failed') {
           tryReconnect();
         } else if (wsService.state === 'disconnected') {
@@ -33,7 +33,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
       }
     });
     return () => sub.remove();
-  }, [tryReconnect]);
+  }, [isConfigured, tryReconnect]);
 
   return <WebSocketContext.Provider value={{ bridge, wsService }}>{children}</WebSocketContext.Provider>;
 }
