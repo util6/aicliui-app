@@ -27,6 +27,15 @@ export CC_aarch64_linux_android="$CLANG"
 export CXX_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
 export AR_aarch64_linux_android="$TOOLCHAIN/bin/llvm-ar"
 
+PATCH="$(cd "$(dirname "$0")/.." && pwd)/patches/codex-acp-android-openssl.patch"
+if git -C "$SOURCE_DIR" apply --reverse --check "$PATCH" >/dev/null 2>&1; then
+  echo "Codex ACP vendored OpenSSL patch is already applied"
+else
+  git -C "$SOURCE_DIR" apply --check "$PATCH"
+  git -C "$SOURCE_DIR" apply "$PATCH"
+fi
+export OPENSSL_STATIC=1
+
 cargo build \
   --manifest-path "$SOURCE_DIR/Cargo.toml" \
   --target "$TARGET" \

@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/workflows/codex-acp-android.yml'
       - 'apps/mobile/scripts/build-android-codex-acp.sh'
+      - 'apps/mobile/patches/codex-acp-android-openssl.patch'
 
 permissions:
   contents: read
