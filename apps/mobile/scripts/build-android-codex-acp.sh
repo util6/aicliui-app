@@ -41,6 +41,8 @@ else
   git -C "$SOURCE_DIR" apply "$PATCH"
 fi
 export OPENSSL_STATIC=1
+export V8_FROM_SOURCE=1
+export CLANG_BASE_PATH="$TOOLCHAIN/bin"
 
 cargo build \
   --manifest-path "$SOURCE_DIR/Cargo.toml" \
