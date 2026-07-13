@@ -20,6 +20,13 @@ ASSET_ROOT="$MOBILE_DIR/modules/aicliui-runtime/android/src/main/assets/aicliui-
 MANIFEST="$MOBILE_DIR/modules/aicliui-runtime/android/src/main/assets/aicliui-runtime.json"
 
 pushd "$SOURCE_DIR" >/dev/null
+PATCH="$MOBILE_DIR/patches/node-android-api24.patch"
+if git apply --reverse --check "$PATCH" >/dev/null 2>&1; then
+  echo "Node Android API 24 patch is already applied"
+else
+  git apply --check "$PATCH"
+  git apply "$PATCH"
+fi
 ./android-configure "$ANDROID_NDK_ROOT" "$ANDROID_API" arm64
 make -j"$JOBS" node
 popd >/dev/null
