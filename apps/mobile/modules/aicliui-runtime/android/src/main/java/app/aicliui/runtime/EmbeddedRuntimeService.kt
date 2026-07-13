@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.Executors
 
 internal data class RuntimeStatus(
@@ -42,9 +43,11 @@ internal data class RuntimePaths(
   val logDir: File,
   val logFile: File,
   val executable: File,
+  val nodeExecutable: File,
+  val nodeRoot: File,
 ) {
   fun prepareDirectories() {
-    listOf(root, dataDir, workDir, logDir).forEach { directory ->
+    listOf(root, dataDir, workDir, logDir, nodeRoot).forEach { directory ->
       if (!directory.exists() && !directory.mkdirs()) {
         throw IllegalStateException("Unable to create runtime directory: ${directory.absolutePath}")
       }
@@ -62,6 +65,8 @@ internal data class RuntimePaths(
         logDir = logDir,
         logFile = File(logDir, "aioncore.log"),
         executable = File(context.applicationInfo.nativeLibraryDir, "libaioncore.so"),
+        nodeExecutable = File(context.applicationInfo.nativeLibraryDir, "libnode.so"),
+        nodeRoot = File(root, "node"),
       )
     }
   }
@@ -132,6 +137,12 @@ class EmbeddedRuntimeService : Service() {
       val paths = RuntimePaths.from(this)
       try {
         paths.prepareDirectories()
+        require(paths.executable.isFile) { "Embedded AionCore executable is missing" }
+        require(paths.nodeExecutable.isFile) { "Embedded Android Node executable is missing" }
+        copyAssetTree("aicliui-runtime/node", paths.nodeRoot)
+        val npmCli = File(paths.nodeRoot, "lib/node_modules/npm/bin/npm-cli.js")
+        val npxCli = File(paths.nodeRoot, "lib/node_modules/npm/bin/npx-cli.js")
+        require(npmCli.isFile && npxCli.isFile) { "Embedded npm resources are incomplete" }
         val command = listOf(
           paths.executable.absolutePath,
           "--local",
@@ -140,7 +151,7 @@ class EmbeddedRuntimeService : Service() {
           "--data-dir", paths.dataDir.absolutePath,
           "--work-dir", paths.workDir.absolutePath,
           "--log-dir", paths.logDir.absolutePath,
-          "--managed-resources-mode", "download",
+          "--managed-resources-mode", "bundled",
         )
         val process = ProcessBuilder(command)
           .directory(paths.root)
@@ -149,6 +160,9 @@ class EmbeddedRuntimeService : Service() {
           .apply {
             environment()["HOME"] = paths.root.absolutePath
             environment()["AICLIUI_HOME"] = paths.root.absolutePath
+            environment()["AIONUI_NODE_BINARY"] = paths.nodeExecutable.absolutePath
+            environment()["AIONUI_NPM_CLI"] = npmCli.absolutePath
+            environment()["AIONUI_NPX_CLI"] = npxCli.absolutePath
           }
           .start()
 
@@ -182,6 +196,21 @@ class EmbeddedRuntimeService : Service() {
         stopSelf()
       }
     }
+  }
+
+  private fun copyAssetTree(assetPath: String, destination: File) {
+    val children = assets.list(assetPath) ?: emptyArray()
+    if (children.isEmpty()) {
+      destination.parentFile?.mkdirs()
+      assets.open(assetPath).use { input ->
+        FileOutputStream(destination).use { output -> input.copyTo(output) }
+      }
+      return
+    }
+    if (!destination.exists() && !destination.mkdirs()) {
+      throw IllegalStateException("Unable to create runtime asset directory: ${destination.absolutePath}")
+    }
+    children.forEach { child -> copyAssetTree("$assetPath/$child", File(destination, child)) }
   }
 
   private fun stopRuntime() {

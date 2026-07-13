@@ -36,6 +36,14 @@ export CC_aarch64_linux_android="$CLANG"
 export CXX_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
 export AR_aarch64_linux_android="$AR"
 
+PATCH="$(cd "$(dirname "$0")/.." && pwd)/patches/aioncore-android-external-node.patch"
+if git -C "$SOURCE_DIR" apply --reverse --check "$PATCH" >/dev/null 2>&1; then
+  echo "AionCore Android external Node patch is already applied"
+else
+  git -C "$SOURCE_DIR" apply --check "$PATCH"
+  git -C "$SOURCE_DIR" apply "$PATCH"
+fi
+
 cargo build \
   --manifest-path "$SOURCE_DIR/Cargo.toml" \
   --target "$TARGET" \

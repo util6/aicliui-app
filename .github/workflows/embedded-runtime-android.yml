@@ -12,6 +12,8 @@ on:
       - 'apps/mobile/modules/aicliui-runtime/**'
       - 'apps/mobile/plugins/withEmbeddedRuntimePackaging.js'
       - 'apps/mobile/scripts/build-embedded-runtime.sh'
+      - 'apps/mobile/scripts/build-android-node.sh'
+      - 'apps/mobile/patches/**'
       - 'package-lock.json'
   pull_request:
     branches: [main]
@@ -23,6 +25,8 @@ on:
       - 'apps/mobile/modules/aicliui-runtime/**'
       - 'apps/mobile/plugins/withEmbeddedRuntimePackaging.js'
       - 'apps/mobile/scripts/build-embedded-runtime.sh'
+      - 'apps/mobile/scripts/build-android-node.sh'
+      - 'apps/mobile/patches/**'
       - 'package-lock.json'
 
 permissions:
@@ -34,6 +38,7 @@ jobs:
     timeout-minutes: 90
     env:
       AIONCORE_VERSION: v0.1.43
+      NODE_VERSION: v22.22.0
       ANDROID_NDK_VERSION: 27.1.12297006
 
     steps:
@@ -46,6 +51,13 @@ jobs:
           repository: iOfficeAI/AionCore
           ref: ${{ env.AIONCORE_VERSION }}
           path: .runtime-src/aioncore
+
+      - name: Check out Node.js
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: nodejs/node
+          ref: ${{ env.NODE_VERSION }}
+          path: .runtime-src/node
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -71,6 +83,16 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      - name: Cache Rust and Android Node builds
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .runtime-src/aioncore/target
+            .runtime-src/node/out
+          key: embedded-runtime-${{ runner.os }}-${{ env.AIONCORE_VERSION }}-${{ env.NODE_VERSION }}-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('apps/mobile/patches/**', 'apps/mobile/scripts/build-*.sh') }}
+
       - name: Install JavaScript dependencies
         run: npm ci
 
@@ -78,6 +100,12 @@ jobs:
         run: >-
           ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
           bash apps/mobile/scripts/build-embedded-runtime.sh .runtime-src/aioncore
+
+      - name: Cross-compile embedded Node.js
+        run: >-
+          NODE_VERSION="$NODE_VERSION"
+          ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          bash apps/mobile/scripts/build-android-node.sh .runtime-src/node
 
       - name: Generate Android project
         working-directory: apps/mobile
@@ -94,6 +122,14 @@ jobs:
         run: |
           APK="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
           unzip -Z1 "$APK" | grep -Fxq 'lib/arm64-v8a/libaioncore.so'
+          unzip -Z1 "$APK" | grep -Fxq 'lib/arm64-v8a/libnode.so'
+          unzip -Z1 "$APK" | grep -Fxq 'assets/aicliui-runtime/node/lib/node_modules/npm/bin/npm-cli.js'
+          unzip -p "$APK" assets/aicliui-runtime.json | node -e '
+            let input=""; process.stdin.on("data", c => input += c);
+            process.stdin.on("end", () => {
+              const manifest=JSON.parse(input);
+              if (manifest.node?.target !== "aarch64-linux-android") process.exit(1);
+            });'
           unzip -Z1 "$APK" | grep -Fxq 'assets/aicliui-runtime.json'
           "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > /tmp/aicliui-manifest.xml
           grep -q 'app.aicliui.runtime.EmbeddedRuntimeService' /tmp/aicliui-manifest.xml

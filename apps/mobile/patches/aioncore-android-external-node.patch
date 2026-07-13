@@ -1,0 +1,83 @@
+diff --git a/crates/aionui-runtime/src/node_runtime/mod.rs b/crates/aionui-runtime/src/node_runtime/mod.rs
+index ba7ac33..8f53039 100644
+--- a/crates/aionui-runtime/src/node_runtime/mod.rs
++++ b/crates/aionui-runtime/src/node_runtime/mod.rs
+@@ -1,3 +1,4 @@
++mod external;
+ mod managed;
+ mod system;
+ mod types;
+@@ -56,6 +57,11 @@ pub async fn ensure_node_runtime() -> Result<ResolvedNodeRuntime, NodeRuntimeErr
+ pub async fn ensure_node_runtime_with_reporter(
+     reporter: Option<&dyn NodeRuntimeProgressReporter>,
+ ) -> Result<ResolvedNodeRuntime, NodeRuntimeError> {
++    if let Some(runtime) = external::configured_runtime().await? {
++        log_runtime_selected(&runtime);
++        return Ok(runtime);
++    }
++
+     if let Some(runtime) = cached_managed_runtime_unreported().await {
+         log_runtime_selected(&runtime);
+         return Ok(runtime);
+diff --git a/crates/aionui-runtime/src/node_runtime/external.rs b/crates/aionui-runtime/src/node_runtime/external.rs
+new file mode 100644
+index 0000000..1de7a9b
+--- /dev/null
++++ b/crates/aionui-runtime/src/node_runtime/external.rs
+@@ -0,0 +1,56 @@
++use std::path::PathBuf;
++
++use super::types::{NodeRuntimeError, ResolvedNodeRuntime, ResolvedNodeSource};
++
++const NODE_BINARY_ENV: &str = "AIONUI_NODE_BINARY";
++const NPM_CLI_ENV: &str = "AIONUI_NPM_CLI";
++const NPX_CLI_ENV: &str = "AIONUI_NPX_CLI";
++
++pub async fn configured_runtime() -> Result<Option<ResolvedNodeRuntime>, NodeRuntimeError> {
++    let Some(node_path) = configured_path(NODE_BINARY_ENV) else {
++        return Ok(None);
++    };
++    let npm_cli = required_path(NPM_CLI_ENV)?;
++    let npx_cli = required_path(NPX_CLI_ENV)?;
++    for (label, path) in [("node", &node_path), ("npm CLI", &npm_cli), ("npx CLI", &npx_cli)] {
++        if !path.is_file() {
++            return Err(NodeRuntimeError::system_invalid(format!(
++                "configured external {label} is missing: {}",
++                path.display()
++            )));
++        }
++    }
++
++    let version = super::command_version(super::ResolvedCommand::plain(node_path.clone()), "node").await?;
++    let root = npm_cli
++        .parent()
++        .and_then(|path| path.parent())
++        .map(PathBuf::from)
++        .unwrap_or_else(|| npm_cli.parent().unwrap_or(&npm_cli).to_path_buf());
++
++    Ok(Some(ResolvedNodeRuntime {
++        source: ResolvedNodeSource::Bundled,
++        root,
++        version,
++        node_path: node_path.clone(),
++        npm_path: node_path.clone(),
++        npm_args_prefix: vec![npm_cli.into_os_string()],
++        npx_path: node_path,
++        npx_args_prefix: vec![npx_cli.into_os_string()],
++        env: vec![],
++    }))
++}
++
++fn configured_path(key: &str) -> Option<PathBuf> {
++    std::env::var_os(key)
++        .filter(|value| !value.is_empty())
++        .map(PathBuf::from)
++}
++
++fn required_path(key: &str) -> Result<PathBuf, NodeRuntimeError> {
++    configured_path(key).ok_or_else(|| {
++        NodeRuntimeError::system_invalid(format!(
++            "{key} is required when {NODE_BINARY_ENV} is configured"
++        ))
++    })
++}
