@@ -26,6 +26,12 @@ export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CLANG"
 export CC_aarch64_linux_android="$CLANG"
 export CXX_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
 export AR_aarch64_linux_android="$TOOLCHAIN/bin/llvm-ar"
+export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
+export RANLIB_aarch64_linux_android="$RANLIB"
+TOOL_SHIMS="$(mktemp -d)"
+trap 'rm -rf "$TOOL_SHIMS"' EXIT
+ln -s "$RANLIB" "$TOOL_SHIMS/aarch64-linux-android-ranlib"
+export PATH="$TOOL_SHIMS:$TOOLCHAIN/bin:$PATH"
 
 PATCH="$(cd "$(dirname "$0")/.." && pwd)/patches/codex-acp-android-openssl.patch"
 if git -C "$SOURCE_DIR" apply --reverse --check "$PATCH" >/dev/null 2>&1; then
