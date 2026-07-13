@@ -859,10 +859,6 @@ export async function getRuntimeStatus(
       pid: process.pid,
     },
     ...(bootstrap ? { bootstrap } : {}),
-    termux: {
-      runCommandPermission: runtimePermissionValue(environment.AICLIUI_TERMUX_RUN_COMMAND_PERMISSION),
-      allowExternalApps: externalAppsValue(environment.AICLIUI_TERMUX_ALLOW_EXTERNAL_APPS),
-    },
     agents: await adapters.probeAll(),
   };
 }
@@ -887,16 +883,6 @@ async function readBootstrapStatus(path: string): Promise<RuntimeStatus['bootstr
   } catch {
     return undefined;
   }
-}
-
-function runtimePermissionValue(value: string | undefined): RuntimeStatus['termux']['runCommandPermission'] {
-  if (value === 'granted' || value === 'denied') return value;
-  return 'unknown';
-}
-
-function externalAppsValue(value: string | undefined): RuntimeStatus['termux']['allowExternalApps'] {
-  if (value === 'enabled' || value === 'disabled') return value;
-  return 'unknown';
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

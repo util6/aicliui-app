@@ -658,7 +658,6 @@ describe('ConversationContext new chat context', () => {
       if (name === 'runtime.get-status') {
         return Promise.resolve({
           daemon: { version: '0.1.0', startedAt: 1000 },
-          termux: { runCommandPermission: 'granted', allowExternalApps: 'enabled' },
           agents: [
             { backend: 'opencode', state: 'ready', version: '1.0.0' },
             { backend: 'codex', state: 'missing', detail: 'codex command not found' },

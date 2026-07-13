@@ -65,7 +65,7 @@ export function createCodexAdapter(runner: CommandRunner): CliAgentAdapter {
       if (!runner.runCommand) {
         yield {
           type: 'content',
-          content: 'Codex CLI execution is queued for the Termux runtime adapter.',
+          content: 'Codex CLI execution is queued for the embedded runtime adapter.',
         };
         return;
       }

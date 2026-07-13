@@ -21,9 +21,11 @@ jobs:
   build-and-upload:
     name: Build and upload APK
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 120
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+      AIONCORE_VERSION: v0.1.43
+      ANDROID_NDK_VERSION: 27.1.12297006
 
     steps:
       - name: Validate release tag
@@ -38,6 +40,13 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+
+      - name: Check out AionCore source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: iOfficeAI/AionCore
+          ref: ${{ env.AIONCORE_VERSION }}
+          path: .runtime-src/aioncore
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -55,6 +64,14 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
+      - name: Install Android NDK
+        run: sdkmanager "ndk;$ANDROID_NDK_VERSION"
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
@@ -67,6 +84,11 @@ jobs:
       - name: Run TypeScript checks
         run: npm run ts:check
 
+      - name: Cross-compile embedded AionCore
+        run: >-
+          ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          bash apps/mobile/scripts/build-embedded-runtime.sh .runtime-src/aioncore
+
       - name: Generate Android project
         working-directory: apps/mobile
         env:
@@ -78,17 +100,52 @@ jobs:
         run: >-
           ./gradlew assembleRelease
           --no-daemon
-          -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+          -PreactNativeArchitectures=arm64-v8a
           -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
+
+      - name: Verify embedded runtime APK
+        shell: bash
+        run: |
+          APK="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
+          unzip -Z1 "$APK" | grep -Fxq 'lib/arm64-v8a/libaioncore.so'
+          unzip -Z1 "$APK" | grep -Fxq 'assets/aicliui-runtime.json'
+          unzip -p "$APK" assets/aicliui-runtime.json > /tmp/aicliui-runtime.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const manifest = JSON.parse(fs.readFileSync('/tmp/aicliui-runtime.json', 'utf8'));
+          const required = ['opencode', 'gemini', 'codex'];
+          const agents = Array.isArray(manifest.agents) ? manifest.agents : [];
+          const packagedPaths = [];
+          for (const backend of required) {
+            const agent = agents.find((entry) => entry?.backend === backend);
+            if (!agent || typeof agent.launcher !== 'string' || !Array.isArray(agent.files)) {
+              throw new Error(`Embedded runtime manifest is missing packaged ${backend} resources`);
+            }
+            if (!agent.files.includes(agent.launcher)) {
+              throw new Error(`${backend} launcher is not included in its packaged file list`);
+            }
+            packagedPaths.push(...agent.files);
+          }
+          fs.writeFileSync('/tmp/aicliui-agent-paths', `${[...new Set(packagedPaths)].join('\n')}\n`);
+          NODE
+          while IFS= read -r packaged_path; do
+            [[ -z "$packaged_path" ]] || unzip -Z1 "$APK" | grep -Fxq "$packaged_path"
+          done < /tmp/aicliui-agent-paths
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > /tmp/aicliui-manifest.xml
+          grep -q 'app.aicliui.runtime.EmbeddedRuntimeService' /tmp/aicliui-manifest.xml
+          if grep -qi 'com\.termux' /tmp/aicliui-manifest.xml; then
+            echo "Release APK still contains a Termux permission, query, or component" >&2
+            exit 1
+          fi
 
       - name: Prepare release asset
         shell: bash
         run: |
           mkdir -p dist
           cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk \
-            "dist/aicliui-${RELEASE_TAG}-android.apk"
-          sha256sum "dist/aicliui-${RELEASE_TAG}-android.apk" \
-            > "dist/aicliui-${RELEASE_TAG}-android.apk.sha256"
+            "dist/aicliui-${RELEASE_TAG}-android-arm64.apk"
+          sha256sum "dist/aicliui-${RELEASE_TAG}-android-arm64.apk" \
+            > "dist/aicliui-${RELEASE_TAG}-android-arm64.apk.sha256"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

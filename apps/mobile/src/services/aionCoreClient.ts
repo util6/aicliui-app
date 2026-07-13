@@ -165,7 +165,6 @@ async function getRuntimeStatus() {
   const agents = await getAvailableAgents();
   return {
     daemon: { version: 'AionCore 0.1.x', startedAt: 0 },
-    termux: { runCommandPermission: 'granted', allowExternalApps: 'enabled' },
     agents: agents.filter((agent) => SUPPORTED_LOCAL_BACKENDS.has(agent.backend)).map((agent) => ({
       backend: agent.backend,
       state: agent.state,

@@ -271,10 +271,6 @@ export type RuntimeStatus = {
     detail?: string;
     updatedAt?: number;
   };
-  termux: {
-    runCommandPermission: 'unknown' | 'granted' | 'denied';
-    allowExternalApps: 'unknown' | 'enabled' | 'disabled';
-  };
   agents: AgentHealth[];
 };
 

@@ -1,7 +1,12 @@
 import React from 'react';
+import { Alert } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import ConnectScreen from '@/app/connect';
-import { installOrStartLocalRuntime } from '@/src/services/termuxRuntime';
+import {
+  prepareEmbeddedRuntime,
+  probeEmbeddedRuntime,
+  startEmbeddedRuntime,
+} from '@/src/services/embeddedRuntime';
 import { getRuntimeStatus } from '@/src/services/runtimeStatus';
 
 const mockConnect = jest.fn();
@@ -16,10 +21,6 @@ jest.mock('@expo/vector-icons', () => {
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ replace: (...args: unknown[]) => mockReplace(...args) }),
-}));
-
-jest.mock('expo-clipboard', () => ({
-  setStringAsync: jest.fn(),
 }));
 
 jest.mock('react-i18next', () => ({
@@ -70,19 +71,15 @@ jest.mock('@/src/services/runtimeStatus', () => ({
   getAgentStateLabelKey: () => 'connect.statusReady',
 }));
 
-jest.mock('@/src/services/termuxRuntime', () => ({
-  TERMUX_DOWNLOAD_URL: 'https://example.test/termux',
-  getTermuxExternalAppsSetupCommand: () => 'setup-termux',
-  installOrStartLocalRuntime: jest.fn(),
-  openTermuxIfAvailable: jest.fn(),
-  probeTermuxRuntime: jest.fn().mockResolvedValue({
-    nativeModule: 'available',
-    termuxInstalled: 'yes',
-    runCommandPermission: 'yes',
-  }),
+jest.mock('@/src/services/embeddedRuntime', () => ({
+  probeEmbeddedRuntime: jest.fn(),
+  prepareEmbeddedRuntime: jest.fn(),
+  startEmbeddedRuntime: jest.fn(),
 }));
 
-const mockInstallOrStartLocalRuntime = installOrStartLocalRuntime as jest.Mock;
+const mockProbeEmbeddedRuntime = probeEmbeddedRuntime as jest.Mock;
+const mockPrepareEmbeddedRuntime = prepareEmbeddedRuntime as jest.Mock;
+const mockStartEmbeddedRuntime = startEmbeddedRuntime as jest.Mock;
 const mockGetRuntimeStatus = getRuntimeStatus as jest.Mock;
 
 describe('ConnectScreen', () => {
@@ -95,13 +92,11 @@ describe('ConnectScreen', () => {
       token: '',
       transport: 'aioncore',
     });
-    mockInstallOrStartLocalRuntime.mockResolvedValue({
-      status: 'started',
-      config: { host: '127.0.0.1', port: '43117', token: '', transport: 'aioncore' },
-    });
+    mockProbeEmbeddedRuntime.mockResolvedValue({ state: 'stopped', supported: true, port: 43117 });
+    mockPrepareEmbeddedRuntime.mockResolvedValue({ state: 'stopped', supported: true, port: 43117 });
+    mockStartEmbeddedRuntime.mockResolvedValue({ state: 'starting', supported: true, port: 43117 });
     mockGetRuntimeStatus.mockResolvedValue({
       daemon: { version: '0.1.0', startedAt: 1000, pid: 42 },
-      termux: { runCommandPermission: 'granted', allowExternalApps: 'enabled' },
       agents: [],
     });
     mockConnect.mockImplementation(async () => {
@@ -109,15 +104,48 @@ describe('ConnectScreen', () => {
     });
   });
 
-  it('connects and opens chat when the bootstrapped daemon becomes ready', async () => {
+  it('prepares and starts the embedded runtime before opening chat', async () => {
     const screen = render(<ConnectScreen />);
 
     fireEvent.press(screen.getByText('connect.installRuntime'));
 
     await waitFor(() => {
+      expect(mockPrepareEmbeddedRuntime).toHaveBeenCalledTimes(1);
+      expect(mockStartEmbeddedRuntime).toHaveBeenCalledTimes(1);
       expect(mockConnect).toHaveBeenCalledWith('127.0.0.1', '43117', '', 'aioncore');
       expect(mockGetRuntimeStatus).toHaveBeenCalledTimes(1);
       expect(mockReplace).toHaveBeenCalledWith('/(tabs)/chat');
     });
+  });
+
+  it('shows only the embedded runtime and daemon status rows', async () => {
+    const screen = render(<ConnectScreen />);
+
+    await waitFor(() => expect(mockProbeEmbeddedRuntime).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('connect.embeddedRuntime')).toBeTruthy();
+    expect(screen.getByText('connect.daemon')).toBeTruthy();
+    expect(screen.queryByText('connect.termux')).toBeNull();
+    expect(screen.queryByText('connect.runCommandPermission')).toBeNull();
+    expect(screen.queryByText('connect.configureTermux')).toBeNull();
+  });
+
+  it('does not try to connect when the packaged runtime is unavailable', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    mockPrepareEmbeddedRuntime.mockResolvedValueOnce({
+      state: 'unavailable',
+      supported: false,
+      port: 43117,
+      detail: 'Embedded AionCore binary is missing',
+    });
+    const screen = render(<ConnectScreen />);
+
+    fireEvent.press(screen.getByText('connect.installRuntime'));
+
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith('connect.installRuntime', 'connect.embeddedRuntimeUnavailable');
+    });
+    expect(mockStartEmbeddedRuntime).not.toHaveBeenCalled();
+    expect(mockConnect).not.toHaveBeenCalled();
+    alertSpy.mockRestore();
   });
 });

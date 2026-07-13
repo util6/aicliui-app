@@ -179,6 +179,20 @@ describe('AionCore client adapter', () => {
     });
   });
 
+  it('reports runtime health without Termux-specific permission fields', async () => {
+    mockGet.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: [{ id: '1', backend: 'opencode', name: 'OpenCode', installed: true, status: 'online' }],
+      },
+    });
+
+    await expect(requestAionCore('runtime.get-status')).resolves.toEqual({
+      daemon: { version: 'AionCore 0.1.x', startedAt: 0 },
+      agents: [{ backend: 'opencode', state: 'ready' }],
+    });
+  });
+
   it('maps the full AionCore custom agent management lifecycle', async () => {
     mockGet.mockResolvedValueOnce({ data: { success: true, data: [{ id: 'custom-1' }] } });
     mockPost

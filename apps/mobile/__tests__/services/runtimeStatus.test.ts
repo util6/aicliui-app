@@ -18,7 +18,6 @@ describe('runtimeStatus', () => {
     const status = {
       daemon: { version: '0.1.0', startedAt: 1000, pid: 123 },
       bootstrap: { phase: 'daemon_start_requested', detail: 'Starting local daemon', updatedAt: 1234 },
-      termux: { runCommandPermission: 'granted', allowExternalApps: 'unknown' },
       agents: [{ backend: 'opencode', state: 'ready', version: '1.2.3' }],
     };
     mockRequest.mockResolvedValueOnce(status);

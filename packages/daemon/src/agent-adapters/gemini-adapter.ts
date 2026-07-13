@@ -79,7 +79,7 @@ export function createGeminiAdapter(runner: CommandRunner): CliAgentAdapter {
       if (!runner.runCommand) {
         yield {
           type: 'content',
-          content: 'Gemini CLI execution is queued for the Termux runtime adapter.',
+          content: 'Gemini CLI execution is queued for the embedded runtime adapter.',
         };
         return;
       }

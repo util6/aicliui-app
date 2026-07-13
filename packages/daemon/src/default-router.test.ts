@@ -14,7 +14,7 @@ import type { ConversationArtifact } from '@aicliui/shared';
 const execFileAsync = promisify(execFile);
 
 describe('default bridge routes', () => {
-  it('reports injected Termux state and bootstrap progress', async () => {
+  it('reports bootstrap progress without platform-specific permission state', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'aicliui-runtime-status-'));
     const statusPath = join(directory, 'bootstrap.status');
     await writeFile(
@@ -26,8 +26,6 @@ describe('default bridge routes', () => {
       const status = await getRuntimeStatus(createFallbackAgentAdapterRegistry(), {
         AICLIUI_HOME: directory,
         AICLIUI_BOOTSTRAP_STATUS: statusPath,
-        AICLIUI_TERMUX_RUN_COMMAND_PERMISSION: 'granted',
-        AICLIUI_TERMUX_ALLOW_EXTERNAL_APPS: 'enabled',
       });
 
       expect(status.daemon.pid).toBe(process.pid);
@@ -36,10 +34,7 @@ describe('default bridge routes', () => {
         detail: 'Starting local daemon',
         updatedAt: 1234000,
       });
-      expect(status.termux).toEqual({
-        runCommandPermission: 'granted',
-        allowExternalApps: 'enabled',
-      });
+      expect(status).not.toHaveProperty('termux');
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

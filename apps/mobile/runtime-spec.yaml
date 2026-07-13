@@ -1,0 +1,65 @@
+name: AICLIUI embedded Android runtime
+objective: >-
+  Ship AICLIUI as one Android APK that installs, starts, monitors, and stops its
+  local AionCore and CLI runtime without Termux or another companion app.
+
+assumptions:
+  supportedAbis: [arm64-v8a]
+  distribution: GitHub Releases
+  minRuntimeModel: foreground-service
+  targetSdkPolicy: do-not-lower-for-executable-files
+  networkBootstrap: non-executable-data-only
+
+runtimeContract:
+  states: [unavailable, stopped, preparing, starting, running, error]
+  operations: [getStatus, prepare, start, stop, getLogPath]
+  endpoint:
+    host: 127.0.0.1
+    port: 43117
+
+securityBoundaries:
+  - Runtime services and files remain private to app.aicliui.mobile.
+  - The local HTTP and WebSocket server binds only to 127.0.0.1.
+  - Downloaded runtime resources require a pinned version and SHA-256 digest.
+  - Executable CLI resources must ship as APK native libraries or run through an interpreter embedded in the APK.
+  - No executable is downloaded to an app-writable directory and launched directly.
+  - No shell command is accepted directly from React Native or user input.
+  - No exported Android component controls the runtime.
+  - Android targetSdkVersion must not be lowered to bypass executable-file restrictions.
+
+projectStructure:
+  nativeModule: apps/mobile/modules/aicliui-runtime
+  typescriptAdapter: apps/mobile/src/services/embeddedRuntime.ts
+  releaseWorkflow: .github/workflows/release-android-apk.yml
+
+commands:
+  test: npm test
+  typecheck: npm run ts:check
+  generateAndroid: CI=1 npx expo prebuild --platform android --no-install
+  buildApk: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+successCriteria:
+  - A clean phone needs only the AICLIUI APK; Termux is not installed or queried.
+  - The APK contains an arm64 Android-compatible AionCore launcher binary.
+  - The APK contains every interpreter and executable resource needed by each advertised CLI agent.
+  - AICLIUI prepares runtime files under its private application directory.
+  - Starting the runtime creates an ongoing foreground-service notification.
+  - AionCore is reachable on 127.0.0.1:43117 over HTTP and WebSocket.
+  - OpenCode, Gemini CLI, and Codex CLI each complete a real agent turn without another Android app.
+  - Runtime start, stop, status, and log-path operations are covered by tests.
+  - No com.termux permission, package query, UI copy, or runtime dependency remains.
+  - The release workflow builds one installable APK containing the runtime assets.
+  - The release APK is installed and the local runtime flow is verified on an arm64 device.
+
+implementationPhases:
+  - Prove AionCore can build for aarch64-linux-android without lowering targetSdkVersion.
+  - Add the private foreground-service native module and typed JS contract.
+  - Package the native executable and version manifest into the APK.
+  - Migrate bootstrap, diagnostics, and agent login away from Termux.
+  - Remove the Termux module and permission plugin.
+  - Build, install, and verify the final single APK.
+
+openRisks:
+  - Existing AionCore releases target glibc Linux, not Android Bionic.
+  - Managed CLI resources may require Android-native builds or an embedded interpreter.
+  - The current environment cannot push or run the Android CI feasibility build.

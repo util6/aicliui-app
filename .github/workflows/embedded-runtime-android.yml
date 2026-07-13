@@ -1,0 +1,110 @@
+name: Embedded Runtime Android Feasibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/embedded-runtime-android.yml'
+      - '.github/workflows/release-android-apk.yml'
+      - 'apps/mobile/app.config.ts'
+      - 'apps/mobile/package.json'
+      - 'apps/mobile/modules/aicliui-runtime/**'
+      - 'apps/mobile/plugins/withEmbeddedRuntimePackaging.js'
+      - 'apps/mobile/scripts/build-embedded-runtime.sh'
+      - 'package-lock.json'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/embedded-runtime-android.yml'
+      - '.github/workflows/release-android-apk.yml'
+      - 'apps/mobile/app.config.ts'
+      - 'apps/mobile/package.json'
+      - 'apps/mobile/modules/aicliui-runtime/**'
+      - 'apps/mobile/plugins/withEmbeddedRuntimePackaging.js'
+      - 'apps/mobile/scripts/build-embedded-runtime.sh'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+jobs:
+  build-runtime-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      AIONCORE_VERSION: v0.1.43
+      ANDROID_NDK_VERSION: 27.1.12297006
+
+    steps:
+      - name: Check out AICLIUI
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Check out AionCore
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: iOfficeAI/AionCore
+          ref: ${{ env.AIONCORE_VERSION }}
+          path: .runtime-src/aioncore
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Set up Java
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;$ANDROID_NDK_VERSION"
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Cross-compile embedded AionCore
+        run: >-
+          ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
+          bash apps/mobile/scripts/build-embedded-runtime.sh .runtime-src/aioncore
+
+      - name: Generate Android project
+        working-directory: apps/mobile
+        env:
+          CI: 1
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build arm64 APK
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Verify embedded runtime APK
+        shell: bash
+        run: |
+          APK="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
+          unzip -Z1 "$APK" | grep -Fxq 'lib/arm64-v8a/libaioncore.so'
+          unzip -Z1 "$APK" | grep -Fxq 'assets/aicliui-runtime.json'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > /tmp/aicliui-manifest.xml
+          grep -q 'app.aicliui.runtime.EmbeddedRuntimeService' /tmp/aicliui-manifest.xml
+          if grep -qi 'com\.termux' /tmp/aicliui-manifest.xml; then
+            echo "APK still contains a Termux permission, query, or component" >&2
+            exit 1
+          fi
+
+      - name: Upload feasibility APK
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aicliui-embedded-runtime-arm64
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error

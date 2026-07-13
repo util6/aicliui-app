@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useTranslation } from 'react-i18next';
@@ -13,14 +13,14 @@ import {
   type RuntimeStatus,
 } from '../../services/runtimeStatus';
 import {
-  getAgentLoginCommand,
-  installOrStartLocalRuntime,
-  openTermuxIfAvailable,
-  type LocalAgentBackend,
-} from '../../services/termuxRuntime';
+  getEmbeddedRuntimeLogPath,
+  prepareEmbeddedRuntime,
+  probeEmbeddedRuntime,
+  startEmbeddedRuntime,
+  type EmbeddedRuntimeStatus,
+} from '../../services/embeddedRuntime';
 
 type RuntimeTone = 'ready' | 'pending' | 'missing';
-const DAEMON_LOG_PATH = '~/.aicliui/logs/aioncore.log';
 
 type RuntimeRowProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -37,17 +37,20 @@ export function RuntimeStatusCard() {
   const error = useThemeColor({}, 'error');
   const textSecondary = useThemeColor({}, 'textSecondary');
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
+  const [embeddedStatus, setEmbeddedStatus] = useState<EmbeddedRuntimeStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRepairing, setIsRepairing] = useState(false);
-  const [hasError, setHasError] = useState(false);
+  const [hasDaemonError, setHasDaemonError] = useState(false);
 
   const refresh = useCallback(async () => {
     setIsLoading(true);
-    setHasError(false);
+    setHasDaemonError(false);
+    setEmbeddedStatus(await probeEmbeddedRuntime());
     try {
       setStatus(await getRuntimeStatus());
     } catch {
-      setHasError(true);
+      setStatus(null);
+      setHasDaemonError(true);
     } finally {
       setIsLoading(false);
     }
@@ -59,39 +62,35 @@ export function RuntimeStatusCard() {
 
   const copyDaemonLogPath = useCallback(async () => {
     try {
-      await Clipboard.setStringAsync(DAEMON_LOG_PATH);
-      Alert.alert(t('common.copied'), DAEMON_LOG_PATH);
+      const logPath = await getEmbeddedRuntimeLogPath();
+      await Clipboard.setStringAsync(logPath);
+      Alert.alert(t('common.copied'), logPath);
     } catch {
-      Alert.alert(t('common.error'), DAEMON_LOG_PATH);
+      Alert.alert(t('common.error'), t('settings.runtimeLogUnavailable'));
     }
   }, [t]);
 
   const repairRuntime = useCallback(async () => {
     setIsRepairing(true);
     try {
-      const result = await installOrStartLocalRuntime();
-      if (result.status === 'native_unavailable') {
-        Alert.alert(t('connect.installRuntime'), t('connect.nativeModuleUnavailable'));
+      const prepared = await prepareEmbeddedRuntime();
+      setEmbeddedStatus(prepared);
+      if (!prepared.supported || prepared.state === 'unavailable') {
+        Alert.alert(t('connect.installRuntime'), t('connect.embeddedRuntimeUnavailable'));
         return;
       }
-      if (result.status === 'termux_missing') {
-        Alert.alert(t('connect.termux'), t('connect.termuxMissing'));
-        await openTermuxIfAvailable();
+      if (prepared.state === 'error') {
+        Alert.alert(t('common.error'), t('connect.runtimeStartFailed'));
         return;
       }
-      if (result.status === 'permission_missing') {
-        Alert.alert(t('connect.termux'), t('connect.runCommandPermissionMissing'), [
-          { text: t('common.cancel'), style: 'cancel' },
-          {
-            text: t('connect.openAppSettings'),
-            onPress: () => {
-              void Linking.openSettings();
-            },
-          },
-        ]);
+
+      const started = await startEmbeddedRuntime();
+      setEmbeddedStatus(started);
+      if (!started.supported || started.state === 'unavailable') {
+        Alert.alert(t('connect.installRuntime'), t('connect.embeddedRuntimeUnavailable'));
         return;
       }
-      if (result.status === 'start_failed') {
+      if (started.state === 'error') {
         Alert.alert(t('common.error'), t('connect.runtimeStartFailed'));
         return;
       }
@@ -103,24 +102,7 @@ export function RuntimeStatusCard() {
     }
   }, [t]);
 
-  const openAgentLogin = useCallback(
-    async (backend: LocalAgentBackend) => {
-      const command = getAgentLoginCommand(backend);
-      try {
-        await Clipboard.setStringAsync(command);
-        const opened = await openTermuxIfAvailable();
-        Alert.alert(
-          t('settings.agentLoginTitle', { agent: getAgentDisplayName(backend) }),
-          opened ? t('settings.agentLoginOpened') : t('settings.agentLoginOpenFailed'),
-        );
-      } catch {
-        Alert.alert(t('common.error'), t('settings.agentLoginOpenFailed'));
-      }
-    },
-    [t],
-  );
-
-  const showRepairAction = shouldOfferRuntimeRepair(status, hasError);
+  const showRepairAction = shouldOfferRuntimeRepair(embeddedStatus, status, hasDaemonError);
 
   return (
     <View style={styles.section}>
@@ -146,7 +128,18 @@ export function RuntimeStatusCard() {
       </View>
 
       <View style={[styles.card, { backgroundColor: surface }]}>
-        {hasError && !status ? (
+        {embeddedStatus ? (
+          <RuntimeRow
+            icon='hardware-chip-outline'
+            label={t('connect.embeddedRuntime')}
+            value={embeddedRuntimeLabel(embeddedStatus, t)}
+            tone={embeddedRuntimeTone(embeddedStatus)}
+          />
+        ) : (
+          <LoadingRow label={t('connect.embeddedRuntime')} tint={tint} textSecondary={textSecondary} />
+        )}
+
+        {hasDaemonError ? (
           <View style={[styles.row, { borderBottomColor: border }]}>
             <Ionicons name='alert-circle-outline' size={20} color={error} style={styles.rowIcon} />
             <View style={styles.rowText}>
@@ -164,18 +157,6 @@ export function RuntimeStatusCard() {
               value={daemonLabel(status)}
               tone='ready'
             />
-            <RuntimeRow
-              icon='hardware-chip-outline'
-              label={t('connect.runCommandPermission')}
-              value={termuxRunCommandLabel(status, t)}
-              tone={termuxRunCommandTone(status.termux.runCommandPermission)}
-            />
-            <RuntimeRow
-              icon='phone-portrait-outline'
-              label={t('settings.termuxExternalApps')}
-              value={termuxExternalAppsLabel(status, t)}
-              tone={termuxExternalAppsTone(status.termux.allowExternalApps)}
-            />
             {status.bootstrap && (
               <RuntimeRow
                 icon='pulse-outline'
@@ -184,37 +165,15 @@ export function RuntimeStatusCard() {
                 tone={bootstrapTone(status.bootstrap.phase)}
               />
             )}
-            {status.agents.map((agent) => {
-              const row = (
-                <RuntimeRow
-                  icon={agent.backend === 'opencode' ? 'code-slash-outline' : 'sparkles-outline'}
-                  label={getAgentDisplayName(agent.backend)}
-                  value={agentLabel(agent, t)}
-                  tone={agentTone(agent.state)}
-                />
-              );
-              if (!isLocalAgentBackend(agent.backend)) {
-                return <React.Fragment key={agent.backend}>{row}</React.Fragment>;
-              }
-
-              const backend = agent.backend;
-              return (
-                <TouchableOpacity
-                  key={backend}
-                  accessibilityRole='button'
-                  accessibilityLabel={t('settings.configureAgentLogin', {
-                    agent: getAgentDisplayName(backend),
-                  })}
-                  testID={`configure-agent-${backend}`}
-                  style={styles.agentAction}
-                  onPress={() => openAgentLogin(backend)}
-                  activeOpacity={0.72}
-                >
-                  <View style={styles.agentActionContent}>{row}</View>
-                  <Ionicons name='chevron-forward-outline' size={18} color={textSecondary} />
-                </TouchableOpacity>
-              );
-            })}
+            {status.agents.map((agent) => (
+              <RuntimeRow
+                key={agent.backend}
+                icon={agent.backend === 'opencode' ? 'code-slash-outline' : 'sparkles-outline'}
+                label={getAgentDisplayName(agent.backend)}
+                value={agentLabel(agent, t)}
+                tone={agentTone(agent.state)}
+              />
+            ))}
             <TouchableOpacity
               accessibilityRole='button'
               accessibilityLabel={t('settings.copyDaemonLogPath')}
@@ -225,25 +184,20 @@ export function RuntimeStatusCard() {
             >
               <Ionicons name='copy-outline' size={18} color={tint} style={styles.rowIcon} />
               <View style={styles.rowText}>
-                <ThemedText style={[styles.rowLabel, { color: tint }]}>{t('settings.copyDaemonLogPath')}</ThemedText>
+                <ThemedText style={[styles.rowLabel, { color: tint }]}>
+                  {t('settings.copyDaemonLogPath')}
+                </ThemedText>
                 <ThemedText type='caption' style={{ color: textSecondary }} numberOfLines={1}>
-                  {DAEMON_LOG_PATH}
+                  {t('settings.appPrivateRuntimeLog')}
                 </ThemedText>
               </View>
             </TouchableOpacity>
           </>
         ) : (
-          <View style={[styles.row, { borderBottomColor: border }]}>
-            <ActivityIndicator size='small' color={tint} style={styles.rowIcon} />
-            <View style={styles.rowText}>
-              <ThemedText style={styles.rowLabel}>{t('common.loading')}</ThemedText>
-              <ThemedText type='caption' style={{ color: textSecondary }}>
-                {t('settings.runtime')}
-              </ThemedText>
-            </View>
-          </View>
+          <LoadingRow label={t('connect.daemon')} tint={tint} textSecondary={textSecondary} />
         )}
       </View>
+
       {showRepairAction && (
         <TouchableOpacity
           accessibilityRole='button'
@@ -259,23 +213,49 @@ export function RuntimeStatusCard() {
           ) : (
             <Ionicons name='construct-outline' size={18} color={tint} />
           )}
-          <ThemedText style={[styles.repairButtonText, { color: tint }]}>{t('settings.repairRuntime')}</ThemedText>
+          <ThemedText style={[styles.repairButtonText, { color: tint }]}>
+            {t('settings.repairRuntime')}
+          </ThemedText>
         </TouchableOpacity>
       )}
     </View>
   );
 }
 
-function shouldOfferRuntimeRepair(status: RuntimeStatus | null, hasError: boolean): boolean {
-  if (hasError) return true;
-  if (!status) return false;
-  if (status.termux.runCommandPermission === 'denied' || status.termux.allowExternalApps === 'disabled') return true;
-  if (status.bootstrap && (status.bootstrap.phase.endsWith('_failed') || status.bootstrap.phase === 'error')) return true;
-  return status.agents.some((agent) => agent.state === 'missing' || agent.state === 'error');
+function shouldOfferRuntimeRepair(
+  embeddedStatus: EmbeddedRuntimeStatus | null,
+  status: RuntimeStatus | null,
+  hasDaemonError: boolean,
+): boolean {
+  if (hasDaemonError) return true;
+  if (embeddedStatus && embeddedStatus.state !== 'running' && embeddedStatus.state !== 'starting') return true;
+  if (status?.bootstrap && (status.bootstrap.phase.endsWith('_failed') || status.bootstrap.phase === 'error')) {
+    return true;
+  }
+  return status?.agents.some((agent) => agent.state === 'missing' || agent.state === 'error') ?? false;
 }
 
-function isLocalAgentBackend(backend: string): backend is LocalAgentBackend {
-  return backend === 'opencode' || backend === 'gemini' || backend === 'codex';
+function LoadingRow({
+  label,
+  tint,
+  textSecondary,
+}: {
+  label: string;
+  tint: string;
+  textSecondary: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.row}>
+      <ActivityIndicator size='small' color={tint} style={styles.rowIcon} />
+      <View style={styles.rowText}>
+        <ThemedText style={styles.rowLabel}>{t('common.loading')}</ThemedText>
+        <ThemedText type='caption' style={{ color: textSecondary }}>
+          {label}
+        </ThemedText>
+      </View>
+    </View>
+  );
 }
 
 function RuntimeRow({ icon, label, value, tone }: RuntimeRowProps) {
@@ -296,6 +276,27 @@ function RuntimeRow({ icon, label, value, tone }: RuntimeRowProps) {
       </View>
     </View>
   );
+}
+
+function embeddedRuntimeLabel(
+  status: EmbeddedRuntimeStatus,
+  t: (key: string) => string,
+): string {
+  const state = t(`connect.runtimeState${capitalize(status.state)}`);
+  const details = [status.version, status.pid ? `pid ${status.pid}` : null, status.detail].filter(
+    (item): item is string => Boolean(item),
+  );
+  return details.length > 0 ? `${state} · ${details.join(' · ')}` : state;
+}
+
+function embeddedRuntimeTone(status: EmbeddedRuntimeStatus): RuntimeTone {
+  if (status.state === 'running') return 'ready';
+  if (status.state === 'preparing' || status.state === 'starting' || status.state === 'stopped') return 'pending';
+  return 'missing';
+}
+
+function capitalize(value: string): string {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 }
 
 function daemonLabel(status: RuntimeStatus): string {
@@ -327,30 +328,6 @@ function bootstrapLabel(
 function bootstrapTone(phase: string): RuntimeTone {
   if (phase === 'daemon_start_requested' || phase === 'aioncore_start_requested') return 'ready';
   if (phase.endsWith('_failed') || phase === 'error') return 'missing';
-  return 'pending';
-}
-
-function termuxRunCommandLabel(status: RuntimeStatus, t: (key: string) => string): string {
-  if (status.termux.runCommandPermission === 'granted') return t('connect.statusReady');
-  if (status.termux.runCommandPermission === 'denied') return t('connect.statusMissing');
-  return t('connect.statusUnknown');
-}
-
-function termuxRunCommandTone(state: RuntimeStatus['termux']['runCommandPermission']): RuntimeTone {
-  if (state === 'granted') return 'ready';
-  if (state === 'denied') return 'missing';
-  return 'pending';
-}
-
-function termuxExternalAppsLabel(status: RuntimeStatus, t: (key: string) => string): string {
-  if (status.termux.allowExternalApps === 'enabled') return t('connect.statusReady');
-  if (status.termux.allowExternalApps === 'disabled') return t('connect.statusMissing');
-  return t('connect.statusUnknown');
-}
-
-function termuxExternalAppsTone(state: RuntimeStatus['termux']['allowExternalApps']): RuntimeTone {
-  if (state === 'enabled') return 'ready';
-  if (state === 'disabled') return 'missing';
   return 'pending';
 }
 
@@ -405,15 +382,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 10,
-  },
-  agentAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingRight: 12,
-  },
-  agentActionContent: {
-    flex: 1,
-    minWidth: 0,
   },
   rowIcon: {
     width: 22,
