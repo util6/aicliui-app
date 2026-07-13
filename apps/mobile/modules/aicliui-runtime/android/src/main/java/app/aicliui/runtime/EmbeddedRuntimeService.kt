@@ -121,7 +121,7 @@ class EmbeddedRuntimeService : Service() {
     startForeground(NOTIFICATION_ID, buildNotification("Starting local agent runtime"))
     synchronized(PROCESS_LOCK) {
       if (runtimeProcess?.let(::isAlive) == true) {
-        RuntimeStateStore.write(this, runningStatus(port, runtimeProcess))
+        RuntimeStateStore.write(this, runningStatus(port))
         updateNotification("Local agent runtime is running")
         return
       }
@@ -156,7 +156,7 @@ class EmbeddedRuntimeService : Service() {
           runtimeProcess = process
           runtimeStarting = false
         }
-        RuntimeStateStore.write(this, runningStatus(port, process))
+        RuntimeStateStore.write(this, runningStatus(port))
         updateNotification("Local agent runtime is running")
 
         val exitCode = process.waitFor()
@@ -221,10 +221,8 @@ class EmbeddedRuntimeService : Service() {
     manager.notify(NOTIFICATION_ID, buildNotification(text))
   }
 
-  private fun runningStatus(port: Int, process: Process?): RuntimeStatus {
-    val pid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) process?.pid()?.toInt() else null
-    return RuntimeStatus("running", true, port, pid, "AionCore is running")
-  }
+  private fun runningStatus(port: Int): RuntimeStatus =
+    RuntimeStatus("running", true, port, detail = "AionCore is running")
 
   private fun isAlive(process: Process): Boolean = try {
     process.exitValue()

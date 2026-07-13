@@ -46,7 +46,7 @@ class AicliuiRuntimeModule : Module() {
       statusWithMetadata(context, status).toMap()
     }
 
-    AsyncFunction<Map<String, Any?>>("startAsync") { port: Int ->
+    AsyncFunction("startAsync") { port: Int ->
       val context = appContext.reactContext
         ?: throw RuntimeUnavailableException("React context is unavailable")
       if (port !in 1..65535) throw InvalidRuntimePortException(port)
