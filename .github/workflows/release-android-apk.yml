@@ -93,6 +93,8 @@ jobs:
             .runtime-src/aioncore/target
             .runtime-src/node/out
           key: release-runtime-${{ runner.os }}-${{ env.AIONCORE_VERSION }}-${{ env.NODE_VERSION }}-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('apps/mobile/patches/**', 'apps/mobile/scripts/build-*.sh') }}
+          restore-keys: |
+            release-runtime-${{ runner.os }}-${{ env.AIONCORE_VERSION }}-${{ env.NODE_VERSION }}-${{ env.ANDROID_NDK_VERSION }}-
 
       - name: Install dependencies
         run: npm ci

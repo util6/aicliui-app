@@ -95,6 +95,8 @@ jobs:
             .runtime-src/aioncore/target
             .runtime-src/node/out
           key: embedded-runtime-${{ runner.os }}-${{ env.AIONCORE_VERSION }}-${{ env.NODE_VERSION }}-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('apps/mobile/patches/**', 'apps/mobile/scripts/build-*.sh') }}
+          restore-keys: |
+            embedded-runtime-${{ runner.os }}-${{ env.AIONCORE_VERSION }}-${{ env.NODE_VERSION }}-${{ env.ANDROID_NDK_VERSION }}-
 
       - name: Install JavaScript dependencies
         run: npm ci

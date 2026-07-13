@@ -49,6 +49,8 @@ jobs:
             ~/.cargo/git
             .runtime-src/codex-acp/target
           key: codex-acp-android-${{ env.CODEX_ACP_VERSION }}-${{ env.ANDROID_NDK_VERSION }}-${{ hashFiles('apps/mobile/scripts/build-android-codex-acp.sh') }}
+          restore-keys: |
+            codex-acp-android-${{ env.CODEX_ACP_VERSION }}-${{ env.ANDROID_NDK_VERSION }}-
 
       - name: Cross-compile Codex ACP
         run: >-
