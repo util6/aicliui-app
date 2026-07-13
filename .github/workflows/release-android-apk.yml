@@ -21,7 +21,7 @@ jobs:
   build-and-upload:
     name: Build and upload APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     env:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
 
@@ -55,6 +55,9 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
 
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
       - name: Install dependencies
         run: npm ci
 
@@ -72,7 +75,11 @@ jobs:
 
       - name: Build release APK
         working-directory: apps/mobile/android
-        run: ./gradlew assembleRelease --no-daemon
+        run: >-
+          ./gradlew assembleRelease
+          --no-daemon
+          -PreactNativeArchitectures=armeabi-v7a,arm64-v8a
+          -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
 
       - name: Prepare release asset
         shell: bash
