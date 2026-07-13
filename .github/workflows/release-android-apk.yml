@@ -26,6 +26,7 @@ jobs:
       RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
       AIONCORE_VERSION: v0.1.43
       NODE_VERSION: v22.22.0
+      GEMINI_CLI_VERSION: 0.50.0
       ANDROID_NDK_VERSION: 27.1.12297006
 
     steps:
@@ -112,6 +113,9 @@ jobs:
           NODE_VERSION="$NODE_VERSION"
           ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
           bash apps/mobile/scripts/build-android-node.sh .runtime-src/node
+
+      - name: Package embedded agent resources
+        run: bash apps/mobile/scripts/package-android-agents.sh
 
       - name: Generate Android project
         working-directory: apps/mobile

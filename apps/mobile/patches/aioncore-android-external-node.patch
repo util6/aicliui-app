@@ -1,5 +1,22 @@
+diff --git a/crates/aionui-runtime/src/lib.rs b/crates/aionui-runtime/src/lib.rs
+index c587f45..ec0b17e 100644
+--- a/crates/aionui-runtime/src/lib.rs
++++ b/crates/aionui-runtime/src/lib.rs
+@@ -30,9 +30,9 @@ pub use managed_resources::{ManagedResourcesMode, managed_resources_mode, set_ma
+ pub use node_runtime::{
+     DoctorRow, NodeRuntimeError, NodeRuntimeFailureKind, NodeRuntimeProgress, NodeRuntimeProgressPhase,
+     NodeRuntimeProgressReporter, NodeRuntimeSupport, NodeTool, ResolvedCommand, ResolvedNodeRuntime,
+-    ResolvedNodeSource, RuntimeCommandProbe, SharedNodeRuntimeProgressReporter, doctor_snapshot,
+-    doctor_snapshot_for_test, ensure_node_runtime, ensure_node_runtime_with_reporter, ensure_runtime_command,
+-    ensure_runtime_command_with_reporter, probe_node_runtime_supported, probe_runtime_command,
++    ResolvedNodeSource, RuntimeCommandProbe, SharedNodeRuntimeProgressReporter, configured_external_command_program,
++    doctor_snapshot, doctor_snapshot_for_test, ensure_node_runtime, ensure_node_runtime_with_reporter,
++    ensure_runtime_command, ensure_runtime_command_with_reporter, probe_node_runtime_supported, probe_runtime_command,
+ };
+ pub use resolver::{ResolveError, bun_bin_dir, resolve_bun, resolve_command_in, resolve_command_path};
+ pub use shell_env::enhance_process_path;
 diff --git a/crates/aionui-runtime/src/node_runtime/mod.rs b/crates/aionui-runtime/src/node_runtime/mod.rs
-index ba7ac33..8f53039 100644
+index ba7ac33..abae1c3 100644
 --- a/crates/aionui-runtime/src/node_runtime/mod.rs
 +++ b/crates/aionui-runtime/src/node_runtime/mod.rs
 @@ -1,3 +1,4 @@
@@ -19,19 +36,55 @@ index ba7ac33..8f53039 100644
      if let Some(runtime) = cached_managed_runtime_unreported().await {
          log_runtime_selected(&runtime);
          return Ok(runtime);
+@@ -83,6 +89,9 @@ pub async fn ensure_runtime_command_with_reporter(
+     command: &str,
+     reporter: Option<&dyn NodeRuntimeProgressReporter>,
+ ) -> Result<ResolvedCommand, NodeRuntimeError> {
++    if let Some(command) = external::configured_command(command) {
++        return Ok(command);
++    }
+     match probe_runtime_command(command) {
+         RuntimeCommandProbe::ExplicitPath { path } => {
+             if !path.exists() {
+@@ -103,6 +112,10 @@ pub async fn ensure_runtime_command_with_reporter(
+     }
+ }
+ 
++pub fn configured_external_command_program(command: &str) -> Option<std::path::PathBuf> {
++    external::configured_command_program(command)
++}
++
+ fn runtime_source_label(source: ResolvedNodeSource) -> &'static str {
+     match source {
+         ResolvedNodeSource::Bundled => "bundled",
 diff --git a/crates/aionui-runtime/src/node_runtime/external.rs b/crates/aionui-runtime/src/node_runtime/external.rs
 new file mode 100644
-index 0000000..1de7a9b
+index 0000000..e6f2c8b
 --- /dev/null
 +++ b/crates/aionui-runtime/src/node_runtime/external.rs
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,69 @@
 +use std::path::PathBuf;
 +
-+use super::types::{NodeRuntimeError, ResolvedNodeRuntime, ResolvedNodeSource};
++use super::types::{NodeRuntimeError, ResolvedCommand, ResolvedNodeRuntime, ResolvedNodeSource};
 +
 +const NODE_BINARY_ENV: &str = "AIONUI_NODE_BINARY";
 +const NPM_CLI_ENV: &str = "AIONUI_NPM_CLI";
 +const NPX_CLI_ENV: &str = "AIONUI_NPX_CLI";
++
++pub fn configured_command(command: &str) -> Option<ResolvedCommand> {
++    let env_key = format!("AIONUI_{}_CLI", command.to_ascii_uppercase().replace('-', "_"));
++    let script = configured_path(&env_key).filter(|path| path.is_file())?;
++    let node = configured_path(NODE_BINARY_ENV).filter(|path| path.is_file())?;
++    Some(ResolvedCommand {
++        program: node,
++        args_prefix: vec![script.into_os_string()],
++        env: vec![],
++    })
++}
++
++pub fn configured_command_program(command: &str) -> Option<PathBuf> {
++    configured_command(command).map(|resolved| resolved.program)
++}
 +
 +pub async fn configured_runtime() -> Result<Option<ResolvedNodeRuntime>, NodeRuntimeError> {
 +    let Some(node_path) = configured_path(NODE_BINARY_ENV) else {
@@ -76,8 +129,21 @@ index 0000000..1de7a9b
 +
 +fn required_path(key: &str) -> Result<PathBuf, NodeRuntimeError> {
 +    configured_path(key).ok_or_else(|| {
-+        NodeRuntimeError::system_invalid(format!(
-+            "{key} is required when {NODE_BINARY_ENV} is configured"
-+        ))
++        NodeRuntimeError::system_invalid(format!("{key} is required when {NODE_BINARY_ENV} is configured"))
 +    })
 +}
+diff --git a/crates/aionui-runtime/src/resolver.rs b/crates/aionui-runtime/src/resolver.rs
+index 9a277e0..99430a5 100644
+--- a/crates/aionui-runtime/src/resolver.rs
++++ b/crates/aionui-runtime/src/resolver.rs
+@@ -160,7 +160,9 @@ pub fn resolve_command_path(cmd: &str) -> Option<PathBuf> {
+             }
+             which::which("bunx").ok()
+         }
+-        other => which::which(other).ok().or_else(|| windows_shim_fallback(other)),
++        other => crate::node_runtime::configured_external_command_program(other)
++            .or_else(|| which::which(other).ok())
++            .or_else(|| windows_shim_fallback(other)),
+     }
+ }
+ 

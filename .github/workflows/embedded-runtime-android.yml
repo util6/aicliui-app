@@ -13,6 +13,7 @@ on:
       - 'apps/mobile/plugins/withEmbeddedRuntimePackaging.js'
       - 'apps/mobile/scripts/build-embedded-runtime.sh'
       - 'apps/mobile/scripts/build-android-node.sh'
+      - 'apps/mobile/scripts/package-android-agents.sh'
       - 'apps/mobile/patches/**'
       - 'package-lock.json'
   pull_request:
@@ -26,6 +27,7 @@ on:
       - 'apps/mobile/plugins/withEmbeddedRuntimePackaging.js'
       - 'apps/mobile/scripts/build-embedded-runtime.sh'
       - 'apps/mobile/scripts/build-android-node.sh'
+      - 'apps/mobile/scripts/package-android-agents.sh'
       - 'apps/mobile/patches/**'
       - 'package-lock.json'
 
@@ -39,6 +41,7 @@ jobs:
     env:
       AIONCORE_VERSION: v0.1.43
       NODE_VERSION: v22.22.0
+      GEMINI_CLI_VERSION: 0.50.0
       ANDROID_NDK_VERSION: 27.1.12297006
 
     steps:
@@ -107,6 +110,9 @@ jobs:
           ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/$ANDROID_NDK_VERSION"
           bash apps/mobile/scripts/build-android-node.sh .runtime-src/node
 
+      - name: Package embedded agent resources
+        run: bash apps/mobile/scripts/package-android-agents.sh
+
       - name: Generate Android project
         working-directory: apps/mobile
         env:
@@ -124,6 +130,7 @@ jobs:
           unzip -Z1 "$APK" | grep -Fxq 'lib/arm64-v8a/libaioncore.so'
           unzip -Z1 "$APK" | grep -Fxq 'lib/arm64-v8a/libnode.so'
           unzip -Z1 "$APK" | grep -Fxq 'assets/aicliui-runtime/node/lib/node_modules/npm/bin/npm-cli.js'
+          unzip -Z1 "$APK" | grep -Fxq 'assets/aicliui-runtime/agents/gemini/node_modules/@google/gemini-cli/bundle/gemini.js'
           unzip -p "$APK" assets/aicliui-runtime.json | node -e '
             let input=""; process.stdin.on("data", c => input += c);
             process.stdin.on("end", () => {

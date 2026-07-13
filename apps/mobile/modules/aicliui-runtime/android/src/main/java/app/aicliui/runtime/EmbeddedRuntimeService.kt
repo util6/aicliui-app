@@ -45,9 +45,10 @@ internal data class RuntimePaths(
   val executable: File,
   val nodeExecutable: File,
   val nodeRoot: File,
+  val agentRoot: File,
 ) {
   fun prepareDirectories() {
-    listOf(root, dataDir, workDir, logDir, nodeRoot).forEach { directory ->
+    listOf(root, dataDir, workDir, logDir, nodeRoot, agentRoot).forEach { directory ->
       if (!directory.exists() && !directory.mkdirs()) {
         throw IllegalStateException("Unable to create runtime directory: ${directory.absolutePath}")
       }
@@ -67,6 +68,7 @@ internal data class RuntimePaths(
         executable = File(context.applicationInfo.nativeLibraryDir, "libaioncore.so"),
         nodeExecutable = File(context.applicationInfo.nativeLibraryDir, "libnode.so"),
         nodeRoot = File(root, "node"),
+        agentRoot = File(root, "agents"),
       )
     }
   }
@@ -140,9 +142,12 @@ class EmbeddedRuntimeService : Service() {
         require(paths.executable.isFile) { "Embedded AionCore executable is missing" }
         require(paths.nodeExecutable.isFile) { "Embedded Android Node executable is missing" }
         copyAssetTree("aicliui-runtime/node", paths.nodeRoot)
+        copyAssetTree("aicliui-runtime/agents", paths.agentRoot)
         val npmCli = File(paths.nodeRoot, "lib/node_modules/npm/bin/npm-cli.js")
         val npxCli = File(paths.nodeRoot, "lib/node_modules/npm/bin/npx-cli.js")
         require(npmCli.isFile && npxCli.isFile) { "Embedded npm resources are incomplete" }
+        val geminiCli = File(paths.agentRoot, "gemini/node_modules/@google/gemini-cli/bundle/gemini.js")
+        require(geminiCli.isFile) { "Embedded Gemini CLI resources are incomplete" }
         val command = listOf(
           paths.executable.absolutePath,
           "--local",
@@ -163,6 +168,7 @@ class EmbeddedRuntimeService : Service() {
             environment()["AIONUI_NODE_BINARY"] = paths.nodeExecutable.absolutePath
             environment()["AIONUI_NPM_CLI"] = npmCli.absolutePath
             environment()["AIONUI_NPX_CLI"] = npxCli.absolutePath
+            environment()["AIONUI_GEMINI_CLI"] = geminiCli.absolutePath
           }
           .start()
 
