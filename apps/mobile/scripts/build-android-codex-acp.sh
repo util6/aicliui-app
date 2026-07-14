@@ -24,6 +24,13 @@ if [[ ! -x "$CLANG" ]]; then
   echo "Android NDK compiler was not found: $CLANG" >&2
   exit 1
 fi
+CLANG_RESOURCE_DIR="$("$CLANG" --print-resource-dir)"
+NDK_CLANG_VERSION="$(basename "$CLANG_RESOURCE_DIR")"
+CLANG_BUILTINS_ARCHIVE="$CLANG_RESOURCE_DIR/lib/linux/libclang_rt.builtins-aarch64-android.a"
+if [[ -z "$NDK_CLANG_VERSION" || ! -f "$CLANG_BUILTINS_ARCHIVE" ]]; then
+  echo "Android NDK Clang builtins archive was not found: $CLANG_BUILTINS_ARCHIVE" >&2
+  exit 1
+fi
 for required_ndk_header in stdlib.h stdio.h; do
   if [[ ! -f "$TOOLCHAIN/sysroot/usr/include/$required_ndk_header" ]]; then
     echo "Android NDK sysroot header is missing: $required_ndk_header" >&2
@@ -64,7 +71,7 @@ fi
 export OPENSSL_STATIC=1
 export V8_FROM_SOURCE=1
 export CLANG_BASE_PATH="$TOOLCHAIN"
-export EXTRA_GN_ARGS="android_ndk_root=\"$ANDROID_NDK_ROOT\" android_ndk_version=\"r$NDK_MAJOR\" android_ndk_api_level=$ANDROID_API"
+export EXTRA_GN_ARGS="android_ndk_root=\"$ANDROID_NDK_ROOT\" android_ndk_version=\"r$NDK_MAJOR\" android_ndk_api_level=$ANDROID_API clang_version=\"$NDK_CLANG_VERSION\""
 export PRINT_GN_ARGS=1
 
 cargo fetch \
