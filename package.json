@@ -1,6 +1,6 @@
 {
   "name": "aicliui-app",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Android local CLI agent workbench based on AionUi mobile patterns.",
   "workspaces": [

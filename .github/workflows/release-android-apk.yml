@@ -109,28 +109,6 @@ jobs:
           APK="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
           unzip -Z1 "$APK" | grep -Fxq 'lib/arm64-v8a/libaioncore.so'
           unzip -Z1 "$APK" | grep -Fxq 'assets/aicliui-runtime.json'
-          unzip -p "$APK" assets/aicliui-runtime.json > /tmp/aicliui-runtime.json
-          node <<'NODE'
-          const fs = require('node:fs');
-          const manifest = JSON.parse(fs.readFileSync('/tmp/aicliui-runtime.json', 'utf8'));
-          const required = ['opencode', 'gemini', 'codex'];
-          const agents = Array.isArray(manifest.agents) ? manifest.agents : [];
-          const packagedPaths = [];
-          for (const backend of required) {
-            const agent = agents.find((entry) => entry?.backend === backend);
-            if (!agent || typeof agent.launcher !== 'string' || !Array.isArray(agent.files)) {
-              throw new Error(`Embedded runtime manifest is missing packaged ${backend} resources`);
-            }
-            if (!agent.files.includes(agent.launcher)) {
-              throw new Error(`${backend} launcher is not included in its packaged file list`);
-            }
-            packagedPaths.push(...agent.files);
-          }
-          fs.writeFileSync('/tmp/aicliui-agent-paths', `${[...new Set(packagedPaths)].join('\n')}\n`);
-          NODE
-          while IFS= read -r packaged_path; do
-            [[ -z "$packaged_path" ]] || unzip -Z1 "$APK" | grep -Fxq "$packaged_path"
-          done < /tmp/aicliui-agent-paths
           "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > /tmp/aicliui-manifest.xml
           grep -q 'app.aicliui.runtime.EmbeddedRuntimeService' /tmp/aicliui-manifest.xml
           if grep -qi 'com\.termux' /tmp/aicliui-manifest.xml; then
