@@ -54,6 +54,47 @@ if [[ -z "$V8_SOURCE" ]]; then
   echo "rusty_v8 source was not downloaded by cargo fetch" >&2
   exit 1
 fi
+
+V8_RUST_VENDOR="$V8_SOURCE/third_party/rust/chromium_crates_io/vendor"
+V8_RUST_VENDOR_SENTINEL="$V8_RUST_VENDOR/icu_calendar_data-v2/build.rs"
+if [[ ! -f "$V8_RUST_VENDOR_SENTINEL" || \
+      ! -f "$V8_RUST_VENDOR/icu_calendar_data-v2/src/lib.rs" || \
+      ! -f "$V8_RUST_VENDOR/serde-v1/src/lib.rs" ]]; then
+  # rusty_v8 147.4.0 packages the Chromium Rust GN files without their
+  # corresponding vendored crate sources. Restore the exact submodule commit.
+  V8_RUST_REVISION="ba6ceef355cf48cc50493296d4fc862d9745b742"
+  V8_RUST_CHECKOUT="$TOOL_SHIMS/chromium-rust"
+  mkdir -p "$V8_RUST_CHECKOUT"
+  git -C "$V8_RUST_CHECKOUT" init -q
+  git -C "$V8_RUST_CHECKOUT" remote add origin \
+    https://chromium.googlesource.com/chromium/src/third_party/rust
+  git -C "$V8_RUST_CHECKOUT" sparse-checkout init --cone
+  git -C "$V8_RUST_CHECKOUT" sparse-checkout set chromium_crates_io/vendor
+  git -C "$V8_RUST_CHECKOUT" fetch -q \
+    --depth=1 \
+    --filter=blob:none \
+    origin \
+    "$V8_RUST_REVISION"
+  git -C "$V8_RUST_CHECKOUT" checkout -q --detach FETCH_HEAD
+  if [[ "$(git -C "$V8_RUST_CHECKOUT" rev-parse HEAD)" != "$V8_RUST_REVISION" ]]; then
+    echo "Chromium Rust vendor checkout did not match $V8_RUST_REVISION" >&2
+    exit 1
+  fi
+  rm -rf "$V8_RUST_VENDOR"
+  mkdir -p "$(dirname "$V8_RUST_VENDOR")"
+  mv "$V8_RUST_CHECKOUT/chromium_crates_io/vendor" "$V8_RUST_VENDOR"
+fi
+for required_vendor_file in \
+  icu_calendar_data-v2/build.rs \
+  icu_calendar_data-v2/src/lib.rs \
+  serde-v1/src/lib.rs
+do
+  if [[ ! -f "$V8_RUST_VENDOR/$required_vendor_file" ]]; then
+    echo "rusty_v8 Chromium Rust vendor file is missing: $required_vendor_file" >&2
+    exit 1
+  fi
+done
+
 for pydeps in \
   build/android/pylib/results/presentation/test_results_presentation.pydeps \
   build/android/devil_chromium.pydeps \
