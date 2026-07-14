@@ -15,7 +15,7 @@ permissions:
 jobs:
   build-codex-acp:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 240
     env:
       CODEX_ACP_VERSION: v0.16.0
       ANDROID_NDK_VERSION: 27.1.12297006

@@ -37,7 +37,7 @@ permissions:
 jobs:
   build-runtime-apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 240
     env:
       AIONCORE_VERSION: v0.1.43
       NODE_VERSION: v22.22.0

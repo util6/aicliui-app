@@ -44,6 +44,27 @@ export OPENSSL_STATIC=1
 export V8_FROM_SOURCE=1
 export CLANG_BASE_PATH="$TOOLCHAIN/bin"
 
+cargo fetch \
+  --manifest-path "$SOURCE_DIR/Cargo.toml" \
+  --target "$TARGET" \
+  --locked
+
+V8_SOURCE="$(find "${CARGO_HOME:-$HOME/.cargo}/registry/src" -maxdepth 2 -type d -name 'v8-147.4.0' | head -1)"
+if [[ -z "$V8_SOURCE" ]]; then
+  echo "rusty_v8 source was not downloaded by cargo fetch" >&2
+  exit 1
+fi
+for pydeps in \
+  build/android/pylib/results/presentation/test_results_presentation.pydeps \
+  build/android/devil_chromium.pydeps \
+  build/android/apk_operations.pydeps \
+  build/android/test_runner.pydeps \
+  build/android/test_wrapper/logdog_wrapper.pydeps \
+  build/android/resource_sizes.pydeps
+do
+  install -D -m 0644 /dev/null "$V8_SOURCE/$pydeps"
+done
+
 cargo build \
   --manifest-path "$SOURCE_DIR/Cargo.toml" \
   --target "$TARGET" \
