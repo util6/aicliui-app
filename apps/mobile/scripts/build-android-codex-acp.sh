@@ -65,6 +65,20 @@ do
   install -D -m 0644 /dev/null "$V8_SOURCE/$pydeps"
 done
 
+if [[ "$TOOLCHAIN_HOST" == "linux-x86_64" ]]; then
+  V8_SYSROOT_INSTALLER="$V8_SOURCE/build/linux/sysroot_scripts/install-sysroot.py"
+  V8_HOST_SYSROOT="$V8_SOURCE/build/linux/debian_bullseye_amd64-sysroot"
+  if [[ ! -f "$V8_SYSROOT_INSTALLER" ]]; then
+    echo "rusty_v8 host sysroot installer was not found: $V8_SYSROOT_INSTALLER" >&2
+    exit 1
+  fi
+  python3 "$V8_SYSROOT_INSTALLER" --arch=amd64
+  if [[ ! -d "$V8_HOST_SYSROOT" ]]; then
+    echo "rusty_v8 host sysroot was not installed: $V8_HOST_SYSROOT" >&2
+    exit 1
+  fi
+fi
+
 cargo build \
   --manifest-path "$SOURCE_DIR/Cargo.toml" \
   --target "$TARGET" \
