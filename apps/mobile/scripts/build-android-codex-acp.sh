@@ -20,6 +20,27 @@ case "$(uname -s)" in
 esac
 TOOLCHAIN="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/$TOOLCHAIN_HOST"
 CLANG="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang"
+if [[ ! -x "$CLANG" ]]; then
+  echo "Android NDK compiler was not found: $CLANG" >&2
+  exit 1
+fi
+for required_ndk_header in stdlib.h stdio.h; do
+  if [[ ! -f "$TOOLCHAIN/sysroot/usr/include/$required_ndk_header" ]]; then
+    echo "Android NDK sysroot header is missing: $required_ndk_header" >&2
+    exit 1
+  fi
+done
+NDK_PROPERTIES="$ANDROID_NDK_ROOT/source.properties"
+if [[ ! -f "$NDK_PROPERTIES" ]]; then
+  echo "Android NDK properties were not found: $NDK_PROPERTIES" >&2
+  exit 1
+fi
+NDK_REVISION="$(awk -F= '/^Pkg.Revision/ { gsub(/[[:space:]]/, "", $2); print $2 }' "$NDK_PROPERTIES")"
+if [[ -z "$NDK_REVISION" ]]; then
+  echo "Android NDK revision was not found in $NDK_PROPERTIES" >&2
+  exit 1
+fi
+NDK_MAJOR="${NDK_REVISION%%.*}"
 
 rustup target add "$TARGET"
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CLANG"
@@ -42,7 +63,9 @@ else
 fi
 export OPENSSL_STATIC=1
 export V8_FROM_SOURCE=1
-export CLANG_BASE_PATH="$TOOLCHAIN/bin"
+export CLANG_BASE_PATH="$TOOLCHAIN"
+export EXTRA_GN_ARGS="android_ndk_root=\"$ANDROID_NDK_ROOT\" android_ndk_version=\"r$NDK_MAJOR\" android_ndk_api_level=$ANDROID_API"
+export PRINT_GN_ARGS=1
 
 cargo fetch \
   --manifest-path "$SOURCE_DIR/Cargo.toml" \
